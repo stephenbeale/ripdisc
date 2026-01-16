@@ -9,19 +9,19 @@ param(
     [switch]$Documentary,
 
     [Parameter()]
-    [switch]$MultiPart,  # for multi-disc movies like Dances with Wolves
-
-    [Parameter()]
     [int]$Disc = 1,
 
     [Parameter()]
     [string]$Drive = "D:",
 
     [Parameter()]
-    [int]$DriveIndex = -1
+    [int]$DriveIndex = -1,
+
+    [Parameter()]
+    [switch]$MultiPart  # For multi-disc movies with main content across discs
 )
 
-# -------- Helper: Get unique file path to avoid overwrites --------
+# ========== HELPER FUNCTIONS ==========
 function Get-UniqueFilePath {
     param([string]$DestDir, [string]$FileName)
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
@@ -40,35 +40,26 @@ function Get-UniqueFilePath {
     return $targetPath
 }
 
-# -------- Normalize drive --------
+# Normalize drive letter format
 $driveLetter = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
 
-# -------- Show drive info and confirm --------
-$driveDescription = if ($DriveIndex -ge 0) {
-    switch ($DriveIndex) {
-        0 { "D: Black Sandstrom" }
-        1 { "G: White Sandstrom" }
-        default { "unknown drive" }
-    }
-} else { "Drive $driveLetter" }
-
+# ========== DRIVE CONFIRMATION ==========
+$driveDescription = if ($DriveIndex -ge 0) { "Drive Index $DriveIndex" } else { "Drive $driveLetter" }
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
-# -------- Paths --------
-$makemkvOutputDir = "C:\Video\$title"
-$finalOutputDir  = if ($Series) { "F:\Series\$title\Season 01" } elseif ($Documentary) { "F:\Documentaries\$title"} else { "F:\DVDs\$title" }
-$extrasDir       = Join-Path $finalOutputDir "extras"
-$makemkvconPath  = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
-$handbrakePath   = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
+# ========== CONFIGURATION ==========
+$makemkvOutputDir = "C:\Video\$title"  # temporary MakeMKV output
+$finalOutputDir = if ($Series) { "F:\Series\$title\Season 01" } elseif ($Documentary) { "F:\Documentaries\$title" } else { "F:\DVDs\$title" }
+$makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
+$handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
 $lastSuccessfulStep = "None"
 
-function Stop-WithError {
-    param([string]$Step, [string]$Message)
+function Stop-WithError { param([string]$Step,[string]$Message)
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "FAILED!" -ForegroundColor Red
     Write-Host "Error at: $Step" -ForegroundColor Red
@@ -78,118 +69,118 @@ function Stop-WithError {
 }
 
 $contentType = if ($Series) { "TV Series" } elseif ($Documentary) { "Documentary" } else { "Movie" }
-$isMainFeatureDisc = (-not $Series -and -not $Documentary) -and ($Disc -eq 1)
+$isMainFeatureDisc = (-not $Series -and -not $Documentary)
 
-# -------- MakeMKV Rip --------
+$extrasDir = Join-Path $finalOutputDir "extras"
+
+# ========== STEP 1: RIP WITH MAKEMKV ==========
 Write-Host "`n[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 
-if ($DriveIndex -ge 0) { $discSource = "disc:$DriveIndex" } else { $discSource = "dev:$driveLetter" }
+if ($DriveIndex -ge 0) {
+    # Determine actual drive letter from MakeMKV info
+    $allDrives = & "$makemkvconPath" info
+    $driveMap = $allDrives | Where-Object { $_ -match '^DRV:' } | ForEach-Object {
+        $parts = $_ -split ','
+        [PSCustomObject]@{ Index=[int]$parts[1]; Label=$parts[5].Trim('"'); Letter=$parts[6].Trim('"') }
+    }
+    $selectedDrive = $driveMap | Where-Object { $_.Index -eq $DriveIndex }
+    if (-not $selectedDrive) { Stop-WithError "Drive selection" "DriveIndex $DriveIndex not found" }
+    $discSource = "disc:$($selectedDrive.Index)"
+    $ejectDrive = $selectedDrive.Letter
+    Write-Host "Using drive index $DriveIndex ($ejectDrive)" -ForegroundColor Green
+} else {
+    $discSource = "dev:$driveLetter"
+    $ejectDrive = $driveLetter
+    Write-Host "Using drive: $driveLetter" -ForegroundColor Yellow
+}
 
-if (!(Test-Path $makemkvOutputDir)) { New-Item -ItemType Directory -Path $makemkvOutputDir | Out-Null }
+# Prepare temporary directory
+if (Test-Path $makemkvOutputDir) {
+    $existingMkvs = Get-ChildItem $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
+    if ($existingMkvs) { $existingMkvs | Remove-Item -Force }
+} else { New-Item -ItemType Directory -Path $makemkvOutputDir | Out-Null }
 
 & $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120
-if ($LASTEXITCODE -ne 0) { Stop-WithError "MakeMKV rip" "Exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { Stop-WithError "MakeMKV rip" "Exited with code $LASTEXITCODE" }
 
-$rippedFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv"
-if (!$rippedFiles) { Stop-WithError "MakeMKV rip" "No MKV files created" }
+$rippedFiles = Get-ChildItem $makemkvOutputDir -Filter "*.mkv"
+if (!$rippedFiles) { Stop-WithError "MakeMKV rip" "No MKV files created." }
+
 $lastSuccessfulStep = "STEP 1/4: MakeMKV rip"
 
-# -------- Eject Disc (CIM + COM fallback) --------
-$ejectDrive = if ($DriveIndex -ge 0) {
-    switch ($DriveIndex) {0 {"D:"} 1 {"G:"} default {$driveLetter}}
-} else { $driveLetter }
+# ========== EJECT DISC ==========
 if ($ejectDrive -notmatch ':$') { $ejectDrive += ':' }
-
-Write-Host "`nEjecting disc $ejectDrive..." -ForegroundColor Yellow
 $cdDrive = Get-CimInstance Win32_CDROMDrive | Where-Object { $_.Drive -eq $ejectDrive }
 if ($cdDrive) {
-    try { $cdDrive.Eject() | Out-Null; Start-Sleep -Seconds 2; Write-Host "Disc ejected successfully" -ForegroundColor Green }
-    catch { $shell = New-Object -ComObject Shell.Application; $shell.Namespace(17).ParseName($ejectDrive).InvokeVerb("Eject"); Write-Host "Disc ejected via COM fallback" -ForegroundColor Green }
+    try { $cdDrive.Eject() | Out-Null; Start-Sleep -Seconds 2; Write-Host "Disc ejected successfully via CIM" -ForegroundColor Green }
+    catch {
+        try { $shell = New-Object -ComObject Shell.Application; $shell.Namespace(17).ParseName($ejectDrive).InvokeVerb("Eject"); Write-Host "Disc ejected via COM fallback" -ForegroundColor Green } 
+        catch { Write-Warning "Failed to eject disc on $ejectDrive" }
+    }
 } else { Write-Warning "No optical drive found for $ejectDrive" }
 
-# -------- HandBrake Encode --------
+# ========== STEP 2: ENCODE WITH HANDBRAKE ==========
 Write-Host "`n[STEP 2/4] Starting HandBrake encoding..." -ForegroundColor Green
 if (!(Test-Path $finalOutputDir)) { New-Item -ItemType Directory -Path $finalOutputDir | Out-Null }
 
-$encodedCount = 0
+$fileCount = 0
 foreach ($mkv in $rippedFiles) {
-    $encodedCount++
+    $fileCount++
+    $inputFile = $mkv.FullName
     $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
-    & $handbrakePath -i $mkv.FullName -o $outputFile --preset "Fast 1080p30" --all-audio --all-subtitles --subtitle-burned=none --verbose=1
-    if ($LASTEXITCODE -ne 0) { Stop-WithError "HandBrake encoding" "Exit code $LASTEXITCODE on $($mkv.Name)" }
-    Write-Host "Encoding complete: $($mkv.Name) -> $outputFile" -ForegroundColor Green
+
+    & $handbrakePath -i $inputFile -o $outputFile --preset "Fast 1080p30" --all-audio --all-subtitles --subtitle-burned=none --verbose=1
+    if ($LASTEXITCODE -ne 0) { Stop-WithError "HandBrake encoding" "Failed encoding $($mkv.Name)" }
 }
 $lastSuccessfulStep = "STEP 2/4: HandBrake encoding"
 
-# Remove temp MKV dir
-if (Test-Path $makemkvOutputDir) { Remove-Item -Path $makemkvOutputDir -Recurse -Force }
+# Clean up temporary MakeMKV folder
+if (Get-ChildItem $finalOutputDir -Filter "*.mp4") { Remove-Item $makemkvOutputDir -Recurse -Force }
 
-# -------- File Organization --------
+# ========== STEP 3: ORGANIZE FILES ==========
 Write-Host "`n[STEP 3/4] Organizing files..." -ForegroundColor Green
-Set-Location $finalOutputDir
+cd $finalOutputDir
 
-# -------- Series renaming --------
+# --- Series ---
 if ($Series) {
-    # Detect season folder
-    $seasonFolder = Get-ChildItem -Directory | Select-Object -First 1
-    $seasonNumber = 1
-    if ($seasonFolder -and $seasonFolder.Name -match '\d+') { $seasonNumber = [int]$Matches[0] }
-    $seasonTag = "S{0:D2}" -f $seasonNumber
-    if (-not $seasonFolder -or $seasonFolder.Name -ne "Season $seasonNumber") { $seasonFolder = New-Item -ItemType Directory -Name "Season $seasonNumber" -Force }
+    # Determine next episode number across all discs
+    $seriesRoot = Split-Path $finalOutputDir -Parent
+    $seasonFolder = Split-Path $finalOutputDir -Leaf
+    $seasonTag = "S01"  # hardcoded for now, can detect dynamically if needed
 
-    # Determine next episode number from all discs
-    $seriesParent = Split-Path $finalOutputDir -Parent
-    $allSeasonEpisodes =
-        Get-ChildItem $seriesParent -Directory |
-        ForEach-Object {
-            $path = Join-Path $_.FullName $seasonFolder.Name
-            if (Test-Path $path) { Get-ChildItem $path -File -Filter "*.mp4" }
-        } |
-        Where-Object { $_.Name -match "$seasonTag`E(\d{2})" } |
-        ForEach-Object { [int]$Matches[1] }
+    $allEpisodes = Get-ChildItem $seriesRoot -Directory | ForEach-Object {
+        $seasonPath = Join-Path $_.FullName $seasonFolder
+        if (Test-Path $seasonPath) { Get-ChildItem $seasonPath -File -Filter "*.mp4" }
+    } | ForEach-Object {
+        if ($_.Name -match "$seasonTag`E(\d{2})") { [int]$Matches[1] }
+    }
 
-    $nextEpisode = if ($allSeasonEpisodes) { ($allSeasonEpisodes | Measure-Object -Maximum).Maximum + 1 } else { 1 }
+    $nextEpisode = if ($allEpisodes) { ($allEpisodes | Measure-Object -Maximum).Maximum + 1 } else { 1 }
 
-    Get-ChildItem -File -Filter "*.mp4" |
-        Sort-Object Name |
-        ForEach-Object {
-            $ep = "{0:D2}" -f $nextEpisode
-            $newName = "$seasonTag`E$ep$($_.Extension)"
-            Rename-Item $_ -NewName $newName
-            $nextEpisode++
-        }
-}
-
-# -------- Movie / MultiPart handling --------
-elseif ($MultiPart -or -not $Series -and -not $Documentary) {
-    $videoFiles = Get-ChildItem -File -Filter "*.mp4" | Sort-Object Length -Descending
-    if ($videoFiles.Count -gt 0) {
-        # Determine main feature file
-        $featureFile = $videoFiles[0]
-        $featureName = if ($MultiPart) { "$title - Part $Disc$($featureFile.Extension)" } else { "$title-Feature$($featureFile.Extension)" }
-        Rename-Item $featureFile.FullName $featureName -Force
-
-        # Move remaining files to extras
-        $otherFiles = $videoFiles | Where-Object { $_.FullName -ne $featureFile.FullName }
-        foreach ($file in $otherFiles) {
-            $newName = if ($file.BaseName -notlike "$title*") { "$title-$($file.Name)" } else { $file.Name }
-            $uniquePath = Get-UniqueFilePath -DestDir $extrasDir -FileName $newName
-            if (!(Test-Path $extrasDir)) { New-Item -ItemType Directory -Path $extrasDir | Out-Null }
-            Move-Item $file.FullName $uniquePath
-        }
+    Get-ChildItem -File -Filter "*.mp4" | Sort-Object Name | ForEach-Object {
+        $ep = "{0:D2}" -f $nextEpisode
+        $newName = "$seasonTag`E$ep$($_.Extension)"
+        Rename-Item $_ -NewName $newName
+        $nextEpisode++
     }
 }
 
-# -------- Delete image files --------
-Get-ChildItem -File | Where-Object { $_.Extension -match '\.(jpg|jpeg|png|gif|bmp)$' } | Remove-Item -Force -ErrorAction SilentlyContinue
+# --- Movie / Documentary Extras ---
+if (-not $Series -and -not $Documentary) {
+    if (!(Test-Path $extrasDir)) { New-Item -ItemType Directory -Path $extrasDir | Out-Null }
 
-$lastSuccessfulStep = "STEP 3/4: File organization"
+    $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*-Feature.*" }
+    foreach ($video in $videoFiles) {
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($video.Name)
+        if ($baseName -notlike "$title*") { $newName = "$title-$($video.Name)" } else { $newName = $video.Name }
+        $uniquePath = Get-UniqueFilePath -DestDir $extrasDir -FileName $newName
+        Move-Item $video.FullName $uniquePath
+    }
+}
 
-# -------- Open final folder --------
-Write-Host "`n[STEP 4/4] Opening final directory..." -ForegroundColor Green
-Start-Process $finalOutputDir
-$lastSuccessfulStep = "STEP 4/4: Open directory"
+# ========== STEP 4: OPEN DIRECTORY ==========
+Write-Host "`n[STEP 4/4] Opening output directory..." -ForegroundColor Green
+Start $finalOutputDir
 
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "COMPLETE!" -ForegroundColor Green
-Write-Host "All steps completed successfully" -ForegroundColor Cyan
+$lastSuccessfulStep = "STEP 4/4: Complete"
+Write-Host "`nAll steps completed successfully." -ForegroundColor Green
