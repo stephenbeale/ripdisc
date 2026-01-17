@@ -73,7 +73,7 @@ function Stop-WithError { param([string]$Step,[string]$Message)
 }
 
 $contentType = if ($Series) { "TV Series" } elseif ($Documentary) { "Documentary" } else { "Movie" }
-$isMainFeatureDisc = (-not $Series -and -not $Documentary)
+$isMainFeatureDisc = (-not $Series)  # Both movies and documentaries have main features
 
 $extrasDir = Join-Path $finalOutputDir "extras"
 
@@ -170,7 +170,7 @@ if ($Series) {
 }
 
 # --- Movie / Documentary Extras ---
-if (-not $Series -and -not $Documentary) {
+if (-not $Series) {  # Both movies and documentaries get the same file organization
     if (!(Test-Path $extrasDir)) { New-Item -ItemType Directory -Path $extrasDir | Out-Null }
 
     $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*-Feature.*" }
