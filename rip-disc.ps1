@@ -12,6 +12,9 @@ param(
     [int]$Disc = 1,
 
     [Parameter()]
+    [int]$Season = 1,  # Season number for TV series (default: 1)
+
+    [Parameter()]
     [string]$Drive = "D:",
 
     [Parameter()]
@@ -53,7 +56,8 @@ Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
 # ========== CONFIGURATION ==========
 $makemkvOutputDir = "C:\Video\$title"  # temporary MakeMKV output
-$finalOutputDir = if ($Series) { "F:\Series\$title\Season 01" } elseif ($Documentary) { "F:\Documentaries\$title" } else { "F:\DVDs\$title" }
+$seasonFolderName = "Season {0:D2}" -f $Season
+$finalOutputDir = if ($Series) { "F:\Series\$title\$seasonFolderName" } elseif ($Documentary) { "F:\Documentaries\$title" } else { "F:\DVDs\$title" }
 $makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
 $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
@@ -146,7 +150,7 @@ if ($Series) {
     # Determine next episode number across all discs
     $seriesRoot = Split-Path $finalOutputDir -Parent
     $seasonFolder = Split-Path $finalOutputDir -Leaf
-    $seasonTag = "S01"  # hardcoded for now, can detect dynamically if needed
+    $seasonTag = "S{0:D2}" -f $Season  # Use the Season parameter
 
     $allEpisodes = Get-ChildItem $seriesRoot -Directory | ForEach-Object {
         $seasonPath = Join-Path $_.FullName $seasonFolder
