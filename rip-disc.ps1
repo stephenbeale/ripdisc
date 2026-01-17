@@ -21,7 +21,10 @@ param(
     [int]$DriveIndex = -1,
 
     [Parameter()]
-    [switch]$MultiPart  # For multi-disc movies with main content across discs
+    [switch]$MultiPart,  # For multi-disc movies with main content across discs
+
+    [Parameter()]
+    [switch]$ExtrasDisc  # For bonus/extras-only discs - all content goes to extras folder
 )
 
 # ========== HELPER FUNCTIONS ==========
@@ -48,9 +51,11 @@ $driveLetter = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
 
 # ========== DRIVE CONFIRMATION ==========
 $driveDescription = if ($DriveIndex -ge 0) { "Drive Index $DriveIndex" } else { "Drive $driveLetter" }
+$modeDescription = if ($ExtrasDisc) { "EXTRAS DISC MODE (all content -> extras folder)" } else { "Standard mode" }
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
+if ($ExtrasDisc) { Write-Host "Mode: $modeDescription" -ForegroundColor Magenta }
 Write-Host "========================================" -ForegroundColor Cyan
 Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
@@ -169,8 +174,22 @@ if ($Series) {
     }
 }
 
-# --- Movie / Documentary Extras ---
-if (-not $Series) {  # Both movies and documentaries get the same file organization
+# --- ExtrasDisc Mode: All content goes directly to extras folder ---
+if ($ExtrasDisc -and -not $Series) {
+    if (!(Test-Path $extrasDir)) { New-Item -ItemType Directory -Path $extrasDir | Out-Null }
+
+    $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' }
+    foreach ($video in $videoFiles) {
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($video.Name)
+        if ($baseName -notlike "$title*") { $newName = "$title-$($video.Name)" } else { $newName = $video.Name }
+        $uniquePath = Get-UniqueFilePath -DestDir $extrasDir -FileName $newName
+        Move-Item $video.FullName $uniquePath
+    }
+    Write-Host "ExtrasDisc: Moved $($videoFiles.Count) files to extras folder" -ForegroundColor Magenta
+}
+
+# --- Movie / Documentary Extras (Standard mode) ---
+if (-not $Series -and -not $ExtrasDisc) {  # Both movies and documentaries get the same file organization
     if (!(Test-Path $extrasDir)) { New-Item -ItemType Directory -Path $extrasDir | Out-Null }
 
     $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*-Feature.*" }
