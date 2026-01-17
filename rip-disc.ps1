@@ -309,17 +309,75 @@ if (Test-Path $makemkvOutputDir) {
 
 Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
 Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120" -ForegroundColor Gray
-& $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120
-$makemkvExitCode = $LASTEXITCODE
 
-# Check if MakeMKV succeeded
+# Capture MakeMKV output to analyze for specific errors
+$makemkvOutput = & $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput
+$makemkvExitCode = $LASTEXITCODE
+$makemkvOutputText = $makemkvFullOutput -join "`n"
+
+# Check if MakeMKV succeeded - provide specific error messages for common issues
 if ($makemkvExitCode -ne 0) {
-    Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message "MakeMKV exited with code $makemkvExitCode"
+    # Analyze output to determine the specific error
+    $errorMessage = "MakeMKV exited with code $makemkvExitCode"
+
+    # Check for drive not found / doesn't exist
+    if ($makemkvOutputText -match "Failed to open disc" -or
+        $makemkvOutputText -match "no disc" -or
+        $makemkvOutputText -match "can't find" -or
+        $makemkvOutputText -match "invalid drive") {
+        if ($DriveIndex -ge 0) {
+            $errorMessage = "Drive not found: Drive index $DriveIndex does not exist or is not accessible"
+        } else {
+            $errorMessage = "Drive not found: $driveLetter - verify the drive letter is correct"
+        }
+        Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+    }
+    # Check for empty drive / no disc inserted
+    elseif ($makemkvOutputText -match "no media" -or
+            $makemkvOutputText -match "medium not present" -or
+            $makemkvOutputText -match "drive is empty" -or
+            $makemkvOutputText -match "no disc in drive" -or
+            $makemkvOutputText -match "insert a disc") {
+        if ($DriveIndex -ge 0) {
+            $driveHintMsg = switch ($DriveIndex) {
+                0 { "D: internal" }
+                1 { "G: ASUS external" }
+                default { "drive index $DriveIndex" }
+            }
+            $errorMessage = "Drive is empty ($driveHintMsg) - please insert a disc"
+        } else {
+            $errorMessage = "Drive $driveLetter is empty - please insert a disc"
+        }
+        Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+    }
+    # Check for disc not readable / can't detect disc
+    elseif ($makemkvOutputText -match "can't access" -or
+            $makemkvOutputText -match "read error" -or
+            $makemkvOutputText -match "cannot read" -or
+            $makemkvOutputText -match "failed to read") {
+        $errorMessage = "No disc detected in drive - the disc may be damaged or unreadable"
+        Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+    }
+
+    Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message $errorMessage
 }
 
 $rippedFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
 if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
-    Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message "No MKV files were created. Check if disc is readable."
+    # MakeMKV succeeded but no files created - likely no valid titles found
+    $errorMessage = "No MKV files were created"
+
+    # Check output for clues about why no files were created
+    if ($makemkvOutputText -match "no valid" -or $makemkvOutputText -match "0 titles") {
+        $errorMessage = "No disc detected in drive - MakeMKV could not find any valid titles"
+    } elseif ($makemkvOutputText -match "copy protection" -or $makemkvOutputText -match "protected") {
+        $errorMessage = "Disc may be copy-protected or encrypted - MakeMKV could not extract titles"
+    } else {
+        $errorMessage = "No MKV files were created - check if disc is readable and contains valid content"
+    }
+
+    Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+    Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message $errorMessage
 }
 
 Write-Host "`nMakeMKV rip complete!" -ForegroundColor Green
