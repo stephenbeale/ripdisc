@@ -108,6 +108,36 @@ function Get-UniqueFilePath {
     return $targetPath
 }
 
+function Test-DriveReady {
+    param([string]$Path)
+
+    # Extract the drive letter from the path (e.g., "E:" from "E:\DVDs\Movie")
+    $driveLetter = [System.IO.Path]::GetPathRoot($Path)
+    if (-not $driveLetter) {
+        return @{ Ready = $false; Drive = "Unknown"; Message = "Could not determine drive letter from path: $Path" }
+    }
+
+    # Normalize drive letter (remove trailing backslash for display)
+    $driveDisplay = $driveLetter.TrimEnd('\')
+
+    # Check if the drive exists and is ready
+    try {
+        $drive = Get-PSDrive -Name $driveDisplay.TrimEnd(':') -ErrorAction Stop
+        if ($drive) {
+            # Additional check: try to access the drive root
+            if (Test-Path $driveLetter -ErrorAction SilentlyContinue) {
+                return @{ Ready = $true; Drive = $driveDisplay; Message = "Drive is ready" }
+            } else {
+                return @{ Ready = $false; Drive = $driveDisplay; Message = "Destination drive $driveDisplay is not ready - please ensure the drive is connected and mounted" }
+            }
+        }
+    } catch {
+        return @{ Ready = $false; Drive = $driveDisplay; Message = "Destination drive $driveDisplay is not ready - please ensure the drive is connected and mounted" }
+    }
+
+    return @{ Ready = $false; Drive = $driveDisplay; Message = "Destination drive $driveDisplay is not ready - please ensure the drive is connected and mounted" }
+}
+
 
 # ========== DRIVE CONFIRMATION ==========
 # Show which drive will be used and confirm before proceeding
@@ -240,6 +270,12 @@ $extrasDir = Join-Path $finalOutputDir "extras"
 
 # For disc 2+, ensure parent dir and extras folder exist upfront (disc 1 may still be running)
 if (-not $isMainFeatureDisc -and -not $Series) {
+    # Check if destination drive is ready before attempting to create directories
+    $driveCheck = Test-DriveReady -Path $finalOutputDir
+    if (-not $driveCheck.Ready) {
+        Write-Host "`nERROR: $($driveCheck.Message)" -ForegroundColor Red
+        exit 1
+    }
     if (!(Test-Path $finalOutputDir)) {
         New-Item -ItemType Directory -Path $finalOutputDir -Force | Out-Null
     }
@@ -398,6 +434,15 @@ Write-Host "Disc ejected successfully" -ForegroundColor Green
 Set-CurrentStep -StepNumber 2
 $script:LastWorkingDirectory = $finalOutputDir
 Write-Host "`n[STEP 2/4] Starting HandBrake encoding..." -ForegroundColor Green
+
+# Check if destination drive is ready before attempting to create directories
+Write-Host "Checking destination drive..." -ForegroundColor Yellow
+$driveCheck = Test-DriveReady -Path $finalOutputDir
+if (-not $driveCheck.Ready) {
+    Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message $driveCheck.Message
+}
+Write-Host "Destination drive $($driveCheck.Drive) is ready" -ForegroundColor Green
+
 Write-Host "Creating directory: $finalOutputDir" -ForegroundColor Yellow
 if (!(Test-Path $finalOutputDir)) {
     New-Item -ItemType Directory -Path $finalOutputDir | Out-Null
