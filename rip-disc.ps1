@@ -185,7 +185,7 @@ if ($Series) {
     $windowTitle += " Disc $Disc"
 } else {
     $windowTitle = "$title"
-    if ($Disc -gt 1) { $windowTitle += " (Special Features)" }
+    if ($Disc -gt 1) { $windowTitle += "-extras" }
 }
 $host.UI.RawUI.WindowTitle = $windowTitle
 

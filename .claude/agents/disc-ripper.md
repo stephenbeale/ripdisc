@@ -158,6 +158,7 @@ The script runs 4 steps:
   - `The Dark Knight` (running)
   - `The Dark Knight - ERROR` (failed)
   - `The Dark Knight - DONE` (completed successfully)
+  - For extras discs: `The Dark Knight-extras`, `The Dark Knight-extras - DONE`, etc.
 - The script auto-ejects the disc after MakeMKV rip (before HandBrake)
 - 3-second delay after HandBrake encoding to prevent file locking issues
 - MakeMKV must be installed at: `C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`
