@@ -176,7 +176,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
 # ========== CONFIGURATION ==========
-$makemkvOutputDir = "C:\Video\$title"  # MakeMKV rips here first
+# Make MakeMKV temp directory disc-specific to support concurrent ripping
+$makemkvOutputDir = "C:\Video\$title\Disc$Disc"  # MakeMKV rips here first
 
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
@@ -249,8 +250,13 @@ function Stop-WithError {
                         Write-Host "    Format: $title - E##.mp4" -ForegroundColor Gray
                     }
                 } else {
-                    Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
-                    Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
+                    if ($Disc -eq 1) {
+                        Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
+                        Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
+                    } else {
+                        Write-Host "    Format: $title-Special Features-originalname.mp4" -ForegroundColor Gray
+                        Write-Host "    Move all files to: $extrasDir" -ForegroundColor Gray
+                    }
                 }
             }
             4 { Write-Host "  - Open output directory to verify files" -ForegroundColor Yellow }
@@ -578,15 +584,33 @@ if ($Series) {
 } else {
     # ========== MOVIE MODE: Original behavior ==========
     # prefix files with parent dir name (only if not already prefixed)
-    Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
-    $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
-    if ($filesToPrefix) {
-        Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
-        $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-        $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
-        Write-Host "Prefixing complete" -ForegroundColor Green
+    # For disc 2+, add "Special Features-" after the movie name prefix
+    if ($isMainFeatureDisc) {
+        Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
+        if ($filesToPrefix) {
+            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+            $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+            $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
+            Write-Host "Prefixing complete" -ForegroundColor Green
+        } else {
+            Write-Host "No files need prefixing" -ForegroundColor Gray
+        }
     } else {
-        Write-Host "No files need prefixing" -ForegroundColor Gray
+        # Disc 2+: prefix with "MovieName-Special Features-originalfilename"
+        Write-Host "`nPrefixing special features files..." -ForegroundColor Yellow
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
+        if ($filesToPrefix) {
+            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+            $filesToPrefix | ForEach-Object {
+                $newName = $_.Directory.Name + "-Special Features-" + $_.Name
+                Write-Host "  - $($_.Name) -> $newName" -ForegroundColor Gray
+                Rename-Item -Path $_.FullName -NewName $newName
+            }
+            Write-Host "Special features prefixing complete" -ForegroundColor Green
+        } else {
+            Write-Host "No files need prefixing" -ForegroundColor Gray
+        }
     }
 
     # Movie disc 1 only: add 'Feature' suffix to largest file
