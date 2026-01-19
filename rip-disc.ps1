@@ -173,10 +173,29 @@ if ($Series) {
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
+$host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
+# ========== SET WINDOW TITLE ==========
+# Set PowerShell window title to help identify concurrent rips
+# Title comes FIRST so it's visible in narrow terminal tabs
+if ($Series) {
+    $windowTitle = "$title"
+    if ($Season -gt 0) { $windowTitle += " S$Season" }
+    $windowTitle += " Disc $Disc"
+} else {
+    $windowTitle = "$title"
+    if ($Disc -gt 1) { $windowTitle += " (Special Features)" }
+}
+$host.UI.RawUI.WindowTitle = $windowTitle
+
 # ========== CONFIGURATION ==========
-$makemkvOutputDir = "C:\Video\$title"  # MakeMKV rips here first
+# MakeMKV temp directory - only use Disc subdirectory for multi-disc rips
+if ($Disc -gt 1) {
+    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
+} else {
+    $makemkvOutputDir = "C:\Video\$title"
+}
 
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
@@ -204,6 +223,8 @@ $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
 function Stop-WithError {
     param([string]$Step, [string]$Message)
+
+    $host.UI.RawUI.WindowTitle = "$($host.UI.RawUI.WindowTitle) - ERROR"
 
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "FAILED!" -ForegroundColor Red
@@ -249,8 +270,13 @@ function Stop-WithError {
                         Write-Host "    Format: $title - E##.mp4" -ForegroundColor Gray
                     }
                 } else {
-                    Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
-                    Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
+                    if ($Disc -eq 1) {
+                        Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
+                        Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
+                    } else {
+                        Write-Host "    Format: $title-Special Features-originalname.mp4" -ForegroundColor Gray
+                        Write-Host "    Move all files to: $extrasDir" -ForegroundColor Gray
+                    }
                 }
             }
             4 { Write-Host "  - Open output directory to verify files" -ForegroundColor Yellow }
@@ -578,15 +604,33 @@ if ($Series) {
 } else {
     # ========== MOVIE MODE: Original behavior ==========
     # prefix files with parent dir name (only if not already prefixed)
-    Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
-    $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
-    if ($filesToPrefix) {
-        Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
-        $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-        $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
-        Write-Host "Prefixing complete" -ForegroundColor Green
+    # For disc 2+, add "Special Features-" after the movie name prefix
+    if ($isMainFeatureDisc) {
+        Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
+        if ($filesToPrefix) {
+            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+            $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+            $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
+            Write-Host "Prefixing complete" -ForegroundColor Green
+        } else {
+            Write-Host "No files need prefixing" -ForegroundColor Gray
+        }
     } else {
-        Write-Host "No files need prefixing" -ForegroundColor Gray
+        # Disc 2+: prefix with "MovieName-Special Features-originalfilename"
+        Write-Host "`nPrefixing special features files..." -ForegroundColor Yellow
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
+        if ($filesToPrefix) {
+            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+            $filesToPrefix | ForEach-Object {
+                $newName = $_.Directory.Name + "-Special Features-" + $_.Name
+                Write-Host "  - $($_.Name) -> $newName" -ForegroundColor Gray
+                Rename-Item -Path $_.FullName -NewName $newName
+            }
+            Write-Host "Special features prefixing complete" -ForegroundColor Green
+        } else {
+            Write-Host "No files need prefixing" -ForegroundColor Gray
+        }
     }
 
     # Movie disc 1 only: add 'Feature' suffix to largest file
@@ -690,3 +734,5 @@ $finalFiles = Get-ChildItem -Path $finalOutputDir -File -Recurse
 Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
 Write-Host "  Total size: $([math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)) GB" -ForegroundColor White
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+$host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
