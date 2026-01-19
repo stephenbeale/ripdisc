@@ -173,6 +173,7 @@ if ($Series) {
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
+$host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
 # ========== SET WINDOW TITLE ==========
@@ -189,8 +190,12 @@ if ($Series) {
 $host.UI.RawUI.WindowTitle = $windowTitle
 
 # ========== CONFIGURATION ==========
-# Make MakeMKV temp directory disc-specific to support concurrent ripping
-$makemkvOutputDir = "C:\Video\$title\Disc$Disc"  # MakeMKV rips here first
+# MakeMKV temp directory - only use Disc subdirectory for multi-disc rips
+if ($Disc -gt 1) {
+    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
+} else {
+    $makemkvOutputDir = "C:\Video\$title"
+}
 
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
@@ -218,6 +223,8 @@ $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
 function Stop-WithError {
     param([string]$Step, [string]$Message)
+
+    $host.UI.RawUI.WindowTitle = "$($host.UI.RawUI.WindowTitle) - ERROR"
 
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "FAILED!" -ForegroundColor Red
@@ -727,3 +734,5 @@ $finalFiles = Get-ChildItem -Path $finalOutputDir -File -Recurse
 Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
 Write-Host "  Total size: $([math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)) GB" -ForegroundColor White
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+$host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
