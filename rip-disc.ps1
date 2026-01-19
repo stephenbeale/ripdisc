@@ -175,6 +175,19 @@ Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
+# ========== SET WINDOW TITLE ==========
+# Set PowerShell window title to help identify concurrent rips
+# Title comes FIRST so it's visible in narrow terminal tabs
+if ($Series) {
+    $windowTitle = "$title"
+    if ($Season -gt 0) { $windowTitle += " S$Season" }
+    $windowTitle += " Disc $Disc"
+} else {
+    $windowTitle = "$title"
+    if ($Disc -gt 1) { $windowTitle += " (Special Features)" }
+}
+$host.UI.RawUI.WindowTitle = $windowTitle
+
 # ========== CONFIGURATION ==========
 # Make MakeMKV temp directory disc-specific to support concurrent ripping
 $makemkvOutputDir = "C:\Video\$title\Disc$Disc"  # MakeMKV rips here first
