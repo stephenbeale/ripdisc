@@ -18,7 +18,10 @@ param(
     [string]$Drive = "D:",
 
     [Parameter()]
-    [int]$DriveIndex = -1
+    [int]$DriveIndex = -1,
+
+    [Parameter()]
+    [string]$OutputDrive = "E:"
 )
 
 # ========== STEP TRACKING ==========
@@ -168,16 +171,20 @@ if ($Series) {
     Write-Host "Type: Movie - $discType (Disc $Disc)" -ForegroundColor White
 }
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
+Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
 
 # ========== CONFIGURATION ==========
 $makemkvOutputDir = "C:\Video\$title"  # MakeMKV rips here first
 
+# Normalize output drive letter (add colon if missing)
+$outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
+
 # Series: organize into Season subfolders with proper naming (only if Season explicitly specified)
 # Movies: organize into title folder with optional extras
 if ($Series) {
-    $seriesBaseDir = "E:\Series\$title"
+    $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
         # Season explicitly specified - use Season subfolder and episode tags
         $seasonTag = "S{0:D2}" -f $Season
@@ -189,7 +196,7 @@ if ($Series) {
         $finalOutputDir = $seriesBaseDir
     }
 } else {
-    $finalOutputDir = "E:\DVDs\$title"
+    $finalOutputDir = "$outputDriveLetter\DVDs\$title"
 }
 
 $makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
@@ -299,6 +306,7 @@ if ($DriveIndex -ge 0) {
 } else {
     Write-Host "Drive: $driveLetter" -ForegroundColor White
 }
+Write-Host "Output Drive: $outputDriveLetter" -ForegroundColor White
 if ($Series) {
     if ($Season -gt 0) {
         Write-Host "Season: $Season ($seasonTag)" -ForegroundColor White
