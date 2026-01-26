@@ -141,6 +141,14 @@ function Test-DriveReady {
     return @{ Ready = $false; Drive = $driveDisplay; Message = "Destination drive $driveDisplay is not ready - please ensure the drive is connected and mounted" }
 }
 
+function Write-Log {
+    param([string]$Message)
+    if ($script:LogFile) {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $entry = "[$timestamp] $Message"
+        Add-Content -Path $script:LogFile -Value $entry
+    }
+}
 
 # ========== DRIVE CONFIRMATION ==========
 # Show which drive will be used and confirm before proceeding
@@ -221,10 +229,51 @@ if ($Series) {
 $makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
 $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
+# ========== LOGGING SETUP ==========
+$logDir = "C:\Video\logs"
+if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$logTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$script:LogFile = Join-Path $logDir "${title}_disc${Disc}_${logTimestamp}.log"
+
+Write-Log "========== RIP SESSION STARTED =========="
+Write-Log "Title: $title"
+Write-Log "Type: $(if ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Disc: $Disc$(if ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
+if ($Series) {
+    if ($Season -gt 0) {
+        Write-Log "Season: $Season"
+    }
+    Write-Log "Start Episode: $StartEpisode"
+}
+if ($DriveIndex -ge 0) {
+    Write-Log "Drive Index: $DriveIndex"
+} else {
+    Write-Log "Drive: $driveLetter"
+}
+Write-Log "Output Drive: $outputDriveLetter"
+Write-Log "MakeMKV Output: $makemkvOutputDir"
+Write-Log "Final Output: $finalOutputDir"
+Write-Log "Log file: $($script:LogFile)"
+
 function Stop-WithError {
     param([string]$Step, [string]$Message)
 
     $host.UI.RawUI.WindowTitle = "$($host.UI.RawUI.WindowTitle) - ERROR"
+
+    # Log the error
+    Write-Log "========== ERROR =========="
+    Write-Log "Failed at: $Step"
+    Write-Log "Message: $Message"
+    if ($script:CompletedSteps.Count -gt 0) {
+        Write-Log "Completed steps: $(($script:CompletedSteps | ForEach-Object { "Step $($_.Number): $($_.Name)" }) -join ', ')"
+    } else {
+        Write-Log "Completed steps: (none)"
+    }
+    $remaining = Get-RemainingSteps
+    if ($remaining.Count -gt 0) {
+        Write-Log "Remaining steps: $(($remaining | ForEach-Object { "Step $($_.Number): $($_.Name)" }) -join ', ')"
+    }
+    Write-Log "Log file: $($script:LogFile)"
 
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "FAILED!" -ForegroundColor Red
@@ -291,6 +340,7 @@ function Stop-WithError {
         Start-Process explorer.exe -ArgumentList $directoryToOpen
     }
 
+    Write-Host "`nLog file: $($script:LogFile)" -ForegroundColor Yellow
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "Please complete the remaining steps manually" -ForegroundColor Red
     Write-Host "========================================`n" -ForegroundColor Red
@@ -346,11 +396,13 @@ if ($Series) {
 }
 Write-Host "MakeMKV Output: $makemkvOutputDir" -ForegroundColor White
 Write-Host "Final Output: $finalOutputDir" -ForegroundColor White
+Write-Host "Log file: $($script:LogFile)" -ForegroundColor White
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # ========== STEP 1: RIP WITH MAKEMKV ==========
 Set-CurrentStep -StepNumber 1
 $script:LastWorkingDirectory = $makemkvOutputDir
+Write-Log "STEP 1/4: Starting MakeMKV rip..."
 Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 
 # Use disc: syntax with index if provided (completely bypasses drive enumeration)
@@ -379,6 +431,7 @@ if (Test-Path $makemkvOutputDir) {
 
 Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
 Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120" -ForegroundColor Gray
+Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
 
 # Capture MakeMKV output to analyze for specific errors
 $makemkvOutput = & $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput
@@ -452,8 +505,10 @@ if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
 
 Write-Host "`nMakeMKV rip complete!" -ForegroundColor Green
 Write-Host "Files ripped: $($rippedFiles.Count)" -ForegroundColor White
+Write-Log "STEP 1/4: MakeMKV rip complete - $($rippedFiles.Count) file(s)"
 foreach ($file in $rippedFiles) {
     Write-Host "  - $($file.Name) ($([math]::Round($file.Length/1GB, 2)) GB)" -ForegroundColor Gray
+    Write-Log "  Ripped: $($file.Name) ($([math]::Round($file.Length/1GB, 2)) GB)"
 }
 Complete-CurrentStep
 
@@ -462,11 +517,13 @@ Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
 $driveEject = New-Object -comObject Shell.Application
 $driveEject.Namespace(17).ParseName($driveLetter).InvokeVerb("Eject")
 Write-Host "Disc ejected successfully" -ForegroundColor Green
+Write-Log "Disc ejected from drive $driveLetter"
 
 
 # ========== STEP 2: ENCODE WITH HANDBRAKE ==========
 Set-CurrentStep -StepNumber 2
 $script:LastWorkingDirectory = $finalOutputDir
+Write-Log "STEP 2/4: Starting HandBrake encoding..."
 Write-Host "`n[STEP 2/4] Starting HandBrake encoding..." -ForegroundColor Green
 
 # Check if destination drive is ready before attempting to create directories
@@ -496,6 +553,7 @@ foreach ($mkv in $mkvFiles) {
     Write-Host "Input:  $($mkv.Name)" -ForegroundColor White
     Write-Host "Output: $($mkv.BaseName).mp4" -ForegroundColor White
     Write-Host "Size:   $([math]::Round($mkv.Length/1GB, 2)) GB" -ForegroundColor White
+    Write-Log "Encoding file $fileCount of $($mkvFiles.Count): $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)"
 
     Write-Host "`nExecuting HandBrake..." -ForegroundColor Yellow
     & $handbrakePath -i $inputFile -o $outputFile `
@@ -514,11 +572,13 @@ foreach ($mkv in $mkvFiles) {
         $encodedSize = (Get-Item $outputFile).Length
         Write-Host "`nEncoding complete: $($mkv.Name)" -ForegroundColor Green
         Write-Host "Output size: $([math]::Round($encodedSize/1GB, 2)) GB" -ForegroundColor White
+        Write-Log "Encoded: $($mkv.Name) -> $($mkv.BaseName).mp4 ($([math]::Round($encodedSize/1GB, 2)) GB)"
     } else {
         Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message "Output file not created for $($mkv.Name)"
     }
 }
 Complete-CurrentStep
+Write-Log "STEP 2/4: HandBrake encoding complete - $fileCount file(s) encoded"
 
 # Wait for HandBrake to fully release file handles before proceeding
 Write-Host "`nWaiting for file handles to be released..." -ForegroundColor Yellow
@@ -533,13 +593,16 @@ if ($encodedFiles.Count -gt 0) {
     Write-Host "Removing temporary MakeMKV directory: $makemkvOutputDir" -ForegroundColor Yellow
     Remove-Item -Path $makemkvOutputDir -Recurse -Force
     Write-Host "Temporary files removed successfully" -ForegroundColor Green
+    Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
 } else {
     Write-Host "WARNING: No encoded files found. Keeping MakeMKV directory." -ForegroundColor Red
+    Write-Log "WARNING: No encoded files found - keeping MakeMKV directory"
 }
 
 # ========== STEP 3: RENAME AND ORGANIZE ==========
 Set-CurrentStep -StepNumber 3
 $script:LastWorkingDirectory = $finalOutputDir
+Write-Log "STEP 3/4: Organizing files..."
 Write-Host "`n[STEP 3/4] Organizing files..." -ForegroundColor Green
 cd $finalOutputDir
 
@@ -589,8 +652,10 @@ if ($Series) {
         $lastEpisode = $currentEpisode - 1
         if ($seasonTag) {
             Write-Host "Episode renaming complete ($seasonTag`E$("{0:D2}" -f $StartEpisode) to $seasonTag`E$("{0:D2}" -f $lastEpisode))" -ForegroundColor Green
+            Write-Log "Renamed $($episodeFiles.Count) episodes: $seasonTag`E$("{0:D2}" -f $StartEpisode) to $seasonTag`E$("{0:D2}" -f $lastEpisode)"
         } else {
             Write-Host "Episode renaming complete (E$("{0:D2}" -f $StartEpisode) to E$("{0:D2}" -f $lastEpisode))" -ForegroundColor Green
+            Write-Log "Renamed $($episodeFiles.Count) episodes: E$("{0:D2}" -f $StartEpisode) to E$("{0:D2}" -f $lastEpisode)"
         }
 
         # Calculate and display next episode number for user convenience
@@ -613,6 +678,7 @@ if ($Series) {
             $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
             $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
             Write-Host "Prefixing complete" -ForegroundColor Green
+            Write-Log "Prefixed $($filesToPrefix.Count) file(s) with directory name"
         } else {
             Write-Host "No files need prefixing" -ForegroundColor Gray
         }
@@ -628,6 +694,7 @@ if ($Series) {
                 Rename-Item -Path $_.FullName -NewName $newName
             }
             Write-Host "Special features prefixing complete" -ForegroundColor Green
+            Write-Log "Prefixed $($filesToPrefix.Count) special features file(s)"
         } else {
             Write-Host "No files need prefixing" -ForegroundColor Gray
         }
@@ -645,6 +712,7 @@ if ($Series) {
                 Write-Host "Renaming to: $newName" -ForegroundColor Yellow
                 Rename-Item -Path $largestFile.FullName -NewName $newName
                 Write-Host "Feature file renamed successfully" -ForegroundColor Green
+                Write-Log "Feature file: $($largestFile.Name) -> $newName ($([math]::Round($largestFile.Length/1GB, 2)) GB)"
             }
         } else {
             Write-Host "Feature file already exists: $($featureExists.Name)" -ForegroundColor Gray
@@ -673,6 +741,7 @@ if ($Series) {
             Write-Host "Moving files to extras..." -ForegroundColor Yellow
             $nonFeatureVideos | Move-Item -Destination extras -ErrorAction SilentlyContinue
             Write-Host "Files moved to extras" -ForegroundColor Green
+            Write-Log "Moved $($nonFeatureVideos.Count) non-feature file(s) to extras"
         } else {
             Write-Host "No non-feature videos found" -ForegroundColor Gray
         }
@@ -703,15 +772,18 @@ if ($Series) {
                 Move-Item -Path $video.FullName -Destination $uniquePath
             }
             Write-Host "Files moved to extras" -ForegroundColor Green
+            Write-Log "Moved $($videoFiles.Count) special features file(s) to extras"
         } else {
             Write-Host "No video files to move" -ForegroundColor Gray
         }
     }
 }
 Complete-CurrentStep
+Write-Log "STEP 3/4: File organization complete"
 
 # ========== STEP 4: OPEN DIRECTORY ==========
 Set-CurrentStep -StepNumber 4
+Write-Log "STEP 4/4: Opening directory..."
 Write-Host "`n[STEP 4/4] Opening film directory..." -ForegroundColor Green
 Write-Host "Opening: $finalOutputDir" -ForegroundColor Yellow
 start $finalOutputDir
@@ -731,8 +803,18 @@ Show-StepsSummary
 # File summary
 Write-Host "`n--- FILE SUMMARY ---" -ForegroundColor Cyan
 $finalFiles = Get-ChildItem -Path $finalOutputDir -File -Recurse
+$totalSize = [math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)
 Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
-Write-Host "  Total size: $([math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)) GB" -ForegroundColor White
+Write-Host "  Total size: $totalSize GB" -ForegroundColor White
+Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
 Write-Host "========================================`n" -ForegroundColor Cyan
+
+Write-Log "========== RIP SESSION COMPLETE =========="
+Write-Log "Final location: $finalOutputDir"
+Write-Log "Total files: $($finalFiles.Count)"
+Write-Log "Total size: $totalSize GB"
+foreach ($f in $finalFiles) {
+    Write-Log "  $($f.Name) ($([math]::Round($f.Length/1GB, 2)) GB)"
+}
 
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
