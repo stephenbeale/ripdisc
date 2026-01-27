@@ -18,7 +18,10 @@ param(
     [int]$DriveIndex = -1,
 
     [Parameter()]
-    [string]$OutputDrive = "E:"
+    [string]$OutputDrive = "E:",
+
+    [Parameter()]
+    [switch]$Extras
 )
 
 # ========== STEP TRACKING ==========
@@ -58,6 +61,8 @@ function Get-TitleSummary {
         } else {
             $summary += " - Disc $Disc"
         }
+    } elseif ($Extras) {
+        $summary += " (Extras)"
     } elseif ($Disc -gt 1) {
         $summary += " (Disc $Disc - Special Features)"
     }
@@ -229,8 +234,8 @@ if ($Series) {
         Write-Host "Type: TV Series - Disc $Disc (no season folder)" -ForegroundColor White
     }
 } else {
-    $discType = if ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: Movie - $discType (Disc $Disc)" -ForegroundColor White
+    $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
+    Write-Host "Type: Movie - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 }
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
@@ -250,13 +255,15 @@ if ($Series) {
     $windowTitle += " Disc $Disc"
 } else {
     $windowTitle = "$title"
-    if ($Disc -gt 1) { $windowTitle += "-extras" }
+    if ($Extras -or $Disc -gt 1) { $windowTitle += "-extras" }
 }
 $host.UI.RawUI.WindowTitle = $windowTitle
 
 # ========== CONFIGURATION ==========
-# MakeMKV temp directory - only use Disc subdirectory for multi-disc rips
-if ($Disc -gt 1) {
+# MakeMKV temp directory - use subdirectory for multi-disc and extras rips
+if ($Extras) {
+    $makemkvOutputDir = "C:\Video\$title\Extras"
+} elseif ($Disc -gt 1) {
     $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
 } else {
     $makemkvOutputDir = "C:\Video\$title"
@@ -290,12 +297,13 @@ $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 $logDir = "C:\Video\logs"
 if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$script:LogFile = Join-Path $logDir "${title}_disc${Disc}_${logTimestamp}.log"
+$logDiscLabel = if ($Extras) { "extras" } else { "disc${Disc}" }
+$script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_${logTimestamp}.log"
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Type: $(if ($Series) { 'TV Series' } else { 'Movie' })"
-Write-Log "Disc: $Disc$(if ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
+Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
 }
@@ -369,7 +377,7 @@ function Stop-WithError {
                 if ($Series) {
                     Write-Host "    Format: $title-originalname.mp4" -ForegroundColor Gray
                 } else {
-                    if ($Disc -eq 1) {
+                    if ($isMainFeatureDisc) {
                         Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
                         Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
                     } else {
@@ -399,7 +407,7 @@ function Stop-WithError {
 }
 
 $contentType = if ($Series) { "TV Series" } else { "Movie" }
-$isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1)
+$isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # For disc 2+, ensure parent dir and extras folder exist upfront (disc 1 may still be running)
@@ -442,7 +450,7 @@ if ($Series) {
     }
     Write-Host "Disc: $Disc" -ForegroundColor White
 } else {
-    Write-Host "Disc: $Disc$(if ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
+    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
 }
 Write-Host "MakeMKV Output: $makemkvOutputDir" -ForegroundColor White
 Write-Host "Final Output: $finalOutputDir" -ForegroundColor White
