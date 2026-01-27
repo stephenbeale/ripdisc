@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stroop Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        #start-screen, #game-screen, #end-screen {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        #start-screen.active, #game-screen.active, #end-screen.active {
+            display: flex;
+        }
+
+        h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+
+        .instructions {
+            max-width: 500px;
+            text-align: center;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+            color: #aaa;
+            font-size: 1.1rem;
+        }
+
+        .instructions strong { color: #fff; }
+
+        #start-btn, #restart-btn {
+            padding: 1rem 3rem;
+            font-size: 1.3rem;
+            border: none;
+            border-radius: 8px;
+            background: #e94560;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.1s, background 0.2s;
+        }
+
+        #start-btn:hover, #restart-btn:hover {
+            background: #c73651;
+            transform: scale(1.05);
+        }
+
+        #color-word {
+            font-size: 6rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+        }
+
+        #timer-bar-container {
+            width: 400px;
+            max-width: 90vw;
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            margin-bottom: 3rem;
+            overflow: hidden;
+        }
+
+        #timer-bar {
+            height: 100%;
+            width: 100%;
+            background: #0f3460;
+            border-radius: 4px;
+            transition: width linear, background linear;
+        }
+
+        #timer-bar.warning { background: #e94560; }
+
+        .buttons {
+            display: flex;
+            gap: 1.2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .color-btn {
+            width: 120px;
+            height: 60px;
+            border: 3px solid #444;
+            border-radius: 10px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: transform 0.1s, border-color 0.2s;
+            color: #fff;
+        }
+
+        .color-btn:hover {
+            transform: scale(1.08);
+            border-color: #fff;
+        }
+
+        .color-btn[data-color="red"]   { background: #dc3545; }
+        .color-btn[data-color="green"] { background: #28a745; }
+        .color-btn[data-color="blue"]  { background: #007bff; }
+        .color-btn[data-color="black"] { background: #111; }
+
+        #end-screen h1 { font-size: 2rem; }
+
+        #final-score {
+            font-size: 5rem;
+            font-weight: 900;
+            color: #e94560;
+            margin: 1rem 0;
+        }
+
+        #end-message {
+            color: #aaa;
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+        }
+
+        .prompt-label {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+    </style>
+</head>
+<body>
+
+<div id="start-screen" class="active">
+    <h1>Stroop Test</h1>
+    <p class="instructions">
+        A colour word will appear on screen, but displayed in a <strong>different colour</strong>.<br><br>
+        Your task: identify the <strong>colour of the text</strong>, not the word itself.<br><br>
+        You have <strong>10 seconds</strong> per round. How long can you keep your streak?
+    </p>
+    <button id="start-btn">Start</button>
+</div>
+
+<div id="game-screen">
+    <div class="prompt-label">What colour is the text?</div>
+    <div id="color-word">RED</div>
+    <div id="timer-bar-container">
+        <div id="timer-bar"></div>
+    </div>
+    <div class="buttons">
+        <button class="color-btn" data-color="red">Red</button>
+        <button class="color-btn" data-color="green">Green</button>
+        <button class="color-btn" data-color="blue">Blue</button>
+        <button class="color-btn" data-color="black">Black</button>
+    </div>
+</div>
+
+<div id="end-screen">
+    <h1>Game Over</h1>
+    <div id="end-message"></div>
+    <div id="final-score">0</div>
+    <div class="prompt-label" style="margin-bottom:2rem">streak</div>
+    <button id="restart-btn">Play Again</button>
+</div>
+
+<script>
+    const COLORS = ['red', 'green', 'blue', 'black'];
+    const COLOR_CSS = { red: '#dc3545', green: '#28a745', blue: '#007bff', black: '#ccc' };
+    const TIME_LIMIT = 10000;
+
+    let wordIndex = 0;
+    let streak = 0;
+    let currentFillColor = '';
+    let timerStart = 0;
+    let timerRAF = 0;
+    let timeout = 0;
+
+    const startScreen = document.getElementById('start-screen');
+    const gameScreen = document.getElementById('game-screen');
+    const endScreen = document.getElementById('end-screen');
+    const colorWord = document.getElementById('color-word');
+    const timerBar = document.getElementById('timer-bar');
+    const finalScore = document.getElementById('final-score');
+    const endMessage = document.getElementById('end-message');
+    const buttons = document.querySelectorAll('.color-btn');
+
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    document.getElementById('restart-btn').addEventListener('click', startGame);
+    buttons.forEach(btn => btn.addEventListener('click', () => handleAnswer(btn.dataset.color)));
+
+    function show(screen) {
+        [startScreen, gameScreen, endScreen].forEach(s => s.classList.remove('active'));
+        screen.classList.add('active');
+    }
+
+    function startGame() {
+        wordIndex = 0;
+        streak = 0;
+        show(gameScreen);
+        nextRound();
+    }
+
+    function pickRandomColor(exclude) {
+        const options = COLORS.filter(c => c !== exclude);
+        return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function nextRound() {
+        const word = COLORS[wordIndex % COLORS.length];
+        currentFillColor = pickRandomColor(word);
+        wordIndex++;
+
+        colorWord.textContent = word.toUpperCase();
+        colorWord.style.color = COLOR_CSS[currentFillColor];
+
+        timerBar.style.transition = 'none';
+        timerBar.style.width = '100%';
+        timerBar.classList.remove('warning');
+        // force reflow
+        void timerBar.offsetWidth;
+        timerBar.style.transition = `width ${TIME_LIMIT}ms linear, background 0.3s linear`;
+        timerBar.style.width = '0%';
+
+        timerStart = performance.now();
+        cancelAnimationFrame(timerRAF);
+        clearTimeout(timeout);
+
+        timerRAF = requestAnimationFrame(function tick() {
+            const elapsed = performance.now() - timerStart;
+            if (elapsed > TIME_LIMIT * 0.6) timerBar.classList.add('warning');
+            if (elapsed < TIME_LIMIT) timerRAF = requestAnimationFrame(tick);
+        });
+
+        timeout = setTimeout(() => endGame('Time ran out!'), TIME_LIMIT);
+    }
+
+    function handleAnswer(chosen) {
+        if (!gameScreen.classList.contains('active')) return;
+
+        clearTimeout(timeout);
+        cancelAnimationFrame(timerRAF);
+
+        if (chosen === currentFillColor) {
+            streak++;
+            nextRound();
+        } else {
+            endGame(`The answer was ${currentFillColor.toUpperCase()}.`);
+        }
+    }
+
+    function endGame(reason) {
+        clearTimeout(timeout);
+        cancelAnimationFrame(timerRAF);
+        endMessage.textContent = reason;
+        finalScore.textContent = streak;
+        show(endScreen);
+    }
+</script>
+
+</body>
+</html>
