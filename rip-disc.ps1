@@ -87,6 +87,30 @@ function Show-StepsSummary {
     }
 }
 
+# ========== CLOSE BUTTON PROTECTION ==========
+# Disable the console window close button (X) to prevent accidental closure during rip
+Add-Type -Name 'ConsoleCloseProtection' -Namespace 'Win32' -MemberDefinition @'
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+    [DllImport("user32.dll")]
+    public static extern bool EnableMenuItem(IntPtr hMenu, uint uIDEnableItem, uint uEnable);
+'@
+
+$script:ConsoleWindow = [Win32.ConsoleCloseProtection]::GetConsoleWindow()
+$script:ConsoleSystemMenu = [Win32.ConsoleCloseProtection]::GetSystemMenu($script:ConsoleWindow, $false)
+
+function Disable-ConsoleClose {
+    # SC_CLOSE = 0xF060, MF_BYCOMMAND = 0x0, MF_GRAYED = 0x1
+    [Win32.ConsoleCloseProtection]::EnableMenuItem($script:ConsoleSystemMenu, 0xF060, 0x00000001) | Out-Null
+}
+
+function Enable-ConsoleClose {
+    # SC_CLOSE = 0xF060, MF_BYCOMMAND = 0x0, MF_ENABLED = 0x0
+    [Win32.ConsoleCloseProtection]::EnableMenuItem($script:ConsoleSystemMenu, 0xF060, 0x00000000) | Out-Null
+}
+
 # ========== HELPER FUNCTIONS ==========
 function Get-UniqueFilePath {
     param([string]$DestDir, [string]$FileName)
@@ -178,6 +202,9 @@ Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 $host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
+
+# Disable close button to prevent accidental window closure during rip
+Disable-ConsoleClose
 
 # ========== SET WINDOW TITLE ==========
 # Set PowerShell window title to help identify concurrent rips
@@ -332,6 +359,7 @@ function Stop-WithError {
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "Please complete the remaining steps manually" -ForegroundColor Red
     Write-Host "========================================`n" -ForegroundColor Red
+    Enable-ConsoleClose
     exit 1
 }
 
@@ -804,4 +832,5 @@ foreach ($f in $finalFiles) {
     Write-Log "  $($f.Name) ($([math]::Round($f.Length/1GB, 2)) GB)"
 }
 
+Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
