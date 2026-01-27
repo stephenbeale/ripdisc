@@ -610,11 +610,11 @@ if ($imageFiles) {
 if ($Series) {
     # ========== SERIES MODE: Prefix files with title ==========
     Write-Host "`nPrefixing files with title..." -ForegroundColor Yellow
-    $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
+    $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike "$title-*" }
     if ($filesToPrefix) {
         Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
         $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-        $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
+        $filesToPrefix | Rename-Item -NewName { "$title-" + $_.Name }
         Write-Host "Prefixing complete" -ForegroundColor Green
         Write-Log "Prefixed $($filesToPrefix.Count) file(s) with title"
     } else {
