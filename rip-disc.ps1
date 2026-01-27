@@ -405,11 +405,44 @@ if ($DriveIndex -ge 0) {
 
 Write-Host "Creating directory: $makemkvOutputDir" -ForegroundColor Yellow
 if (Test-Path $makemkvOutputDir) {
-    Write-Host "Directory exists - cleaning existing MKV files..." -ForegroundColor Yellow
-    $existingMkvs = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
-    if ($existingMkvs) {
-        $existingMkvs | Remove-Item -Force
-        Write-Host "Removed $($existingMkvs.Count) existing MKV file(s)" -ForegroundColor Yellow
+    $existingFiles = Get-ChildItem -Path $makemkvOutputDir -File -ErrorAction SilentlyContinue
+    if ($existingFiles -and $existingFiles.Count -gt 0) {
+        Write-Host "`nWARNING: Directory already exists with $($existingFiles.Count) file(s):" -ForegroundColor Yellow
+        Write-Host "  $makemkvOutputDir" -ForegroundColor White
+        foreach ($ef in $existingFiles) {
+            Write-Host "  - $($ef.Name) ($([math]::Round($ef.Length/1GB, 2)) GB)" -ForegroundColor Gray
+        }
+
+        # Find the next available suffix
+        $suffix = 1
+        while (Test-Path "${makemkvOutputDir}-${suffix}") { $suffix++ }
+        $suffixedDir = "${makemkvOutputDir}-${suffix}"
+
+        Write-Host "`nChoose an option:" -ForegroundColor Cyan
+        Write-Host "  [1] Delete existing files and reuse directory" -ForegroundColor Yellow
+        Write-Host "  [2] Use suffixed directory: $suffixedDir" -ForegroundColor Yellow
+
+        $choice = $null
+        while ($choice -ne '1' -and $choice -ne '2') {
+            $choice = Read-Host "Enter 1 or 2"
+            if ($choice -ne '1' -and $choice -ne '2') {
+                Write-Host "Invalid choice. Please enter 1 or 2." -ForegroundColor Red
+            }
+        }
+
+        if ($choice -eq '1') {
+            Write-Host "Deleting existing files..." -ForegroundColor Yellow
+            $existingFiles | Remove-Item -Force
+            Write-Host "Deleted $($existingFiles.Count) existing file(s)" -ForegroundColor Green
+            Write-Log "User chose to delete $($existingFiles.Count) existing file(s) in $makemkvOutputDir"
+        } else {
+            $makemkvOutputDir = $suffixedDir
+            New-Item -ItemType Directory -Path $makemkvOutputDir -Force | Out-Null
+            Write-Host "Using suffixed directory: $makemkvOutputDir" -ForegroundColor Green
+            Write-Log "User chose suffixed directory: $makemkvOutputDir"
+        }
+    } else {
+        Write-Host "Directory exists (empty)" -ForegroundColor Gray
     }
 } else {
     New-Item -ItemType Directory -Path $makemkvOutputDir | Out-Null
