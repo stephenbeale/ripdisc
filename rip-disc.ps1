@@ -636,12 +636,32 @@ Write-Host "File handle wait complete" -ForegroundColor Green
 # Delete MakeMKV temporary directory after successful encode
 Write-Host "`nChecking for successful encodes..." -ForegroundColor Yellow
 $encodedFiles = Get-ChildItem -Path $finalOutputDir -Filter "*.mp4"
+$script:EncodedFilesTooSmall = $false
 if ($encodedFiles.Count -gt 0) {
-    Write-Host "Found $($encodedFiles.Count) encoded file(s)" -ForegroundColor Green
-    Write-Host "Removing temporary MakeMKV directory: $makemkvOutputDir" -ForegroundColor Yellow
-    Remove-Item -Path $makemkvOutputDir -Recurse -Force
-    Write-Host "Temporary files removed successfully" -ForegroundColor Green
-    Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
+    # Safety check: verify largest encoded file is at least 100MB
+    # If all files are suspiciously small, encoding likely failed silently
+    $largestEncoded = $encodedFiles | Sort-Object Length -Descending | Select-Object -First 1
+    $largestSizeMB = [math]::Round($largestEncoded.Length / 1MB, 2)
+    $minSizeMB = 100
+
+    if ($largestSizeMB -lt $minSizeMB) {
+        $script:EncodedFilesTooSmall = $true
+        Write-Host "WARNING: Largest encoded file is only $largestSizeMB MB (threshold: $minSizeMB MB)" -ForegroundColor Red
+        Write-Host "Encoded files may be corrupt - keeping MakeMKV source files for safety" -ForegroundColor Red
+        Write-Host "Source MKV directory preserved: $makemkvOutputDir" -ForegroundColor Yellow
+        Write-Log "WARNING: Largest encoded file ($($largestEncoded.Name)) is only $largestSizeMB MB - below $minSizeMB MB safety threshold"
+        Write-Log "Keeping MakeMKV source directory: $makemkvOutputDir"
+        # Open Recycle Bin so user can review
+        Start-Process explorer.exe -ArgumentList "shell:RecycleBinFolder"
+        Write-Host "Opened Recycle Bin for review" -ForegroundColor Yellow
+        Write-Log "Opened Recycle Bin for user review"
+    } else {
+        Write-Host "Found $($encodedFiles.Count) encoded file(s) (largest: $largestSizeMB MB)" -ForegroundColor Green
+        Write-Host "Removing temporary MakeMKV directory: $makemkvOutputDir" -ForegroundColor Yellow
+        Remove-Item -Path $makemkvOutputDir -Recurse -Force
+        Write-Host "Temporary files removed successfully" -ForegroundColor Green
+        Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
+    }
 } else {
     Write-Host "WARNING: No encoded files found. Keeping MakeMKV directory." -ForegroundColor Red
     Write-Log "WARNING: No encoded files found - keeping MakeMKV directory"
@@ -817,19 +837,30 @@ Show-StepsSummary
 
 # File summary
 Write-Host "`n--- FILE SUMMARY ---" -ForegroundColor Cyan
-$finalFiles = Get-ChildItem -Path $finalOutputDir -File -Recurse
-$totalSize = [math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)
-Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
-Write-Host "  Total size: $totalSize GB" -ForegroundColor White
-Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
+if ($script:EncodedFilesTooSmall) {
+    Write-Host "  No large video files found" -ForegroundColor Red
+    Write-Host "  Source MKV files preserved at: $makemkvOutputDir" -ForegroundColor Yellow
+    Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
+} else {
+    $finalFiles = Get-ChildItem -Path $finalOutputDir -File -Recurse
+    $totalSize = [math]::Round(($finalFiles | Measure-Object -Property Length -Sum).Sum/1GB, 2)
+    Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
+    Write-Host "  Total size: $totalSize GB" -ForegroundColor White
+    Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
+}
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 Write-Log "========== RIP SESSION COMPLETE =========="
 Write-Log "Final location: $finalOutputDir"
-Write-Log "Total files: $($finalFiles.Count)"
-Write-Log "Total size: $totalSize GB"
-foreach ($f in $finalFiles) {
-    Write-Log "  $($f.Name) ($([math]::Round($f.Length/1GB, 2)) GB)"
+if ($script:EncodedFilesTooSmall) {
+    Write-Log "WARNING: Encoded files were too small - source MKV files preserved"
+    Write-Log "Source MKV directory: $makemkvOutputDir"
+} else {
+    Write-Log "Total files: $($finalFiles.Count)"
+    Write-Log "Total size: $totalSize GB"
+    foreach ($f in $finalFiles) {
+        Write-Log "  $($f.Name) ($([math]::Round($f.Length/1GB, 2)) GB)"
+    }
 }
 
 Enable-ConsoleClose
