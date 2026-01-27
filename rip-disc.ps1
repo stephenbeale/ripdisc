@@ -9,9 +9,6 @@ param(
     [int]$Season = 0,
 
     [Parameter()]
-    [int]$StartEpisode = 1,
-
-    [Parameter()]
     [int]$Disc = 1,
 
     [Parameter()]
@@ -169,10 +166,8 @@ if ($Series) {
     if ($Season -gt 0) {
         $seasonTagPreview = "S{0:D2}" -f $Season
         Write-Host "Type: TV Series - Season $Season ($seasonTagPreview), Disc $Disc" -ForegroundColor White
-        Write-Host "Starting at: E$("{0:D2}" -f $StartEpisode)" -ForegroundColor White
     } else {
         Write-Host "Type: TV Series - Disc $Disc (no season folder)" -ForegroundColor White
-        Write-Host "Starting at: E$("{0:D2}" -f $StartEpisode)" -ForegroundColor White
     }
 } else {
     $discType = if ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
@@ -208,12 +203,12 @@ if ($Disc -gt 1) {
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
 
-# Series: organize into Season subfolders with proper naming (only if Season explicitly specified)
+# Series: organize into Season subfolders (only if Season explicitly specified)
 # Movies: organize into title folder with optional extras
 if ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
-        # Season explicitly specified - use Season subfolder and episode tags
+        # Season explicitly specified - use Season subfolder
         $seasonTag = "S{0:D2}" -f $Season
         $seasonFolder = "Season $Season"
         $finalOutputDir = Join-Path $seriesBaseDir $seasonFolder
@@ -239,11 +234,8 @@ Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Type: $(if ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
-if ($Series) {
-    if ($Season -gt 0) {
-        Write-Log "Season: $Season"
-    }
-    Write-Log "Start Episode: $StartEpisode"
+if ($Series -and $Season -gt 0) {
+    Write-Log "Season: $Season"
 }
 if ($DriveIndex -ge 0) {
     Write-Log "Drive Index: $DriveIndex"
@@ -313,11 +305,7 @@ function Stop-WithError {
             3 {
                 Write-Host "  - Rename files to proper format" -ForegroundColor Yellow
                 if ($Series) {
-                    if ($seasonTag) {
-                        Write-Host "    Format: $title - $seasonTag`E##.mp4" -ForegroundColor Gray
-                    } else {
-                        Write-Host "    Format: $title - E##.mp4" -ForegroundColor Gray
-                    }
+                    Write-Host "    Format: $title-originalname.mp4" -ForegroundColor Gray
                 } else {
                     if ($Disc -eq 1) {
                         Write-Host "    Format: $title-Feature.mp4 (largest file)" -ForegroundColor Gray
@@ -390,7 +378,6 @@ if ($Series) {
         Write-Host "Season: (none - no season folder)" -ForegroundColor White
     }
     Write-Host "Disc: $Disc" -ForegroundColor White
-    Write-Host "Starting Episode: E$("{0:D2}" -f $StartEpisode)" -ForegroundColor White
 } else {
     Write-Host "Disc: $Disc$(if ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
 }
@@ -621,50 +608,17 @@ if ($imageFiles) {
 }
 
 if ($Series) {
-    # ========== SERIES MODE: Episode naming ==========
-    if ($seasonTag) {
-        Write-Host "`nRenaming episodes with $seasonTag format..." -ForegroundColor Yellow
+    # ========== SERIES MODE: Prefix files with title ==========
+    Write-Host "`nPrefixing files with title..." -ForegroundColor Yellow
+    $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike "$title-*" }
+    if ($filesToPrefix) {
+        Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+        $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+        $filesToPrefix | Rename-Item -NewName { "$title-" + $_.Name }
+        Write-Host "Prefixing complete" -ForegroundColor Green
+        Write-Log "Prefixed $($filesToPrefix.Count) file(s) with title"
     } else {
-        Write-Host "`nRenaming episodes (no season tag)..." -ForegroundColor Yellow
-    }
-
-    # Get all MP4 files sorted by name (MakeMKV typically names them title00.mkv, title01.mkv, etc.)
-    $episodeFiles = Get-ChildItem -File -Filter "*.mp4" | Sort-Object Name
-
-    if ($episodeFiles) {
-        $currentEpisode = $StartEpisode
-        Write-Host "Found $($episodeFiles.Count) episode(s) to rename" -ForegroundColor White
-        Write-Host "Starting from episode E$("{0:D2}" -f $currentEpisode)" -ForegroundColor White
-
-        foreach ($episode in $episodeFiles) {
-            $episodeTag = "E{0:D2}" -f $currentEpisode
-            if ($seasonTag) {
-                $newName = "$title - $seasonTag$episodeTag$($episode.Extension)"
-            } else {
-                $newName = "$title - $episodeTag$($episode.Extension)"
-            }
-
-            Write-Host "  $($episode.Name) -> $newName" -ForegroundColor Yellow
-            Rename-Item -Path $episode.FullName -NewName $newName
-            $currentEpisode++
-        }
-
-        $lastEpisode = $currentEpisode - 1
-        if ($seasonTag) {
-            Write-Host "Episode renaming complete ($seasonTag`E$("{0:D2}" -f $StartEpisode) to $seasonTag`E$("{0:D2}" -f $lastEpisode))" -ForegroundColor Green
-            Write-Log "Renamed $($episodeFiles.Count) episodes: $seasonTag`E$("{0:D2}" -f $StartEpisode) to $seasonTag`E$("{0:D2}" -f $lastEpisode)"
-        } else {
-            Write-Host "Episode renaming complete (E$("{0:D2}" -f $StartEpisode) to E$("{0:D2}" -f $lastEpisode))" -ForegroundColor Green
-            Write-Log "Renamed $($episodeFiles.Count) episodes: E$("{0:D2}" -f $StartEpisode) to E$("{0:D2}" -f $lastEpisode)"
-        }
-
-        # Calculate and display next episode number for user convenience
-        Write-Host "`n--- NEXT DISC INFO ---" -ForegroundColor Cyan
-        Write-Host "For the next disc, use:" -ForegroundColor White
-        Write-Host "  -StartEpisode $currentEpisode" -ForegroundColor Yellow
-        Write-Host "----------------------" -ForegroundColor Cyan
-    } else {
-        Write-Host "No MP4 files found to rename" -ForegroundColor Gray
+        Write-Host "No files need prefixing" -ForegroundColor Gray
     }
 } else {
     # ========== MOVIE MODE: Original behavior ==========
