@@ -184,6 +184,41 @@ $driveDescription = if ($DriveIndex -ge 0) {
 } else {
     "Drive $driveLetter"
 }
+# ========== TITLE VALIDATION ==========
+# Warn if title appears to contain metadata that should be separate parameters
+$titleWarnings = @()
+if ($Series) {
+    if ($title -match '(?i)\bseries\s*\d') {
+        $titleWarnings += "Contains 'Series N' - use -Season parameter instead"
+    }
+    if ($title -match '(?i)\bseason\s*\d') {
+        $titleWarnings += "Contains 'Season N' - use -Season parameter instead"
+    }
+    if ($title -match '(?i)\bdisc\s*\d') {
+        $titleWarnings += "Contains 'Disc N' - use -Disc parameter instead"
+    }
+    if ($title -match '(?i)\bS\d{1,2}E\d') {
+        $titleWarnings += "Contains episode code (e.g. S01E01) - use -Series -Season instead"
+    }
+}
+if ($titleWarnings.Count -gt 0) {
+    Write-Host "`n========================================" -ForegroundColor Red
+    Write-Host "WARNING: Title may contain misplaced metadata" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host "Title: `"$title`"" -ForegroundColor Yellow
+    foreach ($w in $titleWarnings) {
+        Write-Host "  ! $w" -ForegroundColor Yellow
+    }
+    Write-Host "`nExpected usage:" -ForegroundColor Cyan
+    Write-Host "  .\rip-disc.ps1 -title `"Fargo`" -Series -Season 1 -Disc 2" -ForegroundColor White
+    Write-Host ""
+    $continueChoice = Read-Host "Continue with this title? (y/N)"
+    if ($continueChoice -ne 'y' -and $continueChoice -ne 'Y') {
+        Write-Host "Aborted. Please re-run with correct parameters." -ForegroundColor Yellow
+        exit 0
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
 if ($Series) {

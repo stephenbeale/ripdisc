@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RipDisc": {
+      "commandName": "Project",
+      "commandLineArgs": "-title \"The Matrix\""
+    }
+  }
+}
