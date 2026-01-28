@@ -21,7 +21,10 @@ param(
     [string]$OutputDrive = "E:",
 
     [Parameter()]
-    [switch]$Extras
+    [switch]$Extras,
+
+    [Parameter()]
+    [switch]$Queue
 )
 
 # ========== STEP TRACKING ==========
@@ -609,6 +612,78 @@ $driveEject = New-Object -comObject Shell.Application
 $driveEject.Namespace(17).ParseName($driveLetter).InvokeVerb("Eject")
 Write-Host "Disc ejected successfully" -ForegroundColor Green
 Write-Log "Disc ejected from drive $driveLetter"
+
+
+# ========== QUEUE MODE: ADD TO QUEUE AND EXIT ==========
+if ($Queue) {
+    Write-Log "QUEUE MODE: Writing encoding job to queue file..."
+    Write-Host "`n[QUEUE MODE] Adding encoding job to queue..." -ForegroundColor Green
+
+    $queueFilePath = "C:\Video\handbrake-queue.json"
+    $lockFilePath = "$queueFilePath.lock"
+
+    $entry = @{
+        Title = $title
+        Series = [bool]$Series
+        Season = $Season
+        Disc = $Disc
+        OutputDrive = $OutputDrive
+        QueuedAt = (Get-Date -Format "o")
+    }
+
+    # Read existing queue with file locking
+    $retryCount = 0
+    $maxRetries = 10
+    $lockAcquired = $false
+
+    while (-not $lockAcquired -and $retryCount -lt $maxRetries) {
+        try {
+            $lockStream = [System.IO.File]::Open($lockFilePath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $lockAcquired = $true
+        } catch {
+            $retryCount++
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    if (-not $lockAcquired) {
+        Write-Host "WARNING: Could not acquire lock file - writing without lock" -ForegroundColor Red
+    }
+
+    try {
+        if (Test-Path $queueFilePath) {
+            $queue = Get-Content $queueFilePath -Raw | ConvertFrom-Json
+            if ($queue -isnot [System.Array]) { $queue = @($queue) }
+        } else {
+            $queue = @()
+        }
+
+        $queue += $entry
+        $queue | ConvertTo-Json -Depth 10 | Set-Content $queueFilePath -Encoding UTF8
+    } finally {
+        if ($lockStream) { $lockStream.Close() }
+        Remove-Item $lockFilePath -Force -ErrorAction SilentlyContinue
+    }
+
+    $mkvCount = (Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv").Count
+
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "QUEUED!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "`nTitle: $title" -ForegroundColor White
+    Write-Host "MKV files: $mkvCount" -ForegroundColor White
+    Write-Host "Queue file: $queueFilePath" -ForegroundColor White
+    Write-Host "Total jobs in queue: $($queue.Count)" -ForegroundColor White
+    Write-Host "`nRun 'RipDisc -processQueue' to encode all queued jobs sequentially" -ForegroundColor Yellow
+    Write-Host "========================================`n" -ForegroundColor Cyan
+
+    Write-Log "QUEUE MODE: Job added to queue ($($queue.Count) total jobs)"
+    Write-Log "Queue file: $queueFilePath"
+
+    Enable-ConsoleClose
+    $host.UI.RawUI.WindowTitle = "$windowTitle - QUEUED"
+    exit 0
+}
 
 
 # ========== STEP 2: ENCODE WITH HANDBRAKE ==========

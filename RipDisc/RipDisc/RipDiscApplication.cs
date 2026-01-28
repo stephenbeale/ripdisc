@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace RipDisc;
 
 public class RipDiscApplication
 {
+    private const string QueueFilePath = @"C:\Video\handbrake-queue.json";
+
     private readonly CommandLineOptions _options;
     private readonly StepTracker _stepTracker;
     private readonly Logger _logger;
@@ -86,14 +89,24 @@ public class RipDiscApplication
             // Ensure extras directory exists for non-main feature discs
             EnsureExtrasDirectoryForNonMainDisc();
 
-            // Execute the 4 processing steps
+            // Execute processing steps
             Step1_MakeMKVRip();
-            Step2_HandBrakeEncoding();
-            Step3_OrganizeFiles();
-            Step4_OpenDirectory();
 
-            ShowCompletionSummary();
-            ConsoleHelper.SetWindowTitle($"{_windowTitle} - DONE");
+            if (_options.Queue)
+            {
+                // Queue mode: write job to queue file instead of encoding inline
+                WriteToQueue();
+                ConsoleHelper.SetWindowTitle($"{_windowTitle} - QUEUED");
+            }
+            else
+            {
+                // Normal mode: encode, organize, and open
+                Step2_HandBrakeEncoding();
+                Step3_OrganizeFiles();
+                Step4_OpenDirectory();
+                ShowCompletionSummary();
+                ConsoleHelper.SetWindowTitle($"{_windowTitle} - DONE");
+            }
             return 0;
         }
         catch (ProcessingException ex)
@@ -106,6 +119,210 @@ public class RipDiscApplication
             StopWithError("Unexpected error", ex.Message);
             return 1;
         }
+    }
+
+    public void SetMakeMkvOutputDir(string path)
+    {
+        _makemkvOutputDir = path;
+    }
+
+    public int RunFromQueue()
+    {
+        try
+        {
+            _logger.Log("========== QUEUE ENCODE SESSION ==========");
+            _logger.Log($"Title: {_options.Title}");
+            _logger.Log($"Type: {(_options.Series ? "TV Series" : "Movie")}");
+            _logger.Log($"Disc: {_options.Disc}");
+            if (_options.Series && _options.Season > 0)
+                _logger.Log($"Season: {_options.Season}");
+            _logger.Log($"Output: {_finalOutputDir}");
+
+            ConsoleHelper.SetWindowTitle($"Queue: {_windowTitle}");
+
+            if (!Directory.Exists(_makemkvOutputDir) || Directory.GetFiles(_makemkvOutputDir, "*.mkv").Length == 0)
+            {
+                ConsoleHelper.WriteError($"No MKV files found in {_makemkvOutputDir}");
+                _logger.Log($"ERROR: No MKV files found in {_makemkvOutputDir}");
+                return 1;
+            }
+
+            EnsureExtrasDirectoryForNonMainDisc();
+
+            Step2_HandBrakeEncoding();
+            Step3_OrganizeFiles();
+            Step4_OpenDirectory();
+
+            ShowCompletionSummary();
+            ConsoleHelper.SetWindowTitle($"Queue: {_windowTitle} - DONE");
+            return 0;
+        }
+        catch (ProcessingException ex)
+        {
+            StopWithError(ex.Step, ex.Message);
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            StopWithError("Unexpected error", ex.Message);
+            return 1;
+        }
+    }
+
+    public static int ProcessAllQueued()
+    {
+        ConsoleHelper.SetWindowTitle("RipDisc - Processing Queue");
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        int completedCount = 0;
+
+        if (!File.Exists(QueueFilePath))
+        {
+            ConsoleHelper.WriteError("No queue file found.");
+            ConsoleHelper.WriteGray($"Expected: {QueueFilePath}");
+            ConsoleHelper.WriteGray("Use -queue flag when ripping to add jobs to the queue.");
+            return 1;
+        }
+
+        var json = File.ReadAllText(QueueFilePath);
+        var queue = JsonSerializer.Deserialize<List<QueueEntry>>(json);
+
+        if (queue == null || queue.Count == 0)
+        {
+            ConsoleHelper.WriteWarning("Queue is empty - nothing to process.");
+            return 0;
+        }
+
+        Console.WriteLine();
+        ConsoleHelper.WriteSeparator();
+        ConsoleHelper.WriteSuccess($"PROCESSING QUEUE: {queue.Count} job(s)");
+        ConsoleHelper.WriteSeparator();
+
+        while (queue.Count > 0)
+        {
+            var entry = queue[0];
+            completedCount++;
+
+            Console.WriteLine();
+            ConsoleHelper.WriteHeader($"--- Job {completedCount} of {queue.Count + completedCount - 1}: {entry.Title} (Disc {entry.Disc}) ---");
+
+            var options = new CommandLineOptions
+            {
+                Title = entry.Title,
+                Series = entry.Series,
+                Season = entry.Season,
+                Disc = entry.Disc,
+                OutputDrive = entry.OutputDrive
+            };
+
+            var app = new RipDiscApplication(options);
+
+            // Override MakeMKV output dir with the actual path recorded at queue time
+            if (!string.IsNullOrEmpty(entry.MakeMkvOutputDir))
+                app.SetMakeMkvOutputDir(entry.MakeMkvOutputDir);
+
+            var result = app.RunFromQueue();
+
+            if (result != 0)
+            {
+                ConsoleHelper.WriteError($"\nJob failed: {entry.Title}");
+                ConsoleHelper.WriteWarning("Stopping queue processing. Remaining jobs preserved in queue file.");
+                File.WriteAllText(QueueFilePath, JsonSerializer.Serialize(queue, jsonOptions));
+                return 1;
+            }
+
+            // Remove completed job and re-read queue to pick up any new entries added concurrently
+            queue.RemoveAt(0);
+
+            if (File.Exists(QueueFilePath))
+            {
+                var currentJson = File.ReadAllText(QueueFilePath);
+                var currentQueue = JsonSerializer.Deserialize<List<QueueEntry>>(currentJson) ?? new List<QueueEntry>();
+
+                // Merge: keep any new entries that were added since we started
+                // (entries not already in our working list)
+                foreach (var newEntry in currentQueue)
+                {
+                    if (!queue.Any(q => q.Title == newEntry.Title && q.Disc == newEntry.Disc && q.QueuedAt == newEntry.QueuedAt))
+                    {
+                        queue.Add(newEntry);
+                    }
+                }
+            }
+
+            // Write updated queue back (removes completed job, preserves new additions)
+            if (queue.Count > 0)
+                File.WriteAllText(QueueFilePath, JsonSerializer.Serialize(queue, jsonOptions));
+            else
+                File.Delete(QueueFilePath);
+        }
+
+        Console.WriteLine();
+        ConsoleHelper.WriteSeparator();
+        ConsoleHelper.WriteSuccess($"QUEUE COMPLETE: {completedCount} job(s) processed successfully!");
+        ConsoleHelper.WriteSeparator();
+        ConsoleHelper.SetWindowTitle("RipDisc - Queue Complete");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    private void WriteToQueue()
+    {
+        _logger.Log("QUEUE MODE: Writing encoding job to queue file...");
+        ConsoleHelper.WriteSuccess("\n[QUEUE MODE] Adding encoding job to queue...");
+
+        var mkvFiles = Directory.GetFiles(_makemkvOutputDir, "*.mkv");
+
+        var entry = new QueueEntry
+        {
+            Title = _options.Title,
+            Series = _options.Series,
+            Season = _options.Season,
+            Disc = _options.Disc,
+            OutputDrive = _options.OutputDrive,
+            MakeMkvOutputDir = _makemkvOutputDir,
+            QueuedAt = DateTime.Now
+        };
+
+        // Read existing queue with file locking for concurrent access
+        List<QueueEntry> queue;
+        var lockPath = QueueFilePath + ".lock";
+
+        using (var lockFile = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            if (File.Exists(QueueFilePath))
+            {
+                var existingJson = File.ReadAllText(QueueFilePath);
+                queue = JsonSerializer.Deserialize<List<QueueEntry>>(existingJson) ?? new List<QueueEntry>();
+            }
+            else
+            {
+                queue = new List<QueueEntry>();
+            }
+
+            queue.Add(entry);
+
+            var saveOptions = new JsonSerializerOptions { WriteIndented = true };
+            File.WriteAllText(QueueFilePath, JsonSerializer.Serialize(queue, saveOptions));
+        }
+
+        try { File.Delete(lockPath); } catch { }
+
+        Console.WriteLine();
+        ConsoleHelper.WriteSeparator();
+        ConsoleHelper.WriteSuccess("QUEUED!");
+        ConsoleHelper.WriteSeparator();
+        ConsoleHelper.WriteInfo($"\nTitle: {_options.Title}");
+        ConsoleHelper.WriteInfo($"MKV files: {mkvFiles.Length}");
+        ConsoleHelper.WriteInfo($"Queue file: {QueueFilePath}");
+        ConsoleHelper.WriteInfo($"Total jobs in queue: {queue.Count}");
+        Console.WriteLine();
+        ConsoleHelper.WriteWarning("Run 'RipDisc -processQueue' to encode all queued jobs sequentially");
+        ConsoleHelper.WriteSeparator();
+        Console.WriteLine();
+
+        _logger.Log($"QUEUE MODE: Job added to queue ({queue.Count} total jobs)");
+        _logger.Log($"Queue file: {QueueFilePath}");
     }
 
     private void LogSessionStart()
@@ -1096,4 +1313,15 @@ public class ProcessingException : Exception
     {
         Step = step;
     }
+}
+
+public class QueueEntry
+{
+    public string Title { get; set; } = string.Empty;
+    public bool Series { get; set; }
+    public int Season { get; set; }
+    public int Disc { get; set; } = 1;
+    public string OutputDrive { get; set; } = "E:";
+    public string MakeMkvOutputDir { get; set; } = string.Empty;
+    public DateTime QueuedAt { get; set; }
 }

@@ -9,6 +9,8 @@ public class CommandLineOptions
     public string Drive { get; set; } = "D:";
     public int DriveIndex { get; set; } = -1;
     public string OutputDrive { get; set; } = "E:";
+    public bool Queue { get; set; }
+    public bool ProcessQueue { get; set; }
 }
 
 public static class CommandLineParser
@@ -69,10 +71,24 @@ public static class CommandLineParser
                     options.OutputDrive = args[++i];
                     break;
 
+                case "-queue":
+                    options.Queue = true;
+                    break;
+
+                case "-processqueue":
+                    options.ProcessQueue = true;
+                    break;
+
                 default:
                     throw new ArgumentException($"Unknown argument: {args[i]}");
             }
         }
+
+        if (options.ProcessQueue && options.Queue)
+            throw new ArgumentException("-queue and -processQueue are mutually exclusive");
+
+        if (options.ProcessQueue)
+            return options;
 
         if (string.IsNullOrWhiteSpace(options.Title))
             throw new ArgumentException("Title is required");
