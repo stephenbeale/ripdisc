@@ -7,6 +7,10 @@ class Program
         try
         {
             var options = CommandLineParser.Parse(args);
+
+            if (options.ProcessQueue)
+                return RipDiscApplication.ProcessAllQueued();
+
             var app = new RipDiscApplication(options);
             return app.Run();
         }
@@ -27,6 +31,7 @@ class Program
     {
         Console.WriteLine();
         Console.WriteLine("Usage: RipDisc -title <title> [options]");
+        Console.WriteLine("       RipDisc -processQueue");
         Console.WriteLine();
         Console.WriteLine("Required:");
         Console.WriteLine("  -title <string>        Title of the movie or series");
@@ -38,10 +43,18 @@ class Program
         Console.WriteLine("  -drive <string>        Drive letter (default: D:)");
         Console.WriteLine("  -driveIndex <int>      Drive index for MakeMKV (default: -1)");
         Console.WriteLine("  -outputDrive <string>  Output drive letter (default: E:)");
+        Console.WriteLine("  -queue                 Queue encoding instead of running inline");
+        Console.WriteLine();
+        Console.WriteLine("Queue Mode:");
+        Console.WriteLine("  -processQueue          Process all queued encoding jobs sequentially");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  RipDisc -title \"The Matrix\"");
         Console.WriteLine("  RipDisc -title \"Breaking Bad\" -series -season 1 -disc 1");
         Console.WriteLine("  RipDisc -title \"The Matrix\" -disc 2 -driveIndex 1");
+        Console.WriteLine();
+        Console.WriteLine("  RipDisc -title \"The Matrix\" -queue                  # Rip + queue encode");
+        Console.WriteLine("  RipDisc -title \"The Matrix\" -disc 2 -queue          # Rip disc 2 + queue");
+        Console.WriteLine("  RipDisc -processQueue                                # Encode all queued");
     }
 }
