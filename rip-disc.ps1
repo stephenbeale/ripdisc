@@ -813,7 +813,25 @@ if ($Series) {
     if ($filesToPrefix) {
         Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
         $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-        $filesToPrefix | Rename-Item -NewName { "$title-" + $_.Name }
+        $filesToPrefix | ForEach-Object {
+            $newName = "$title-" + $_.Name
+            $maxRetries = 5
+            $retryDelay = 3
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                    break
+                } catch [System.IO.IOException] {
+                    if ($attempt -eq $maxRetries) {
+                        Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                        Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                        throw
+                    }
+                    Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $retryDelay
+                }
+            }
+        }
         Write-Host "Prefixing complete" -ForegroundColor Green
         Write-Log "Prefixed $($filesToPrefix.Count) file(s) with title"
     } else {
@@ -829,7 +847,25 @@ if ($Series) {
         if ($filesToPrefix) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-            $filesToPrefix | Rename-Item -NewName { $_.Directory.Name + "-" + $_.Name }
+            $filesToPrefix | ForEach-Object {
+                $newName = $_.Directory.Name + "-" + $_.Name
+                $maxRetries = 5
+                $retryDelay = 3
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                        break
+                    } catch [System.IO.IOException] {
+                        if ($attempt -eq $maxRetries) {
+                            Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                            throw
+                        }
+                        Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds $retryDelay
+                    }
+                }
+            }
             Write-Host "Prefixing complete" -ForegroundColor Green
             Write-Log "Prefixed $($filesToPrefix.Count) file(s) with directory name"
         } else {
@@ -844,7 +880,22 @@ if ($Series) {
             $filesToPrefix | ForEach-Object {
                 $newName = $_.Directory.Name + "-Special Features-" + $_.Name
                 Write-Host "  - $($_.Name) -> $newName" -ForegroundColor Gray
-                Rename-Item -Path $_.FullName -NewName $newName
+                $maxRetries = 5
+                $retryDelay = 3
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                        break
+                    } catch [System.IO.IOException] {
+                        if ($attempt -eq $maxRetries) {
+                            Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                            throw
+                        }
+                        Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds $retryDelay
+                    }
+                }
             }
             Write-Host "Special features prefixing complete" -ForegroundColor Green
             Write-Log "Prefixed $($filesToPrefix.Count) special features file(s)"
@@ -863,7 +914,22 @@ if ($Series) {
                 Write-Host "Largest file: $($largestFile.Name) ($([math]::Round($largestFile.Length/1GB, 2)) GB)" -ForegroundColor White
                 $newName = $largestFile.Directory.Name + "-Feature" + $largestFile.Extension
                 Write-Host "Renaming to: $newName" -ForegroundColor Yellow
-                Rename-Item -Path $largestFile.FullName -NewName $newName
+                $maxRetries = 5
+                $retryDelay = 3
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        Rename-Item -LiteralPath $largestFile.FullName -NewName $newName -ErrorAction Stop
+                        break
+                    } catch [System.IO.IOException] {
+                        if ($attempt -eq $maxRetries) {
+                            Write-Host "  FAILED to rename $($largestFile.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($largestFile.Name) after $maxRetries attempts: $_"
+                            throw
+                        }
+                        Write-Host "  File locked: $($largestFile.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds $retryDelay
+                    }
+                }
                 Write-Host "Feature file renamed successfully" -ForegroundColor Green
                 Write-Log "Feature file: $($largestFile.Name) -> $newName ($([math]::Round($largestFile.Length/1GB, 2)) GB)"
             }
