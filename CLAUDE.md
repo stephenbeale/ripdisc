@@ -64,3 +64,50 @@ When the user says **"make a workflow"**, execute the full git lifecycle. The wo
 - Special Features naming convention prevents confusion between main feature and extras
 - All changes are backward compatible with existing single-disc workflows
 - Drive readiness check (from previous PR) ensures destination drive is available before starting
+
+---
+
+### 2026-01-28 - HandBrake Queue for Sequential Encoding
+
+**Problem:**
+When ripping multiple discs concurrently, each session spawns its own HandBrakeCLI process. Multiple concurrent HandBrake workers cause significant CPU contention and slowdown.
+
+**Solution:**
+Added queue mode that defers encoding to a separate sequential processing step.
+
+**PR #17 - HandBrake Encoding Queue**
+
+New command-line flags:
+- `-queue` — After MakeMKV rip, write encoding job to shared queue file instead of running HandBrakeCLI inline (skips Steps 2-4)
+- `-processQueue` — Process all queued encoding jobs sequentially through a single HandBrakeCLI instance
+
+**Usage workflow:**
+```powershell
+# Rip multiple discs concurrently, each queuing its encode:
+RipDisc -title "The Matrix" -queue                      # Terminal 1
+RipDisc -title "The Matrix" -disc 2 -queue -driveIndex 1  # Terminal 2
+
+# After all rips complete, encode everything one at a time:
+RipDisc -processQueue
+```
+
+**Implementation details:**
+- Queue file: `C:\Video\handbrake-queue.json`
+- File locking protects concurrent writes from parallel rip sessions
+- Queue re-read after each completed job to pick up new entries added during processing
+- Failed jobs preserved in queue for retry
+- Records actual MakeMKV output directory (handles suffixed directory edge case)
+- `-queue` and `-processQueue` validated as mutually exclusive
+- Both C# and PowerShell implementations updated
+
+**Files changed:**
+- `RipDisc/RipDisc/CommandLineOptions.cs` — Added `Queue` and `ProcessQueue` properties
+- `RipDisc/RipDisc/RipDiscApplication.cs` — Added `WriteToQueue()`, `RunFromQueue()`, `ProcessAllQueued()`, `QueueEntry` class
+- `RipDisc/RipDisc/Program.cs` — Routing for `-processQueue` mode, updated usage text
+- `rip-disc.ps1` — Added `-Queue` parameter and queue writing logic
+
+**Technical Notes:**
+- `QueueEntry` stores `MakeMkvOutputDir` to handle cases where user chose suffixed directory during Step 1
+- `ProcessAllQueued()` uses while-loop with queue re-read to handle concurrent additions
+- Window title shows `QUEUED` status when job is added to queue
+- Normal mode (without `-queue`) unchanged — fully backward compatible
