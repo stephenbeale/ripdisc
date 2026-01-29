@@ -111,3 +111,46 @@ RipDisc -processQueue
 - `ProcessAllQueued()` uses while-loop with queue re-read to handle concurrent additions
 - Window title shows `QUEUED` status when job is added to queue
 - Normal mode (without `-queue`) unchanged — fully backward compatible
+
+---
+
+### 2026-01-29 - Blu-ray Subtitle Skip Option
+
+**Problem:**
+Blu-ray discs use PGS (Presentation Graphics Stream) subtitles which are image-based. These don't work properly in MP4 containers — they're either not displayed by players or cause playback issues. DVD subtitles (VOB-based) work fine.
+
+**Solution:**
+Added `-bluray` flag that skips subtitle extraction entirely for Blu-ray discs.
+
+**PR #18 - Blu-ray Skip Subtitles**
+
+New command-line flag:
+- `-bluray` — Skip subtitles during HandBrake encoding (omits `--all-subtitles` and `--subtitle-burned=none`)
+
+**Usage examples:**
+```powershell
+# Standard Blu-ray rip (no subtitles)
+RipDisc -title "Inception" -bluray
+
+# Blu-ray with queue mode
+RipDisc -title "Inception" -bluray -queue
+
+# Multi-disc Blu-ray concurrent ripping
+RipDisc -title "The Dark Knight" -bluray -queue                    # Terminal 1
+RipDisc -title "The Dark Knight" -bluray -disc 2 -queue -driveIndex 1  # Terminal 2
+RipDisc -processQueue                                               # After rips complete
+
+# DVD rip (subtitles included by default)
+RipDisc -title "Old Movie"
+```
+
+**Implementation details:**
+- Flag preserved through queue system (`QueueEntry.Bluray` property)
+- Works with both C# and PowerShell implementations
+- Default behavior unchanged — DVDs still include all subtitles
+
+**Files changed:**
+- `RipDisc/RipDisc/CommandLineOptions.cs` — Added `Bluray` property and parser case
+- `RipDisc/RipDisc/RipDiscApplication.cs` — Conditional subtitle args, updated `QueueEntry` class
+- `RipDisc/RipDisc/Program.cs` — Updated usage text
+- `rip-disc.ps1` — Added `-Bluray` parameter and conditional subtitle handling
