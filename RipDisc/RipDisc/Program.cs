@@ -44,6 +44,7 @@ class Program
         Console.WriteLine("  -driveIndex <int>      Drive index for MakeMKV (default: -1)");
         Console.WriteLine("  -outputDrive <string>  Output drive letter (default: E:)");
         Console.WriteLine("  -queue                 Queue encoding instead of running inline");
+        Console.WriteLine("  -bluray                Skip subtitles (Blu-ray PGS subs don't work in MP4)");
         Console.WriteLine();
         Console.WriteLine("Queue Mode:");
         Console.WriteLine("  -processQueue          Process all queued encoding jobs sequentially");

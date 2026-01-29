@@ -11,6 +11,7 @@ public class CommandLineOptions
     public string OutputDrive { get; set; } = "E:";
     public bool Queue { get; set; }
     public bool ProcessQueue { get; set; }
+    public bool Bluray { get; set; }
 }
 
 public static class CommandLineParser
@@ -77,6 +78,10 @@ public static class CommandLineParser
 
                 case "-processqueue":
                     options.ProcessQueue = true;
+                    break;
+
+                case "-bluray":
+                    options.Bluray = true;
                     break;
 
                 default:

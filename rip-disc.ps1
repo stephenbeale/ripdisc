@@ -24,7 +24,10 @@ param(
     [switch]$Extras,
 
     [Parameter()]
-    [switch]$Queue
+    [switch]$Queue,
+
+    [Parameter()]
+    [switch]$Bluray
 )
 
 # ========== STEP TRACKING ==========
@@ -722,12 +725,18 @@ foreach ($mkv in $mkvFiles) {
     Write-Log "Encoding file $fileCount of $($mkvFiles.Count): $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)"
 
     Write-Host "`nExecuting HandBrake..." -ForegroundColor Yellow
-    & $handbrakePath -i $inputFile -o $outputFile `
-        --preset "Fast 1080p30" `
-        --all-audio `
-        --all-subtitles `
-        --subtitle-burned=none `
-        --verbose=1
+    $handbrakeArgs = @(
+        "-i", $inputFile,
+        "-o", $outputFile,
+        "--preset", "Fast 1080p30",
+        "--all-audio"
+    )
+    if (-not $Bluray) {
+        $handbrakeArgs += "--all-subtitles"
+        $handbrakeArgs += "--subtitle-burned=none"
+    }
+    $handbrakeArgs += "--verbose=1"
+    & $handbrakePath @handbrakeArgs
     $handbrakeExitCode = $LASTEXITCODE
 
     if ($handbrakeExitCode -ne 0) {
