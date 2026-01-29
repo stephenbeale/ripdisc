@@ -211,7 +211,8 @@ public class RipDiscApplication
                 Series = entry.Series,
                 Season = entry.Season,
                 Disc = entry.Disc,
-                OutputDrive = entry.OutputDrive
+                OutputDrive = entry.OutputDrive,
+                Bluray = entry.Bluray
             };
 
             var app = new RipDiscApplication(options);
@@ -281,6 +282,7 @@ public class RipDiscApplication
             Disc = _options.Disc,
             OutputDrive = _options.OutputDrive,
             MakeMkvOutputDir = _makemkvOutputDir,
+            Bluray = _options.Bluray,
             QueuedAt = DateTime.Now
         };
 
@@ -761,11 +763,11 @@ public class RipDiscApplication
             _logger.Log($"Encoding file {fileCount} of {mkvFiles.Length}: {mkvInfo.Name} ({Math.Round(mkvInfo.Length / (1024.0 * 1024.0 * 1024.0), 2)} GB)");
 
             ConsoleHelper.WriteWarning("\nExecuting HandBrake...");
+            var subtitleArgs = _options.Bluray ? "" : "--all-subtitles --subtitle-burned=none ";
             var args = $"-i \"{mkvFile}\" -o \"{outputFile}\" " +
                       "--preset \"Fast 1080p30\" " +
                       "--all-audio " +
-                      "--all-subtitles " +
-                      "--subtitle-burned=none " +
+                      subtitleArgs +
                       "--verbose=1";
 
             var (exitCode, _) = ExecuteProcess(_handbrakePath, args, showOutput: true);
@@ -1323,5 +1325,6 @@ public class QueueEntry
     public int Disc { get; set; } = 1;
     public string OutputDrive { get; set; } = "E:";
     public string MakeMkvOutputDir { get; set; } = string.Empty;
+    public bool Bluray { get; set; }
     public DateTime QueuedAt { get; set; }
 }
