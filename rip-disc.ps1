@@ -27,7 +27,10 @@ param(
     [switch]$Queue,
 
     [Parameter()]
-    [switch]$Bluray
+    [switch]$Bluray,
+
+    [Parameter()]
+    [switch]$Documentary
 )
 
 # ========== STEP TRACKING ==========
@@ -59,7 +62,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Series) { "TV Series" } else { "Movie" }
+    $contentType = if ($Documentary) { "Documentary" } elseif ($Series) { "TV Series" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -232,7 +235,10 @@ if ($titleWarnings.Count -gt 0) {
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
-if ($Series) {
+if ($Documentary) {
+    $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
+    Write-Host "Type: Documentary - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
+} elseif ($Series) {
     if ($Season -gt 0) {
         $seasonTagPreview = "S{0:D2}" -f $Season
         Write-Host "Type: TV Series - Season $Season ($seasonTagPreview), Disc $Disc" -ForegroundColor White
@@ -278,9 +284,12 @@ if ($Extras) {
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
 
+# Documentaries: organize into Documentaries folder
 # Series: organize into Season subfolders (only if Season explicitly specified)
 # Movies: organize into title folder with optional extras
-if ($Series) {
+if ($Documentary) {
+    $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
+} elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
         # Season explicitly specified - use Season subfolder
@@ -308,7 +317,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_${logTimestamp}.lo
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
-Write-Log "Type: $(if ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -412,7 +421,8 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Series) { "TV Series" } else { "Movie" }
+$contentType = if ($Documentary) { "Documentary" } elseif ($Series) { "TV Series" } else { "Movie" }
+# Documentaries are treated like movies for file organization (Feature file, extras subfolder)
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
