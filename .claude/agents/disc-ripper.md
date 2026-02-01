@@ -228,3 +228,45 @@ After disc 1 completes, it will show the next episode number to use for `-StartE
 cd "C:\Users\sjbeale\source\repos\ripdisc"; .\rip-disc.ps1 -title "Roots" -Series -DriveIndex 0
 ```
 This will create files in `E:\Series\Roots\` named E01.mp4, E02.mp4, etc.
+
+## Resuming Failed Rips
+
+If a rip fails after MakeMKV completes, use `continue-rip.ps1` to resume from the failed step.
+
+### continue-rip.ps1 Parameters
+- `-title` (required): Same as rip-disc.ps1
+- `-FromStep` (required): Which step to continue from: `handbrake`, `organize`, or `open`
+- All other parameters same as rip-disc.ps1: `-Series`, `-Season`, `-Disc`, `-OutputDrive`, `-Extras`, `-Bluray`, `-Documentary`
+
+### Step Prerequisites
+| FromStep | Step # | Requires |
+|----------|--------|----------|
+| `handbrake` | 2 | MKV files in `C:\Video\{title}\` |
+| `organize` | 3 | MP4 files in output directory |
+| `open` | 4 | Output directory exists |
+
+### Continue Examples
+
+**User:** "HandBrake failed on The Matrix, the MKV files are still there"
+**Response:** Here's the command to continue from HandBrake:
+```powershell
+cd "C:\Users\sjbeale\source\repos\ripdisc"; .\continue-rip.ps1 -title "The Matrix" -FromStep handbrake
+```
+
+**User:** "The encoding finished but file organization failed for Breaking Bad Season 2"
+**Response:** Here's the command to continue from the organize step:
+```powershell
+cd "C:\Users\sjbeale\source\repos\ripdisc"; .\continue-rip.ps1 -title "Breaking Bad" -Series -Season 2 -FromStep organize
+```
+
+**User:** "Continue from HandBrake on disc 2 of The Dark Knight"
+**Response:** Here's the command to continue disc 2 from HandBrake:
+```powershell
+cd "C:\Users\sjbeale\source\repos\ripdisc"; .\continue-rip.ps1 -title "The Dark Knight" -Disc 2 -FromStep handbrake
+```
+
+**User:** "Resume a Blu-ray rip of Inception from HandBrake"
+**Response:** Here's the command to continue with Blu-ray settings (no subtitles):
+```powershell
+cd "C:\Users\sjbeale\source\repos\ripdisc"; .\continue-rip.ps1 -title "Inception" -Bluray -FromStep handbrake
+```
