@@ -763,14 +763,28 @@ public class RipDiscApplication
             _logger.Log($"Encoding file {fileCount} of {mkvFiles.Length}: {mkvInfo.Name} ({Math.Round(mkvInfo.Length / (1024.0 * 1024.0 * 1024.0), 2)} GB)");
 
             ConsoleHelper.WriteWarning("\nExecuting HandBrake...");
-            var subtitleArgs = _options.Bluray ? "" : "--all-subtitles --subtitle-burned=none ";
-            var args = $"-i \"{mkvFile}\" -o \"{outputFile}\" " +
-                      "--preset \"Fast 1080p30\" " +
-                      "--all-audio " +
-                      subtitleArgs +
-                      "--verbose=1";
 
-            var (exitCode, _) = ExecuteProcess(_handbrakePath, args, showOutput: true);
+            // Always try with subtitles first (not burned in)
+            var baseArgs = $"-i \"{mkvFile}\" -o \"{outputFile}\" " +
+                          "--preset \"Fast 1080p30\" " +
+                          "--all-audio ";
+            var argsWithSubs = baseArgs + "--all-subtitles --subtitle-burned=none --verbose=1";
+
+            var (exitCode, _) = ExecuteProcess(_handbrakePath, argsWithSubs, showOutput: true);
+
+            // For Bluray: if subtitle encoding fails, retry without subtitles (PGS incompatibility)
+            if (exitCode != 0 && _options.Bluray)
+            {
+                ConsoleHelper.WriteWarning("\nBluray subtitle encoding failed - retrying without subtitles...");
+                _logger.Log($"Bluray subtitle encoding failed for {mkvInfo.Name} - retrying without subtitles");
+
+                // Delete partial output if exists
+                if (File.Exists(outputFile))
+                    File.Delete(outputFile);
+
+                var argsNoSubs = baseArgs + "--verbose=1";
+                (exitCode, _) = ExecuteProcess(_handbrakePath, argsNoSubs, showOutput: true);
+            }
 
             if (exitCode != 0)
                 throw new ProcessingException("STEP 2/4: HandBrake encoding",
