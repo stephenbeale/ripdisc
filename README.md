@@ -183,15 +183,53 @@ cd RipDisc
 .\publish.bat
 ```
 
+## Resuming Failed Rips
+
+If a rip fails after the MakeMKV step, use `continue-rip.ps1` to resume from where it failed:
+
+```powershell
+# Continue from HandBrake encoding (step 2)
+.\continue-rip.ps1 -title "The Matrix" -FromStep handbrake
+
+# Continue from file organization (step 3)
+.\continue-rip.ps1 -title "The Matrix" -FromStep organize
+
+# Continue from open directory (step 4)
+.\continue-rip.ps1 -title "The Matrix" -FromStep open
+```
+
+### FromStep Options
+
+| Value | Step | Prerequisites |
+|-------|------|---------------|
+| `handbrake` | 2 | MKV files in `C:\Video\{title}\` |
+| `organize` | 3 | MP4 files in output directory |
+| `open` | 4 | Output directory exists |
+
+All other parameters work the same as `rip-disc.ps1`:
+
+```powershell
+# Resume a TV series rip
+.\continue-rip.ps1 -title "Breaking Bad" -Series -Season 1 -FromStep organize
+
+# Resume a Blu-ray rip
+.\continue-rip.ps1 -title "Inception" -Bluray -FromStep handbrake
+
+# Resume disc 2 special features
+.\continue-rip.ps1 -title "The Dark Knight" -Disc 2 -FromStep handbrake
+```
+
 ## Additional Tools
 
 - **series-cleanup.ps1** - Utility for cleaning up series naming
+- **continue-rip.ps1** - Resume failed rips from a specific step
 
 ## Project Structure
 
 ```
 ripdisc/
 ├── rip-disc.ps1           # PowerShell implementation
+├── continue-rip.ps1       # Resume failed rips from a specific step
 ├── series-cleanup.ps1     # Series cleanup utility
 ├── CLAUDE.md              # Development notes
 ├── README.md              # This file

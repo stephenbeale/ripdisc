@@ -154,3 +154,54 @@ RipDisc -title "Old Movie"
 - `RipDisc/RipDisc/RipDiscApplication.cs` — Conditional subtitle args, updated `QueueEntry` class
 - `RipDisc/RipDisc/Program.cs` — Updated usage text
 - `rip-disc.ps1` — Added `-Bluray` parameter and conditional subtitle handling
+
+---
+
+### 2026-02-01 - Continue From Step Script
+
+**Problem:**
+When a rip fails at step 2 (HandBrake), step 3 (organize), or step 4 (open), there was no easy way to resume from that point. Users had to manually run the remaining steps or re-rip the entire disc.
+
+**Solution:**
+Added `continue-rip.ps1` script that allows resuming from any step after the initial MakeMKV rip.
+
+**PR #21 - Continue From Step Script**
+
+New script: `continue-rip.ps1`
+
+**Parameters:**
+- `-FromStep` (required) — Which step to continue from: `handbrake`, `organize`, or `open`
+- All other parameters same as `rip-disc.ps1`: `-title`, `-Series`, `-Season`, `-Disc`, `-OutputDrive`, `-Extras`, `-Bluray`, `-Documentary`
+
+**Step mapping:**
+| FromStep | Step # | Prerequisites |
+|----------|--------|---------------|
+| `handbrake` | 2 | MKV files in MakeMKV output directory |
+| `organize` | 3 | MP4 files in final output directory |
+| `open` | 4 | Final output directory exists |
+
+**Usage examples:**
+```powershell
+# Continue from HandBrake encoding (step 2) - MKV files must exist
+.\continue-rip.ps1 -title "The Matrix" -FromStep handbrake
+
+# Continue from file organization (step 3) - MP4 files must exist
+.\continue-rip.ps1 -title "Fargo" -Series -Season 1 -FromStep organize
+
+# Continue from open directory (step 4)
+.\continue-rip.ps1 -title "Inception" -FromStep open -Bluray
+
+# Continue with special features disc
+.\continue-rip.ps1 -title "The Dark Knight" -Disc 2 -FromStep handbrake
+```
+
+**Implementation details:**
+- Validates prerequisites exist before starting (MKV files for handbrake, MP4 files for organize)
+- Marks skipped steps as "completed" in the step tracker
+- Window title shows "CONTINUE" to distinguish from normal rips
+- Separate log file with `_continue_` suffix: `{title}_{disc}_continue_{timestamp}.log`
+- Same file organization logic as `rip-disc.ps1` (movie/series/documentary modes)
+- Same error handling with recovery guidance
+
+**Files added:**
+- `continue-rip.ps1` — New script (729 lines)
