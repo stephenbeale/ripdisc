@@ -157,6 +157,27 @@ RipDisc -title "Old Movie"
 
 ---
 
+### 2026-02-01 - Bluray Subtitle Fallback
+
+**Problem:**
+The previous Bluray implementation completely skipped subtitles. This meant Bluray rips never got subtitles, even when they might work.
+
+**Solution:**
+Changed to a "try subtitles first, fallback without" approach for Bluray discs.
+
+**Implementation details:**
+- All encodes now try with subtitles first (`--all-subtitles --subtitle-burned=none`)
+- For Bluray: if encoding fails, retry without subtitle arguments (PGS incompatibility fallback)
+- Subtitles are never burned in — kept as separate streams when possible
+- Logs when fallback occurs for troubleshooting
+
+**Files changed:**
+- `RipDisc/RipDisc/RipDiscApplication.cs` — Added subtitle fallback logic
+- `rip-disc.ps1` — Added subtitle fallback logic
+- `continue-rip.ps1` — Added subtitle fallback logic
+
+---
+
 ### 2026-02-01 - Continue From Step Script
 
 **Problem:**
