@@ -275,10 +275,8 @@ $host.UI.RawUI.WindowTitle = $windowTitle
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
     $makemkvOutputDir = "C:\Video\$title\Extras"
-} elseif ($Disc -gt 1) {
-    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
 } else {
-    $makemkvOutputDir = "C:\Video\$title"
+    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
 }
 
 # Normalize output drive letter (add colon if missing)
@@ -854,20 +852,21 @@ if ($Series) {
         Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
         $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
         $filesToPrefix | ForEach-Object {
-            $newName = "$title-" + $_.Name
+            $file = $_
+            $newName = "$title-" + $file.Name
             $maxRetries = 5
             $retryDelay = 3
             for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                 try {
-                    Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                    Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
                     break
                 } catch [System.IO.IOException] {
                     if ($attempt -eq $maxRetries) {
-                        Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
-                        Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                        Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                        Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
                         throw
                     }
-                    Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                    Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
                     Start-Sleep -Seconds $retryDelay
                 }
             }
@@ -888,20 +887,21 @@ if ($Series) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
             $filesToPrefix | ForEach-Object {
-                $newName = $_.Directory.Name + "-" + $_.Name
+                $file = $_
+                $newName = $file.Directory.Name + "-" + $file.Name
                 $maxRetries = 5
                 $retryDelay = 3
                 for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                     try {
-                        Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                        Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
                         break
                     } catch [System.IO.IOException] {
                         if ($attempt -eq $maxRetries) {
-                            Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
-                            Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                            Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
                             throw
                         }
-                        Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
                         Start-Sleep -Seconds $retryDelay
                     }
                 }
@@ -918,21 +918,22 @@ if ($Series) {
         if ($filesToPrefix) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object {
-                $newName = $_.Directory.Name + "-Special Features-" + $_.Name
-                Write-Host "  - $($_.Name) -> $newName" -ForegroundColor Gray
+                $file = $_
+                $newName = $file.Directory.Name + "-Special Features-" + $file.Name
+                Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
                 $maxRetries = 5
                 $retryDelay = 3
                 for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                     try {
-                        Rename-Item -LiteralPath $_.FullName -NewName $newName -ErrorAction Stop
+                        Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
                         break
                     } catch [System.IO.IOException] {
                         if ($attempt -eq $maxRetries) {
-                            Write-Host "  FAILED to rename $($_.Name) after $maxRetries attempts: $_" -ForegroundColor Red
-                            Write-Log "ERROR: Failed to rename $($_.Name) after $maxRetries attempts: $_"
+                            Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
                             throw
                         }
-                        Write-Host "  File locked: $($_.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
                         Start-Sleep -Seconds $retryDelay
                     }
                 }
