@@ -226,3 +226,28 @@ New script: `continue-rip.ps1`
 
 **Files added:**
 - `continue-rip.ps1` — New script (729 lines)
+
+---
+
+### 2026-02-09 - Fix Disc 1 Concurrent Cleanup & File Lock Logging
+
+**Problem:**
+When running concurrent disc rips (e.g. Disc 1 and Disc 2 in separate terminal tabs), Disc 1's cleanup step would try to delete the entire `C:\Video\$title` directory recursively. This nuked `Disc2/` and `Disc3/` subdirectories that were still in use by concurrent rip sessions, causing file lock errors. Additionally, the "File locked" retry messages showed no filename because `$_` inside `catch` blocks referred to the error record, not the pipeline file item.
+
+**Solution:**
+
+**PR #24 - Fix Disc 1 Concurrent Cleanup**
+
+**Bug 1 — Disc 1 temp directory collision:**
+- Previously Disc 1 used `C:\Video\$title` (no subdirectory) while Disc 2+ used `C:\Video\$title\Disc$Disc`
+- Changed so ALL discs use subdirectories: `C:\Video\$title\Disc$Disc` (e.g. `Disc1`, `Disc2`, `Disc3`)
+- Each concurrent rip's temp directory is now isolated, so cleanup only removes its own files
+
+**Bug 2 — `$_` clobbering in ForEach-Object catch blocks:**
+- Inside `ForEach-Object` with `try/catch`, PowerShell's `$_` in the `catch` block refers to the error record, not the pipeline file
+- Added `$file = $_` at the top of each `ForEach-Object` block and used `$file` throughout
+- Retry messages now correctly display the locked filename
+
+**Files changed:**
+- `rip-disc.ps1` — Both fixes applied (MakeMKV output dir + 4 rename blocks)
+- `continue-rip.ps1` — Both fixes applied (MakeMKV output dir + 3 rename blocks)
