@@ -80,7 +80,7 @@ function Get-TitleSummary {
     } elseif ($Extras) {
         $summary += " (Extras)"
     } elseif ($Disc -gt 1) {
-        $summary += " (Disc $Disc - Special Features)"
+        $summary += " (Disc $Disc)"
     }
     return $summary
 }
@@ -198,7 +198,11 @@ $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${Ou
 
 # Build final output directory path
 if ($Documentary) {
-    $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
+    if ($Extras) {
+        $finalOutputDir = "$outputDriveLetter\Documentaries\$title\extras"
+    } else {
+        $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
+    }
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
@@ -210,7 +214,11 @@ if ($Documentary) {
         $finalOutputDir = $seriesBaseDir
     }
 } else {
-    $finalOutputDir = "$outputDriveLetter\DVDs\$title"
+    if ($Extras) {
+        $finalOutputDir = "$outputDriveLetter\DVDs\$title\extras"
+    } else {
+        $finalOutputDir = "$outputDriveLetter\DVDs\$title"
+    }
 }
 
 $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
@@ -226,7 +234,7 @@ Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Continue from: Step $StartFromStepNumber ($FromStep)"
 Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
-Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
+Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
 }
@@ -282,7 +290,7 @@ function Stop-WithError {
 }
 
 $contentType = if ($Documentary) { "Documentary" } elseif ($Series) { "TV Series" } else { "Movie" }
-$isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
+$isMainFeatureDisc = (-not $Series) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # ========== WINDOW TITLE ==========
@@ -310,7 +318,7 @@ if ($Series) {
     }
     Write-Host "Disc: $Disc" -ForegroundColor White
 } else {
-    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
+    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' })" -ForegroundColor White
 }
 Write-Host "MakeMKV Output: $makemkvOutputDir" -ForegroundColor White
 Write-Host "Final Output: $finalOutputDir" -ForegroundColor White
@@ -545,7 +553,39 @@ if ($StartFromStepNumber -le 3) {
         }
     } else {
         # ========== MOVIE MODE ==========
-        if ($isMainFeatureDisc) {
+        if ($Extras) {
+            # Extras mode: prefix with title only (like Series)
+            Write-Host "`nPrefixing extras files with title..." -ForegroundColor Yellow
+            $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike "$title-*" }
+            if ($filesToPrefix) {
+                Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+                $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+                $filesToPrefix | ForEach-Object {
+                    $file = $_
+                    $newName = "$title-" + $file.Name
+                    $maxRetries = 5
+                    $retryDelay = 3
+                    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                        try {
+                            Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
+                            break
+                        } catch [System.IO.IOException] {
+                            if ($attempt -eq $maxRetries) {
+                                Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                                Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
+                                throw
+                            }
+                            Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                            Start-Sleep -Seconds $retryDelay
+                        }
+                    }
+                }
+                Write-Host "Prefixing complete" -ForegroundColor Green
+                Write-Log "Prefixed $($filesToPrefix.Count) extras file(s) with title"
+            } else {
+                Write-Host "No files need prefixing" -ForegroundColor Gray
+            }
+        } elseif ($isMainFeatureDisc) {
             Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
             $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($_.Directory.Name + "-*") }
             if ($filesToPrefix) {
@@ -610,8 +650,10 @@ if ($StartFromStepNumber -le 3) {
             }
         }
 
-        # Movie disc 1 only: add 'Feature' suffix to largest file
-        if ($isMainFeatureDisc) {
+        # Movie disc 1 only: add 'Feature' suffix to largest file (skip for extras - already in extras dir)
+        if ($Extras) {
+            Write-Host "`nSkipping Feature rename (Extras mode)" -ForegroundColor Gray
+        } elseif ($isMainFeatureDisc) {
             Write-Host "`nChecking for Feature file..." -ForegroundColor Yellow
             $featureExists = Get-ChildItem -File | Where-Object { $_.Name -like "*-Feature.*" }
             if (!$featureExists) {
@@ -646,8 +688,10 @@ if ($StartFromStepNumber -le 3) {
             Write-Host "`nSkipping Feature rename (Special Features disc)" -ForegroundColor Gray
         }
 
-        # Handle extras folder
-        if ($isMainFeatureDisc) {
+        # Handle extras folder (skip for -Extras: already outputting to extras dir)
+        if ($Extras) {
+            Write-Host "`nSkipping extras move (already in extras directory)" -ForegroundColor Gray
+        } elseif ($isMainFeatureDisc) {
             Write-Host "`nChecking for non-feature videos..." -ForegroundColor Yellow
             $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" }
             if ($nonFeatureVideos) {
