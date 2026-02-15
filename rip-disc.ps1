@@ -411,6 +411,14 @@ function Stop-WithError {
         Start-Process explorer.exe -ArgumentList $directoryToOpen
     }
 
+    # Show recovery script path if it exists (encoding failed mid-way)
+    if ($recoveryScriptPath -and (Test-Path $recoveryScriptPath)) {
+        Write-Host "`n--- RECOVERY SCRIPT ---" -ForegroundColor Cyan
+        Write-Host "Recovery script: $recoveryScriptPath" -ForegroundColor Yellow
+        Write-Host "Run this to encode remaining files: .\$(Split-Path $recoveryScriptPath -Leaf)" -ForegroundColor White
+        Write-Log "Recovery script available: $recoveryScriptPath"
+    }
+
     Write-Host "`nLog file: $($script:LogFile)" -ForegroundColor Yellow
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "Please complete the remaining steps manually" -ForegroundColor Red
@@ -720,6 +728,52 @@ if (!(Test-Path $finalOutputDir)) {
 }
 
 $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv"
+
+# ========== GENERATE RECOVERY SCRIPT ==========
+# Create a recovery .ps1 with HandBrakeCLI commands for each MKV file.
+# If encoding fails, the user can run this script to resume encoding manually.
+$safeTitle = $title -replace '[\\/:*?"<>|]', '_'
+$dateStamp = Get-Date -Format "yyyy-MM-dd"
+$recoveryScriptPath = "C:\Video\recovery_${safeTitle}_${dateStamp}.ps1"
+$recoveryLines = @(
+    "# HandBrake recovery script for: $title"
+    "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    "# Run this script to encode any remaining MKV files that were not successfully encoded."
+    "# Already-encoded files (existing .mp4) will be skipped automatically."
+    ""
+    "`$handbrakePath = `"$handbrakePath`""
+    "`$finalOutputDir = `"$finalOutputDir`""
+    ""
+    "if (!(Test-Path `$finalOutputDir)) { New-Item -ItemType Directory -Path `$finalOutputDir -Force | Out-Null }"
+    ""
+)
+foreach ($mkv in $mkvFiles) {
+    $inputFile = $mkv.FullName
+    $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
+    $recoveryLines += "# --- $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB) ---"
+    $recoveryLines += "if (!(Test-Path `"$outputFile`")) {"
+    if ($Bluray) {
+        $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
+        $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
+        $recoveryLines += "    if (`$LASTEXITCODE -ne 0) {"
+        $recoveryLines += "        Write-Host `"Subtitle encoding failed - retrying without subtitles...`" -ForegroundColor Yellow"
+        $recoveryLines += "        if (Test-Path `"$outputFile`") { Remove-Item `"$outputFile`" -Force }"
+        $recoveryLines += "        & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --verbose=1"
+        $recoveryLines += "    }"
+    } else {
+        $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
+        $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
+    }
+    $recoveryLines += "} else {"
+    $recoveryLines += "    Write-Host `"Skipping (already encoded): $($mkv.Name)`" -ForegroundColor Gray"
+    $recoveryLines += "}"
+    $recoveryLines += ""
+}
+$recoveryLines += "Write-Host `"`nRecovery encoding complete.`" -ForegroundColor Green"
+$recoveryLines | Set-Content -Path $recoveryScriptPath -Encoding UTF8
+Write-Host "Recovery script: $recoveryScriptPath" -ForegroundColor Yellow
+Write-Log "Recovery script created: $recoveryScriptPath"
+
 $fileCount = 0
 foreach ($mkv in $mkvFiles) {
     $fileCount++
@@ -783,6 +837,13 @@ foreach ($mkv in $mkvFiles) {
 }
 Complete-CurrentStep
 Write-Log "STEP 2/4: HandBrake encoding complete - $fileCount file(s) encoded"
+
+# Delete recovery script after successful encoding
+if (Test-Path $recoveryScriptPath) {
+    Remove-Item $recoveryScriptPath -Force
+    Write-Host "Recovery script deleted (encoding successful)" -ForegroundColor Gray
+    Write-Log "Recovery script deleted: $recoveryScriptPath"
+}
 
 # Wait for HandBrake to fully release file handles before proceeding
 Write-Host "`nWaiting for file handles to be released..." -ForegroundColor Yellow
