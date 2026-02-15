@@ -390,8 +390,12 @@ if ($StartFromStepNumber -le 2) {
 
     Write-Host "Creating directory: $finalOutputDir" -ForegroundColor Yellow
     if (!(Test-Path $finalOutputDir)) {
-        New-Item -ItemType Directory -Path $finalOutputDir | Out-Null
-        Write-Host "Directory created successfully" -ForegroundColor Green
+        try {
+            New-Item -ItemType Directory -Path $finalOutputDir -ErrorAction Stop | Out-Null
+            Write-Host "Directory created successfully" -ForegroundColor Green
+        } catch {
+            Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message "Cannot create output directory: $finalOutputDir - $($_.Exception.Message)"
+        }
     } else {
         Write-Host "Directory already exists" -ForegroundColor Yellow
     }

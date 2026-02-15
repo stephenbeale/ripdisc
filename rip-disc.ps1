@@ -440,11 +440,16 @@ if (-not $isMainFeatureDisc -and -not $Series) {
         Write-Host "`nERROR: $($driveCheck.Message)" -ForegroundColor Red
         exit 1
     }
-    if (!(Test-Path $finalOutputDir)) {
-        New-Item -ItemType Directory -Path $finalOutputDir -Force | Out-Null
-    }
-    if (!(Test-Path $extrasDir)) {
-        New-Item -ItemType Directory -Path $extrasDir -Force | Out-Null
+    try {
+        if (!(Test-Path $finalOutputDir)) {
+            New-Item -ItemType Directory -Path $finalOutputDir -Force -ErrorAction Stop | Out-Null
+        }
+        if (!(Test-Path $extrasDir)) {
+            New-Item -ItemType Directory -Path $extrasDir -Force -ErrorAction Stop | Out-Null
+        }
+    } catch {
+        Write-Host "`nERROR: Cannot create output directory - $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
 }
 
@@ -733,8 +738,12 @@ Write-Host "Destination drive $($driveCheck.Drive) is ready" -ForegroundColor Gr
 
 Write-Host "Creating directory: $finalOutputDir" -ForegroundColor Yellow
 if (!(Test-Path $finalOutputDir)) {
-    New-Item -ItemType Directory -Path $finalOutputDir | Out-Null
-    Write-Host "Directory created successfully" -ForegroundColor Green
+    try {
+        New-Item -ItemType Directory -Path $finalOutputDir -ErrorAction Stop | Out-Null
+        Write-Host "Directory created successfully" -ForegroundColor Green
+    } catch {
+        Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message "Cannot create output directory: $finalOutputDir - $($_.Exception.Message)"
+    }
 } else {
     Write-Host "Directory already exists" -ForegroundColor Yellow
 }
