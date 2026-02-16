@@ -251,3 +251,69 @@ When running concurrent disc rips (e.g. Disc 1 and Disc 2 in separate terminal t
 **Files changed:**
 - `rip-disc.ps1` — Both fixes applied (MakeMKV output dir + 4 rename blocks)
 - `continue-rip.ps1` — Both fixes applied (MakeMKV output dir + 3 rename blocks)
+
+---
+
+### 2026-02-16 - Series Episode Renaming & Composite File Exclusion
+
+**Problem:**
+When ripping TV series discs, MakeMKV often produces individual episode files plus one composite mega-file containing all episodes concatenated. The script was encoding all files (wasting hours on the composite) and only prefixing filenames with the series title instead of numbering episodes.
+
+**Solution:**
+
+**PR #31 - Series Episode Renaming & Composite File Exclusion**
+
+Two changes:
+
+**1. Composite mega-file detection (Step 2 — HandBrake encoding):**
+- In series mode only, if there are 3+ MKV files and the largest is at least 2x the size of the second-largest, it's treated as the composite
+- The composite file is excluded from HandBrake encoding (skipped, not deleted)
+- The MKV stays on disk but gets cleaned up when the temp directory is deleted after encoding
+- If no file meets the threshold, all files are encoded (safe fallback)
+- Threshold of 3+ files avoids false positives on 2-episode discs
+
+**2. Jellyfin episode renaming (Step 3 — Organize):**
+- Series files renamed from `title_t00.mp4` to `Title-S01E01.mp4` (Jellyfin naming convention)
+- Files sorted by name to preserve MakeMKV title order as episode order
+- Season tag included when `-Season` is specified, omitted otherwise
+
+**Naming examples:**
+| Scenario | Input | Output |
+|----------|-------|--------|
+| Season 1, file 1 | `title_t00.mp4` | `Fargo-S01E01.mp4` |
+| Season 1, file 2 | `title_t01.mp4` | `Fargo-S01E02.mp4` |
+| No season, file 1 | `title_t00.mp4` | `Fargo-E01.mp4` |
+
+**Files changed:**
+- `rip-disc.ps1` — Composite detection + Jellyfin rename
+- `continue-rip.ps1` — Same changes
+
+---
+
+### 2026-02-16 - StartEpisode Parameter for Multi-Disc Seasons
+
+**Problem:**
+Episode numbering always started at E01 per disc. Multi-disc seasons (e.g. episodes 1-4 on Disc 1, episodes 5-8 on Disc 2) would produce duplicate episode numbers.
+
+**Solution:**
+
+**PR #32 - Add -StartEpisode Parameter**
+
+New parameter:
+- `-StartEpisode` (int, default 1) — Starting episode number for Jellyfin renaming
+
+**Usage examples:**
+```powershell
+# Disc 1: episodes 1-4 (default, starts at E01)
+.\rip-disc.ps1 -title "Fargo" -Series -Season 1 -Disc 1
+
+# Disc 2: episodes 5-8 (starts at E05)
+.\rip-disc.ps1 -title "Fargo" -Series -Season 1 -Disc 2 -StartEpisode 5
+
+# Continue script also supports it
+.\continue-rip.ps1 -title "Fargo" -Series -Season 1 -FromStep organize -StartEpisode 5
+```
+
+**Files changed:**
+- `rip-disc.ps1` — Added `-StartEpisode` parameter, used as initial `$episodeNum`
+- `continue-rip.ps1` — Same changes
