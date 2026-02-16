@@ -373,3 +373,42 @@ Major documentation update to accurately reflect the current state of both Power
 - C# implementation has core functionality but lacks recent enhancements
 - Feature parity table provides clear roadmap for C# porting work
 - CHANGELOG.md follows Keep a Changelog format
+
+---
+
+### 2026-02-16 - Eject Retry, Timeout Popup & Completion Fanfare
+
+**Problem:**
+Disc eject was timing out intermittently via the COM `Shell.Application` interface — likely due to drive busy states, handle locks, or firmware delays. The timeout handling added in PR #28 caught it, but a single attempt wasn't resilient enough. Users also had no out-of-terminal notification when eject failed, and no audible signal when a rip completed.
+
+**Solution:**
+
+**PR #36 - Add Eject Retry on Timeout**
+- Wrapped disc eject in a retry loop (max 2 attempts)
+- 2-second delay between attempts to let the drive settle
+- Only falls back to "please eject manually" after both attempts fail
+- Merged: 2026-02-16
+
+**PR #37 - Add Eject Timeout Popup and Completion Fanfare**
+
+Two additions:
+
+**1. Windows dialog popup on eject timeout:**
+- When both eject attempts fail, shows a `System.Windows.Forms.MessageBox` dialog
+- Dialog includes film title and drive letter: *"Disc eject timed out for 'Title' on drive D:. It is safe to eject the disc manually."*
+- Visible outside PowerShell so user is notified even when in another application
+
+**2. Triumphant completion fanfare:**
+- Plays a C major arpeggio melody via `[Console]::Beep`: C5-E5-G5-C6 (pause) G5-C6
+- Fires on both normal completion (after Step 4) and queue-mode completion (after "QUEUED!")
+- Audible from another room as a distinctive completion signal
+
+**Files changed:**
+- `rip-disc.ps1` — Eject retry loop, MessageBox popup, fanfare in both completion paths
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Consider adding fanfare/popup to `continue-rip.ps1` for parity
