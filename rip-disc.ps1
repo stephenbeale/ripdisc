@@ -635,23 +635,36 @@ foreach ($file in $rippedFiles) {
 }
 Complete-CurrentStep
 
-# Eject disc (with timeout to prevent hanging if drive is busy)
+# Eject disc (with timeout and retry to prevent hanging if drive is busy)
 Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
-$ejectJob = Start-Job -ScriptBlock {
-    param($drive)
-    $shell = New-Object -comObject Shell.Application
-    $shell.Namespace(17).ParseName($drive).InvokeVerb("Eject")
-} -ArgumentList $driveLetter
-$ejectCompleted = $ejectJob | Wait-Job -Timeout 15
-if ($ejectCompleted) {
-    Remove-Job $ejectJob -Force
+$ejectSuccess = $false
+for ($ejectAttempt = 1; $ejectAttempt -le 2; $ejectAttempt++) {
+    if ($ejectAttempt -eq 2) {
+        Write-Host "Retrying eject (attempt 2)..." -ForegroundColor Yellow
+        Write-Log "Retrying disc eject for drive $driveLetter (attempt 2)"
+        Start-Sleep -Seconds 2
+    }
+    $ejectJob = Start-Job -ScriptBlock {
+        param($drive)
+        $shell = New-Object -comObject Shell.Application
+        $shell.Namespace(17).ParseName($drive).InvokeVerb("Eject")
+    } -ArgumentList $driveLetter
+    $ejectCompleted = $ejectJob | Wait-Job -Timeout 15
+    if ($ejectCompleted) {
+        Remove-Job $ejectJob -Force
+        $ejectSuccess = $true
+        break
+    } else {
+        Stop-Job $ejectJob
+        Remove-Job $ejectJob -Force
+    }
+}
+if ($ejectSuccess) {
     Write-Host "Disc ejected successfully" -ForegroundColor Green
     Write-Log "Disc ejected from drive $driveLetter"
 } else {
-    Stop-Job $ejectJob
-    Remove-Job $ejectJob -Force
-    Write-Host "Disc eject timed out - please eject manually" -ForegroundColor Yellow
-    Write-Log "WARNING: Disc eject timed out for drive $driveLetter"
+    Write-Host "Disc eject timed out after 2 attempts - please eject manually" -ForegroundColor Yellow
+    Write-Log "WARNING: Disc eject timed out for drive $driveLetter after 2 attempts"
 }
 
 
