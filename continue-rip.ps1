@@ -404,6 +404,19 @@ if ($StartFromStepNumber -le 2) {
 
     $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv"
 
+    # Series mode: detect and skip composite mega-file (all episodes in one)
+    if ($Series -and $mkvFiles.Count -ge 3) {
+        $sortedBySize = $mkvFiles | Sort-Object Length -Descending
+        $largest = $sortedBySize[0]
+        $secondLargest = $sortedBySize[1]
+        if ($largest.Length -ge ($secondLargest.Length * 2)) {
+            Write-Host "`nComposite file detected (skipping encode): $($largest.Name) ($([math]::Round($largest.Length/1GB, 2)) GB)" -ForegroundColor Yellow
+            Write-Log "Skipping composite file: $($largest.Name) ($([math]::Round($largest.Length/1GB, 2)) GB)"
+            $mkvFiles = $mkvFiles | Where-Object { $_.FullName -ne $largest.FullName }
+            Write-Host "Encoding $($mkvFiles.Count) episode file(s)" -ForegroundColor Green
+        }
+    }
+
     # ========== GENERATE RECOVERY SCRIPT ==========
     $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
     $dateStamp = Get-Date -Format "yyyy-MM-dd"
@@ -577,37 +590,40 @@ if ($StartFromStepNumber -le 3) {
     }
 
     if ($Series) {
-        # ========== SERIES MODE ==========
-        Write-Host "`nPrefixing files with title..." -ForegroundColor Yellow
-        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike "$title-*" }
-        if ($filesToPrefix) {
-            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
-            $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
-            $filesToPrefix | ForEach-Object {
-                $file = $_
-                $newName = "$title-" + $file.Name
-                $maxRetries = 5
-                $retryDelay = 3
-                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-                    try {
-                        Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
-                        break
-                    } catch [System.IO.IOException] {
-                        if ($attempt -eq $maxRetries) {
-                            Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
-                            Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
-                            throw
-                        }
-                        Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
-                        Start-Sleep -Seconds $retryDelay
+        # ========== SERIES MODE: Rename to Jellyfin episode format ==========
+        Write-Host "`nRenaming episodes to Jellyfin format..." -ForegroundColor Yellow
+        $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
+
+        # Get video files sorted by name (MakeMKV title order = episode order)
+        $episodeFiles = Get-ChildItem -File | Where-Object {
+            $_.Extension -match '\.(mp4|mkv)$'
+        } | Sort-Object Name
+
+        $episodeNum = 1
+        foreach ($file in $episodeFiles) {
+            $episodeTag = "E{0:D2}" -f $episodeNum
+            $newName = "$title-$seasonTag$episodeTag$($file.Extension)"
+            Write-Host "  $($file.Name) -> $newName" -ForegroundColor Gray
+            $maxRetries = 5
+            $retryDelay = 3
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
+                    break
+                } catch [System.IO.IOException] {
+                    if ($attempt -eq $maxRetries) {
+                        Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                        Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
+                        throw
                     }
+                    Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $retryDelay
                 }
             }
-            Write-Host "Prefixing complete" -ForegroundColor Green
-            Write-Log "Prefixed $($filesToPrefix.Count) file(s) with title"
-        } else {
-            Write-Host "No files need prefixing" -ForegroundColor Gray
+            $episodeNum++
         }
+        Write-Host "Renamed $($episodeFiles.Count) episode(s)" -ForegroundColor Green
+        Write-Log "Renamed $($episodeFiles.Count) episode(s) to Jellyfin format"
     } else {
         # ========== MOVIE MODE ==========
         if ($isMainFeatureDisc) {
