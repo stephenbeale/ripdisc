@@ -831,5 +831,16 @@ if (-not $script:EncodedFilesTooSmall) {
     }
 }
 
+# Play triumphant fanfare to signal completion
+try {
+    [Console]::Beep(523, 150)  # C5
+    [Console]::Beep(659, 150)  # E5
+    [Console]::Beep(784, 150)  # G5
+    [Console]::Beep(1047, 300) # C6 (held)
+    Start-Sleep -Milliseconds 100
+    [Console]::Beep(784, 150)  # G5
+    [Console]::Beep(1047, 450) # C6 (triumphant hold)
+} catch { }
+
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
