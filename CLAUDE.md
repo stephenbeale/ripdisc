@@ -317,3 +317,59 @@ New parameter:
 **Files changed:**
 - `rip-disc.ps1` — Added `-StartEpisode` parameter, used as initial `$episodeNum`
 - `continue-rip.ps1` — Same changes
+
+---
+
+### 2026-02-16 - Documentation Updates & Changelog Creation
+
+**Summary:**
+Major documentation update to accurately reflect the current state of both PowerShell and C# implementations. Created feature parity table and comprehensive changelog.
+
+**Work Completed:**
+
+**PR #33 - Add Session Notes for Episode Rename Features**
+- Added session notes for PR #31 (Series Episode Renaming & Composite File Exclusion)
+- Added session notes for PR #32 (StartEpisode Parameter)
+- Merged: 2026-02-16T11:57:52Z
+
+**PR #34 - Update README and Add CHANGELOG**
+- Updated README Feature List to include all missing features:
+  - Composite mega-file detection
+  - Jellyfin episode renaming
+  - `-StartEpisode` parameter
+  - `-Documentary` mode
+  - `-Extras` parameter
+  - Disc 1 isolation fix
+- Created comprehensive CHANGELOG.md documenting all releases and PRs
+- Merged: 2026-02-16T12:04:00Z
+
+**PR #35 - Update README to Clarify C# Feature Parity**
+- Replaced feature list with Feature Parity Table showing PowerShell vs C# implementation status
+- Clearly indicates which features are missing from C# implementation:
+  - Composite detection (PS only)
+  - Jellyfin episode renaming (PS only)
+  - `-StartEpisode` parameter (PS only)
+  - `-Documentary` mode (PS only)
+  - `-Extras` parameter (PS only)
+  - Disc 1 directory isolation (PS only)
+- Honest assessment that C# needs porting work to achieve parity
+- Merged: 2026-02-16T12:22:22Z
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Port missing features to C# implementation:
+  - Composite mega-file detection (Step 2 encoding)
+  - Jellyfin episode renaming format (`Title-S01E01.mp4`)
+  - `-StartEpisode` parameter for multi-disc offset
+  - `-Documentary` parameter for genre-based organization
+  - `-Extras` parameter for special features mode
+  - Disc 1 directory isolation (`Disc1/` subdirectory)
+- The README Feature Parity table tracks exactly what's missing
+
+**Technical Notes:**
+- PowerShell implementation is feature-complete and production-ready
+- C# implementation has core functionality but lacks recent enhancements
+- Feature parity table provides clear roadmap for C# porting work
+- CHANGELOG.md follows Keep a Changelog format
