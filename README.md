@@ -15,15 +15,22 @@ Both versions provide identical functionality and can be used interchangeably ba
 
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
-- **Movie and TV Series support** with different organization strategies
+- **Movie, TV Series, and Documentary support** with different organization strategies
+- **Jellyfin episode naming** for series (`Title-S01E01.mp4`)
+- **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
+- **HandBrake queue mode** for sequential encoding after concurrent rips
+- **Blu-ray subtitle fallback** (tries subtitles first, retries without on PGS failure)
 - **Feature file identification** (automatically identifies main feature)
 - **Extras folder management** for special features
+- **Resume failed rips** from any step with `continue-rip.ps1`
+- **HandBrake recovery scripts** generated before encoding
 - **Comprehensive error handling** with recovery guidance
 - **Session logging** for debugging and recovery
 - **Drive readiness checks** before operations
 - **Interactive prompts** for confirmation and conflict resolution
 - **Window title management** for tracking concurrent operations
+- **Console close button protection** prevents accidental window closure
 - **Automatic disc ejection** after successful rip
 
 ## Quick Start
@@ -61,6 +68,11 @@ Both versions use the same command-line parameters:
 -drive <string>         Drive letter (default: D:)
 -driveIndex <int>       Drive index for MakeMKV (default: -1)
 -outputDrive <string>   Output drive letter (default: E:)
+-extras                 Flag for extras-only disc
+-queue                  Queue encoding instead of running immediately
+-bluray                 Blu-ray mode (subtitle fallback for PGS)
+-documentary            Documentary mode (outputs to Documentaries folder)
+-startEpisode <int>     Starting episode number for series (default: 1)
 ```
 
 ### Examples
@@ -78,6 +90,28 @@ Both versions use the same command-line parameters:
 **Rip a TV series:**
 ```powershell
 .\rip-disc.ps1 -title "Breaking Bad" -series -season 1 -disc 1
+```
+
+**Rip a TV series disc 2 (continuing episode numbers):**
+```powershell
+.\rip-disc.ps1 -title "Breaking Bad" -series -season 1 -disc 2 -startEpisode 5
+```
+
+**Rip a documentary:**
+```powershell
+.\rip-disc.ps1 -title "Planet Earth" -documentary
+```
+
+**Rip a Blu-ray:**
+```powershell
+.\rip-disc.ps1 -title "Inception" -bluray
+```
+
+**Queue mode for concurrent rips:**
+```powershell
+.\rip-disc.ps1 -title "The Matrix" -queue                        # Terminal 1
+.\rip-disc.ps1 -title "The Matrix" -disc 2 -queue -driveIndex 1  # Terminal 2
+RipDisc -processQueue                                             # After all rips
 ```
 
 **Use specific drive index:**
@@ -102,16 +136,27 @@ E:\DVDs\MovieName\
 ```
 E:\Series\SeriesName\
 └── Season 1\
-    ├── SeriesName-episode1.mp4
-    └── SeriesName-episode2.mp4
+    ├── SeriesName-S01E01.mp4
+    ├── SeriesName-S01E02.mp4
+    └── SeriesName-S01E03.mp4
 ```
 
 ### TV Series (no season)
 
 ```
 E:\Series\SeriesName\
-├── SeriesName-episode1.mp4
-└── SeriesName-episode2.mp4
+├── SeriesName-E01.mp4
+├── SeriesName-E02.mp4
+└── SeriesName-E03.mp4
+```
+
+### Documentaries
+
+```
+E:\Documentaries\DocName\
+├── DocName-Feature.mp4
+└── extras\
+    └── DocName-bonus.mp4
 ```
 
 ## Processing Steps
