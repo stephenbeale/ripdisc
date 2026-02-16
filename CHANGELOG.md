@@ -12,6 +12,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `-StartEpisode` parameter for multi-disc season episode numbering offset (#32)
 - Jellyfin episode naming format for series (`Title-S01E01.mp4`) (#31)
 - Composite mega-file detection — skips all-in-one files during series encoding (#31)
+- Disc eject retry — retries once after 2-second delay before giving up (#36)
+- Windows dialog popup on eject timeout showing title and drive letter (#37)
+- Triumphant completion fanfare in `rip-disc.ps1` for normal and queue modes (#37)
+- Completion fanfare in `continue-rip.ps1` for parity (#38)
 
 ## 2026-02-09
 
