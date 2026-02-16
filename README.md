@@ -9,7 +9,7 @@ This repository contains two implementations of the same disc ripping workflow:
 1. **PowerShell Script** (`rip-disc.ps1`) - Original implementation
 2. **C# Console Application** (`RipDisc/`) - Modern cross-language port
 
-Both versions provide identical functionality and can be used interchangeably based on your preference.
+The PowerShell version is the primary implementation and has the most features. The C# version covers core ripping functionality but is behind on some newer features (see [Feature Parity](#feature-parity) below).
 
 ## Features
 
@@ -198,19 +198,40 @@ If an error occurs:
 - Relevant directory is opened for inspection
 - Log file location is provided
 
+## Feature Parity
+
+The PowerShell scripts are the primary implementation. The C# version covers core functionality but is missing some newer features:
+
+| Feature | PowerShell | C# |
+|---------|:---:|:---:|
+| Core rip/encode/organize workflow | Yes | Yes |
+| Movie mode (Feature file + extras) | Yes | Yes |
+| Multi-disc concurrent ripping | Yes | Yes |
+| `-Bluray` subtitle fallback | Yes | Yes |
+| `-Queue` / `-ProcessQueue` | Yes | Yes |
+| Window title management | Yes | Yes |
+| Session logging | Yes | Yes |
+| `-Documentary` flag | Yes | No |
+| `-Extras` flag | Yes | No |
+| `-StartEpisode` parameter | Yes | No |
+| Jellyfin episode naming (`S01E01`) | Yes | No |
+| Composite mega-file detection | Yes | No |
+| Disc 1 temp dir isolation (`Disc1/`) | Yes | No |
+| `continue-rip.ps1` resume script | Yes | N/A |
+| HandBrake recovery scripts | Yes | No |
+
 ## Choosing Between Versions
 
 ### Use PowerShell Version If:
-- You prefer PowerShell scripting
+- You rip TV series (Jellyfin naming, composite detection, `-StartEpisode`)
+- You rip documentaries (`-Documentary` flag)
+- You want the latest features
 - You want to easily modify the script
-- You're already familiar with PowerShell
-- You don't want to compile anything
 
 ### Use C# Version If:
-- You prefer statically-typed languages
+- You only rip movies
 - You want a standalone executable
-- You want potentially better performance
-- You're more comfortable with C#
+- You prefer statically-typed languages
 
 ## Building the C# Version
 
@@ -295,7 +316,7 @@ ripdisc/
 
 ## Contributing
 
-Both versions should remain functionally identical. If you add features to one version, please add them to the other as well.
+New features are added to the PowerShell scripts first. The C# version should be updated to match when possible.
 
 ## License
 
