@@ -403,12 +403,16 @@ Two additions:
 - Fires on both normal completion (after Step 4) and queue-mode completion (after "QUEUED!")
 - Audible from another room as a distinctive completion signal
 
+**PR #38 - Add Completion Fanfare to continue-rip.ps1**
+- Same C major arpeggio melody added to `continue-rip.ps1` for parity with `rip-disc.ps1`
+- Merged: 2026-02-16
+
 **Files changed:**
 - `rip-disc.ps1` — Eject retry loop, MessageBox popup, fanfare in both completion paths
+- `continue-rip.ps1` — Completion fanfare
 
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
-- Consider adding fanfare/popup to `continue-rip.ps1` for parity
