@@ -665,6 +665,14 @@ if ($ejectSuccess) {
 } else {
     Write-Host "Disc eject timed out after 2 attempts - please eject manually" -ForegroundColor Yellow
     Write-Log "WARNING: Disc eject timed out for drive $driveLetter after 2 attempts"
+    # Show Windows dialog box so user is notified even when not watching the terminal
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+        "Disc eject timed out for '$title' on drive $driveLetter.`n`nIt is safe to eject the disc manually.",
+        "RipDisc - Eject Timeout",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
 }
 
 
@@ -733,6 +741,17 @@ if ($Queue) {
 
     Write-Log "QUEUE MODE: Job added to queue ($($queue.Count) total jobs)"
     Write-Log "Queue file: $queueFilePath"
+
+    # Play triumphant fanfare to signal completion
+    try {
+        [Console]::Beep(523, 150)  # C5
+        [Console]::Beep(659, 150)  # E5
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 300) # C6 (held)
+        Start-Sleep -Milliseconds 100
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 450) # C6 (triumphant hold)
+    } catch { }
 
     Enable-ConsoleClose
     $host.UI.RawUI.WindowTitle = "$windowTitle - QUEUED"
@@ -1203,6 +1222,17 @@ if ($script:EncodedFilesTooSmall) {
         Write-Log "  $($f.Name) ($([math]::Round($f.Length/1GB, 2)) GB)"
     }
 }
+
+# Play triumphant fanfare to signal completion
+try {
+    [Console]::Beep(523, 150)  # C5
+    [Console]::Beep(659, 150)  # E5
+    [Console]::Beep(784, 150)  # G5
+    [Console]::Beep(1047, 300) # C6 (held)
+    Start-Sleep -Milliseconds 100
+    [Console]::Beep(784, 150)  # G5
+    [Console]::Beep(1047, 450) # C6 (triumphant hold)
+} catch { }
 
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
