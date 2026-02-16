@@ -275,6 +275,8 @@ $host.UI.RawUI.WindowTitle = $windowTitle
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
     $makemkvOutputDir = "C:\Video\$title\Extras"
+} elseif ($Series -and $Season -gt 0) {
+    $makemkvOutputDir = "C:\Video\$title\Season$Season\Disc$Disc"
 } else {
     $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
 }
