@@ -30,7 +30,10 @@ param(
     [switch]$Bluray,
 
     [Parameter()]
-    [switch]$Documentary
+    [switch]$Documentary,
+
+    [Parameter()]
+    [int]$StartEpisode = 1
 )
 
 # ========== STEP TRACKING ==========
@@ -951,7 +954,7 @@ if ($Series) {
         $_.Extension -match '\.(mp4|mkv)$'
     } | Sort-Object Name
 
-    $episodeNum = 1
+    $episodeNum = $StartEpisode
     foreach ($file in $episodeFiles) {
         $episodeTag = "E{0:D2}" -f $episodeNum
         $newName = "$title-$seasonTag$episodeTag$($file.Extension)"
