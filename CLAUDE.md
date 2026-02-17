@@ -416,3 +416,6 @@ Two additions:
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
+- **Extras disc improvements (2 parts):**
+  - Part 1: Extras disc output should go into the parent title directory as a subdirectory — e.g. `Platoon-extras` files should end up in `E:\Films\Platoon\extras\` instead of `E:\Films\Platoon-extras\`
+  - Part 2: During HandBrake step, handle file renaming with lock retries. Don't use `-extras` in the renamed filenames. If a filename conflict exists (duplicate name), suffix with `-1`, `-2`, etc.

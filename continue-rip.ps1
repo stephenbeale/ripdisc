@@ -563,6 +563,20 @@ if ($StartFromStepNumber -le 2) {
             Remove-Item -Path $makemkvOutputDir -Recurse -Force
             Write-Host "Temporary files removed successfully" -ForegroundColor Green
             Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
+
+            # Clean up empty parent directories left behind (e.g. C:\Video\Title\, C:\Video\Title\Season1\)
+            $parentDir = Split-Path $makemkvOutputDir -Parent
+            while ($parentDir -and $parentDir -ne "C:\Video" -and (Test-Path $parentDir)) {
+                $remaining = Get-ChildItem -Path $parentDir -Force -ErrorAction SilentlyContinue
+                if ($remaining.Count -eq 0) {
+                    Remove-Item -Path $parentDir -Force
+                    Write-Host "Removed empty directory: $parentDir" -ForegroundColor Yellow
+                    Write-Log "Removed empty parent directory: $parentDir"
+                    $parentDir = Split-Path $parentDir -Parent
+                } else {
+                    break
+                }
+            }
         }
     } else {
         Write-Host "WARNING: No encoded files found. Keeping MakeMKV directory." -ForegroundColor Red
