@@ -39,6 +39,9 @@
     [switch]$Fitness,
 
     [Parameter()]
+    [switch]$Surf,
+
+    [Parameter()]
     [int]$StartEpisode = 1
 )
 
@@ -71,7 +74,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Series) { "TV Series" } else { "Movie" }
+    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -244,8 +247,8 @@ if ($titleWarnings.Count -gt 0) {
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
-if ($Documentary -or $Tutorial -or $Fitness) {
-    $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } else { "Fitness" }
+if ($Documentary -or $Tutorial -or $Fitness -or $Surf) {
+    $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } else { "Surf" }
     $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
     Write-Host "Type: $genreLabel - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 } elseif ($Series) {
@@ -303,6 +306,8 @@ if ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
 } elseif ($Fitness) {
     $finalOutputDir = "$outputDriveLetter\Fitness\$title"
+} elseif ($Surf) {
+    $finalOutputDir = "$outputDriveLetter\Surf\$title"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
@@ -338,7 +343,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_${logTimestamp}.lo
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -450,8 +455,8 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Series) { "TV Series" } else { "Movie" }
-# Genre types (Documentary/Tutorial/Fitness) are treated like movies for file organization (Feature file, extras subfolder)
+$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
+# Genre types (Documentary/Tutorial/Fitness/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
