@@ -446,6 +446,12 @@ Two additions:
 - `rip-disc.ps1` — All changes above
 - `continue-rip.ps1` — All changes above
 
+**Fix: UTF-8 BOM for PowerShell 5.1 Compatibility**
+- Scripts saved without BOM caused PowerShell 5.1 to default to Windows-1252 encoding
+- Complex nested string expressions like `$([math]::Round($f.Length/1GB, 2))` failed to parse
+- Adding UTF-8 BOM (3-byte `EF BB BF` prefix) fixes PS 5.1 while remaining PS 7+ compatible
+- **Important:** Always ensure scripts are saved with UTF-8 BOM for PS 5.1 compatibility
+
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 

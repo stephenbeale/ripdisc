@@ -16,6 +16,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Series concurrent disc rename conflicts — use per-disc subdirs for encoding isolation (#41)
+- Add UTF-8 BOM to scripts for PowerShell 5.1 compatibility — fixes parse errors on nested string expressions
 
 ## 2026-02-16
 
