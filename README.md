@@ -15,7 +15,7 @@ The PowerShell version is the primary implementation and has the most features. 
 
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
-- **Movie, TV Series, and Documentary support** with different organization strategies
+- **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Surf) with different organization strategies
 - **Jellyfin episode naming** for series (`Title-S01E01.mp4`)
 - **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
@@ -72,6 +72,9 @@ Both versions use the same command-line parameters:
 -queue                  Queue encoding instead of running immediately
 -bluray                 Blu-ray mode (subtitle fallback for PGS)
 -documentary            Documentary mode (outputs to Documentaries folder)
+-tutorial               Tutorial mode (outputs to Tutorials folder)
+-fitness                Fitness mode (outputs to Fitness folder)
+-surf                   Surf mode (outputs to Surf folder)
 -startEpisode <int>     Starting episode number for series (default: 1)
 ```
 
@@ -212,11 +215,16 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Window title management | Yes | Yes |
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
-| `-Extras` flag | Yes | No |
+| `-Tutorial` / `-Fitness` / `-Surf` flags | Yes | No |
+| `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
 | Jellyfin episode naming (`S01E01`) | Yes | No |
 | Composite mega-file detection | Yes | No |
 | Disc 1 temp dir isolation (`Disc1/`) | Yes | No |
+| Series per-disc encoding isolation | Yes | No |
+| Empty parent directory cleanup | Yes | No |
+| Eject retry with timeout popup | Yes | No |
+| Completion fanfare | Yes | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 
@@ -224,7 +232,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 
 ### Use PowerShell Version If:
 - You rip TV series (Jellyfin naming, composite detection, `-StartEpisode`)
-- You rip documentaries (`-Documentary` flag)
+- You rip documentaries, tutorials, fitness, or surf videos
 - You want the latest features
 - You want to easily modify the script
 
