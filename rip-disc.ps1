@@ -1106,6 +1106,38 @@ if ($Series) {
         } else {
             Write-Host "No files need prefixing" -ForegroundColor Gray
         }
+    } elseif ($Extras) {
+        # Extras disc: prefix with title only (no "-extras" or "-Special Features" in name)
+        Write-Host "`nPrefixing extras files with title..." -ForegroundColor Yellow
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$title-*") }
+        if ($filesToPrefix) {
+            Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
+            $filesToPrefix | ForEach-Object {
+                $file = $_
+                $newName = "$title-" + $file.Name
+                Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
+                $maxRetries = 5
+                $retryDelay = 3
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
+                        break
+                    } catch [System.IO.IOException] {
+                        if ($attempt -eq $maxRetries) {
+                            Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                            Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
+                            throw
+                        }
+                        Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds $retryDelay
+                    }
+                }
+            }
+            Write-Host "Extras prefixing complete" -ForegroundColor Green
+            Write-Log "Prefixed $($filesToPrefix.Count) extras file(s) with title"
+        } else {
+            Write-Host "No files need prefixing" -ForegroundColor Gray
+        }
     } else {
         # Disc 2+: prefix with "MovieName-Special Features-originalfilename"
         Write-Host "`nPrefixing special features files..." -ForegroundColor Yellow
