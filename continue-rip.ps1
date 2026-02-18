@@ -28,6 +28,12 @@ param(
     [switch]$Documentary,
 
     [Parameter()]
+    [switch]$Tutorial,
+
+    [Parameter()]
+    [switch]$Fitness,
+
+    [Parameter()]
     [int]$StartEpisode = 1
 )
 
@@ -72,7 +78,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Series) { "TV Series" } else { "Movie" }
+    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Series) { "TV Series" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -204,6 +210,10 @@ $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${Ou
 # Build final output directory path
 if ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
+} elseif ($Tutorial) {
+    $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
+} elseif ($Fitness) {
+    $finalOutputDir = "$outputDriveLetter\Fitness\$title"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$title"
     if ($Season -gt 0) {
@@ -230,7 +240,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_continue_${logTime
 Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Continue from: Step $StartFromStepNumber ($FromStep)"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -294,7 +304,7 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Series) { "TV Series" } else { "Movie" }
+$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Series) { "TV Series" } else { "Movie" }
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
