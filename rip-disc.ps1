@@ -321,6 +321,11 @@ if ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\DVDs\$title"
 }
 
+# Extras: encode directly into extras subdirectory of the title folder
+if ($Extras -and -not $Series) {
+    $finalOutputDir = Join-Path $finalOutputDir "extras"
+}
+
 $makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
 $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
@@ -1232,6 +1237,10 @@ if ($Series) {
         } else {
             Write-Host "No non-feature videos found" -ForegroundColor Gray
         }
+    } elseif ($Extras) {
+        # Extras disc: files already encoded directly into extras directory — no move needed
+        Write-Host "`nExtras files already in: $finalOutputDir" -ForegroundColor Green
+        Write-Log "Extras files encoded directly to extras directory — no move needed"
     } else {
         # Disc 2+: move videos to extras folder (exclude Feature file from disc 1)
         Write-Host "`nMoving special features to extras folder..." -ForegroundColor Yellow
