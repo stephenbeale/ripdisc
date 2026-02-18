@@ -219,11 +219,13 @@ if ($Documentary) {
     if ($Season -gt 0) {
         $seasonTag = "S{0:D2}" -f $Season
         $seasonFolder = "Season $Season"
-        $finalOutputDir = Join-Path $seriesBaseDir $seasonFolder
+        $seriesSeasonDir = Join-Path $seriesBaseDir $seasonFolder
     } else {
         $seasonTag = $null
-        $finalOutputDir = $seriesBaseDir
+        $seriesSeasonDir = $seriesBaseDir
     }
+    # Use per-disc subdirectory to isolate concurrent disc rips (prevents rename conflicts)
+    $finalOutputDir = Join-Path $seriesSeasonDir "Disc$Disc"
 } else {
     $finalOutputDir = "$outputDriveLetter\DVDs\$title"
 }
@@ -651,6 +653,39 @@ if ($StartFromStepNumber -le 3) {
         }
         Write-Host "Renamed $($episodeFiles.Count) episode(s)" -ForegroundColor Green
         Write-Log "Renamed $($episodeFiles.Count) episode(s) to Jellyfin format"
+
+        # Move renamed files up from Disc subdirectory to season folder
+        Write-Host "`nMoving files to season directory: $seriesSeasonDir" -ForegroundColor Yellow
+        $renamedFiles = Get-ChildItem -Path $finalOutputDir -File
+        foreach ($file in $renamedFiles) {
+            $destPath = Join-Path $seriesSeasonDir $file.Name
+            $maxRetries = 5
+            $retryDelay = 3
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    Move-Item -LiteralPath $file.FullName -Destination $destPath -Force -ErrorAction Stop
+                    break
+                } catch [System.IO.IOException] {
+                    if ($attempt -eq $maxRetries) {
+                        Write-Host "  FAILED to move $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                        Write-Log "ERROR: Failed to move $($file.Name) after $maxRetries attempts: $_"
+                        throw
+                    }
+                    Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $retryDelay
+                }
+            }
+        }
+        # Remove empty Disc subdirectory
+        if ((Get-ChildItem -Path $finalOutputDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+            Remove-Item -Path $finalOutputDir -Force
+            Write-Host "Removed empty disc directory: $finalOutputDir" -ForegroundColor Yellow
+            Write-Log "Removed empty disc directory: $finalOutputDir"
+        }
+        # Update finalOutputDir to season folder for Step 4
+        $finalOutputDir = $seriesSeasonDir
+        Write-Host "Files moved to: $finalOutputDir" -ForegroundColor Green
+        Write-Log "Moved files to season directory: $finalOutputDir"
     } else {
         # ========== MOVIE MODE ==========
         if ($isMainFeatureDisc) {
