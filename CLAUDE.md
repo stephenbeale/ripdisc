@@ -446,6 +446,10 @@ Two additions:
 - `rip-disc.ps1` — All changes above
 - `continue-rip.ps1` — All changes above
 
+**PR #44 - Add -Surf Disc Type Switch**
+- `-Surf` outputs to `E:\Surf\<title>\`
+- Same pattern as Documentary/Tutorial/Fitness
+
 **Fix: UTF-8 BOM for PowerShell 5.1 Compatibility**
 - Scripts saved without BOM caused PowerShell 5.1 to default to Windows-1252 encoding
 - Complex nested string expressions like `$([math]::Round($f.Length/1GB, 2))` failed to parse

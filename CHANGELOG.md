@@ -9,7 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-02-18
 
 ### Added
-- `-Tutorial` and `-Fitness` disc type switches — output to `E:\Tutorials\` and `E:\Fitness\` (#40)
+- `-Tutorial`, `-Fitness`, and `-Surf` disc type switches — output to `E:\Tutorials\`, `E:\Fitness\`, `E:\Surf\` (#40, #44)
 - Extras disc: encode directly into `extras\` subdirectory instead of encoding then moving (#43)
 - Extras disc: files prefixed with title only, no `-extras` or `-Special Features` in name (#42)
 - Empty parent directory cleanup after temp directory removal (#39)
