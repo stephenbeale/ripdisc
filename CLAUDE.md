@@ -419,3 +419,6 @@ Two additions:
 - **Extras disc improvements (2 parts):**
   - Part 1: Extras disc output should go into the parent title directory as a subdirectory — e.g. `Platoon-extras` files should end up in `E:\Films\Platoon\extras\` instead of `E:\Films\Platoon-extras\`
   - Part 2: During HandBrake step, handle file renaming with lock retries. Don't use `-extras` in the renamed filenames. If a filename conflict exists (duplicate name), suffix with `-1`, `-2`, etc.
+- **Series concurrent disc rename bug:**
+  - When ripping Season 1 Disc 1 and Disc 2 concurrently, both encode to the same `E:\Series\Title\Season 1\` directory. Step 3 (organize/rename) from both processes then races on the same files, causing file lock conflicts.
+  - Proposed fix: Use per-disc subdirectories during encoding (e.g. `Season 1\Disc1\`, `Season 1\Disc2\`) to isolate concurrent renames, similar to the MakeMKV temp dir fix in PR #24.
