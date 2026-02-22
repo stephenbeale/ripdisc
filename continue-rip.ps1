@@ -438,8 +438,10 @@ if ($StartFromStepNumber -le 2) {
     if ($Series -and $mkvFiles.Count -ge 3) {
         $sortedBySize = $mkvFiles | Sort-Object Length -Descending
         $largest = $sortedBySize[0]
-        $secondLargest = $sortedBySize[1]
-        if ($largest.Length -ge ($secondLargest.Length * 2)) {
+        $others = $sortedBySize | Select-Object -Skip 1
+        $sumOfOthers = ($others | Measure-Object -Property Length -Sum).Sum
+        # Composite is all episodes concatenated, so its size should be close to the sum of episode files (within 70-130%)
+        if ($largest.Length -ge ($sumOfOthers * 0.7) -and $largest.Length -le ($sumOfOthers * 1.3)) {
             Write-Host "`nComposite file detected (skipping encode): $($largest.Name) ($([math]::Round($largest.Length/1GB, 2)) GB)" -ForegroundColor Yellow
             Write-Log "Skipping composite file: $($largest.Name) ($([math]::Round($largest.Length/1GB, 2)) GB)"
             $mkvFiles = $mkvFiles | Where-Object { $_.FullName -ne $largest.FullName }
