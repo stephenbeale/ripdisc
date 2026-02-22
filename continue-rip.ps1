@@ -691,7 +691,8 @@ if ($StartFromStepNumber -le 3) {
                 }
             }
         }
-        # Remove empty Disc subdirectory
+        # Remove empty Disc subdirectory (cd out first — current dir is inside it)
+        cd $seriesSeasonDir
         if ((Get-ChildItem -Path $finalOutputDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
             Remove-Item -Path $finalOutputDir -Force
             Write-Host "Removed empty disc directory: $finalOutputDir" -ForegroundColor Yellow
