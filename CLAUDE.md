@@ -518,8 +518,16 @@ Two changes:
 - Since a composite is all episodes concatenated, its size should closely match the total
 - Applied to both scripts
 
+**PR #55 - Session Notes & Changelog for PRs #52-#54**
+- Added PRs #52-#54 to CLAUDE.md session notes and CHANGELOG.md
+
+**Cleanup:**
+- Deleted 6 stale merged remote branches (feature/1-*, feature/2-*, etc.)
+- Deleted stale local branch `fix/1-composite-megafile-detection`
+- Deleted `feature/stroop-test-web-app` branch (PR #13 already closed, unrelated to ripdisc)
+
 **Work In Progress:**
-- None — all PRs merged, working tree clean
+- None — all PRs merged, working tree clean, no stale branches
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
