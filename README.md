@@ -163,6 +163,24 @@ E:\Documentaries\DocName\
     └── DocName-bonus.mp4
 ```
 
+### Tutorials
+
+```
+E:\Tutorials\TutorialName\
+├── TutorialName-Feature.mp4
+└── extras\
+    └── TutorialName-bonus.mp4
+```
+
+### Fitness
+
+```
+E:\Fitness\WorkoutName\
+├── WorkoutName-Feature.mp4
+└── extras\
+    └── WorkoutName-bonus.mp4
+```
+
 ### Music
 
 ```
@@ -170,6 +188,15 @@ E:\Music\ArtistName\
 ├── ArtistName-Feature.mp4
 └── extras\
     └── ArtistName-behind-the-scenes.mp4
+```
+
+### Surf
+
+```
+E:\Surf\SurfTitle\
+├── SurfTitle-Feature.mp4
+└── extras\
+    └── SurfTitle-bonus.mp4
 ```
 
 ## Processing Steps
