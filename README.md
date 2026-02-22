@@ -106,6 +106,11 @@ Both versions use the same command-line parameters:
 .\rip-disc.ps1 -title "Planet Earth" -documentary
 ```
 
+**Rip a music disc:**
+```powershell
+.\rip-disc.ps1 -title "Metallica Live" -music
+```
+
 **Rip a Blu-ray:**
 ```powershell
 .\rip-disc.ps1 -title "Inception" -bluray
