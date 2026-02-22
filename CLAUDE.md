@@ -504,6 +504,20 @@ Two changes:
 **PR #51 - Add Music Usage Example**
 - Added "Rip a music disc" usage example to README Examples section
 
+**PR #52 - Session Notes for PRs #46-#51**
+- Added PRs #46-#51 to 2026-02-22 session notes in CLAUDE.md
+
+**PR #53 - Fix Series Disc Subdirectory Removal**
+- `Remove-Item` on empty Disc subdirectory failed with "in use" because PowerShell's working directory was still inside it
+- Added `cd $seriesSeasonDir` before `Remove-Item` so the working directory moves to the parent season folder first
+- Applied to both scripts
+
+**PR #54 - Fix Composite Mega-File Detection**
+- Old heuristic (`largest >= 2x second-largest`) failed when one episode was much longer than others
+- New heuristic checks if the largest file is within 70-130% of the sum of all other files
+- Since a composite is all episodes concatenated, its size should closely match the total
+- Applied to both scripts
+
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 
