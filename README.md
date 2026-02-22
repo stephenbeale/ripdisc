@@ -15,7 +15,7 @@ The PowerShell version is the primary implementation and has the most features. 
 
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
-- **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Surf) with different organization strategies
+- **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Music, Surf) with different organization strategies
 - **Jellyfin episode naming** for series (`Title-S01E01.mp4`)
 - **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
@@ -74,6 +74,7 @@ Both versions use the same command-line parameters:
 -documentary            Documentary mode (outputs to Documentaries folder)
 -tutorial               Tutorial mode (outputs to Tutorials folder)
 -fitness                Fitness mode (outputs to Fitness folder)
+-music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
 -startEpisode <int>     Starting episode number for series (default: 1)
 ```
@@ -215,7 +216,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Window title management | Yes | Yes |
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
-| `-Tutorial` / `-Fitness` / `-Surf` flags | Yes | No |
+| `-Tutorial` / `-Fitness` / `-Music` / `-Surf` flags | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
 | Jellyfin episode naming (`S01E01`) | Yes | No |
@@ -232,7 +233,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 
 ### Use PowerShell Version If:
 - You rip TV series (Jellyfin naming, composite detection, `-StartEpisode`)
-- You rip documentaries, tutorials, fitness, or surf videos
+- You rip documentaries, tutorials, fitness, music, or surf videos
 - You want the latest features
 - You want to easily modify the script
 
