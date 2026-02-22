@@ -461,3 +461,33 @@ Two additions:
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-02-22 - Music Switch & Disc 1 Extras Collision Fix
+
+**PR #45 - Add -Music Switch and Fix Disc 1 Extras Move Collision**
+
+Two changes:
+
+**1. `-Music` disc type switch:**
+- `-Music` outputs to `<OutputDrive>:\Music\<title>\`
+- Same pattern as Documentary/Tutorial/Fitness/Surf (genre-based folder routing)
+- Works with `-Extras` for `Music\<title>\extras\`
+- Applied to both scripts including parameter declarations, output directory routing, content type labels, genre labels, and logging
+
+**2. Disc 1 non-feature move collision fix:**
+- When running Disc 1 and Extras disc concurrently, both MakeMKV runs produce identically-named files (`title_t00`, `title_t01`, etc.)
+- Disc 1's Step 3 moves non-feature files to `extras/`, but the Extras disc may have already placed identically-named files there
+- Previously used bare `Move-Item -Destination extras -ErrorAction SilentlyContinue` which silently failed on name collisions, leaving files stranded in the main directory
+- Now uses `Get-UniqueFilePath` with `-1` suffix handling and verbose output, matching what the Disc 2+ path already did
+
+**Files changed:**
+- `rip-disc.ps1` — Music switch + collision fix
+- `continue-rip.ps1` — Music switch + collision fix
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Port missing features to C# implementation (see Feature Parity table in README)
