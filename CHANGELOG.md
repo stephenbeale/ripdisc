@@ -13,6 +13,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Disc 1 non-feature move to extras now uses `Get-UniqueFilePath` to avoid silent filename collisions during concurrent Disc 1 + Extras rips (#45)
+- Series mode: `Remove-Item` on empty Disc subdirectory no longer fails when PowerShell's working directory is inside it (#53)
+- Composite mega-file detection now uses sum-based heuristic (70-130% of sum of other files) instead of 2x second-largest, which failed when one episode was much longer than others (#54)
 
 ## 2026-02-18
 
