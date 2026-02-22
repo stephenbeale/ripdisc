@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-02-22
+
+### Added
+- `-Music` disc type switch — outputs to `<OutputDrive>:\Music\<title>\` (#45)
+
+### Fixed
+- Disc 1 non-feature move to extras now uses `Get-UniqueFilePath` to avoid silent filename collisions during concurrent Disc 1 + Extras rips (#45)
+
 ## 2026-02-18
 
 ### Added
