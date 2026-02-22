@@ -39,6 +39,9 @@
     [switch]$Fitness,
 
     [Parameter()]
+    [switch]$Music,
+
+    [Parameter()]
     [switch]$Surf,
 
     [Parameter()]
@@ -74,7 +77,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
+    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -247,8 +250,8 @@ if ($titleWarnings.Count -gt 0) {
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
-if ($Documentary -or $Tutorial -or $Fitness -or $Surf) {
-    $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } else { "Surf" }
+if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
+    $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } else { "Surf" }
     $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
     Write-Host "Type: $genreLabel - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 } elseif ($Series) {
@@ -297,7 +300,7 @@ if ($Extras) {
 # Normalize output drive letter (add colon if missing)
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
 
-# Genre types: organize into named folders (Documentaries, Tutorials, Fitness)
+# Genre types: organize into named folders (Documentaries, Tutorials, Fitness, Music)
 # Series: organize into Season subfolders (only if Season explicitly specified)
 # Movies: organize into title folder with optional extras
 if ($Documentary) {
@@ -306,6 +309,8 @@ if ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
 } elseif ($Fitness) {
     $finalOutputDir = "$outputDriveLetter\Fitness\$title"
+} elseif ($Music) {
+    $finalOutputDir = "$outputDriveLetter\Music\$title"
 } elseif ($Surf) {
     $finalOutputDir = "$outputDriveLetter\Surf\$title"
 } elseif ($Series) {
@@ -343,7 +348,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_${logTimestamp}.lo
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -455,8 +460,8 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
-# Genre types (Documentary/Tutorial/Fitness/Surf) are treated like movies for file organization (Feature file, extras subfolder)
+$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
+# Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
@@ -1236,7 +1241,16 @@ if ($Series) {
             }
 
             Write-Host "Moving files to extras..." -ForegroundColor Yellow
-            $nonFeatureVideos | Move-Item -Destination extras -ErrorAction SilentlyContinue
+            foreach ($video in $nonFeatureVideos) {
+                $uniquePath = Get-UniqueFilePath -DestDir $extrasDir -FileName $video.Name
+                $newName = [System.IO.Path]::GetFileName($uniquePath)
+                if ($newName -ne $video.Name) {
+                    Write-Host "  - $($video.Name) -> $newName (renamed to avoid clash)" -ForegroundColor Yellow
+                } else {
+                    Write-Host "  - $($video.Name)" -ForegroundColor Gray
+                }
+                Move-Item -Path $video.FullName -Destination $uniquePath
+            }
             Write-Host "Files moved to extras" -ForegroundColor Green
             Write-Log "Moved $($nonFeatureVideos.Count) non-feature file(s) to extras"
         } else {
