@@ -486,6 +486,24 @@ Two changes:
 - `rip-disc.ps1` — Music switch + collision fix
 - `continue-rip.ps1` — Music switch + collision fix
 
+**PR #46 - Session Notes for PR #45**
+- Added 2026-02-22 session notes to CLAUDE.md
+
+**PR #47 - Update CHANGELOG**
+- Added 2026-02-22 section to CHANGELOG.md documenting Music switch and collision fix
+
+**PR #48 - Update README Feature Parity & Usage**
+- Added `-Music` to features list, usage parameters, feature parity table, and "Choosing Between Versions" section
+
+**PR #49 - Add Music Directory Structure Example**
+- Added Music directory structure example to README
+
+**PR #50 - Add Missing Genre Directory Structure Examples**
+- Added Tutorials, Fitness, and Surf directory structure examples to README
+
+**PR #51 - Add Music Usage Example**
+- Added "Rip a music disc" usage example to README Examples section
+
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 
