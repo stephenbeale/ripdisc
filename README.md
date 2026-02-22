@@ -163,6 +163,15 @@ E:\Documentaries\DocName\
     └── DocName-bonus.mp4
 ```
 
+### Music
+
+```
+E:\Music\ArtistName\
+├── ArtistName-Feature.mp4
+└── extras\
+    └── ArtistName-behind-the-scenes.mp4
+```
+
 ## Processing Steps
 
 Both versions execute the same 4-step workflow:
