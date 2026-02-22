@@ -34,6 +34,9 @@
     [switch]$Fitness,
 
     [Parameter()]
+    [switch]$Music,
+
+    [Parameter()]
     [switch]$Surf,
 
     [Parameter()]
@@ -81,7 +84,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
+    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -217,6 +220,8 @@ if ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
 } elseif ($Fitness) {
     $finalOutputDir = "$outputDriveLetter\Fitness\$title"
+} elseif ($Music) {
+    $finalOutputDir = "$outputDriveLetter\Music\$title"
 } elseif ($Surf) {
     $finalOutputDir = "$outputDriveLetter\Surf\$title"
 } elseif ($Series) {
@@ -252,7 +257,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_continue_${logTime
 Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Continue from: Step $StartFromStepNumber ($FromStep)"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
+Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -316,7 +321,7 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
+$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } else { "Movie" }
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
@@ -848,7 +853,16 @@ if ($StartFromStepNumber -le 3) {
                 }
 
                 Write-Host "Moving files to extras..." -ForegroundColor Yellow
-                $nonFeatureVideos | Move-Item -Destination extras -ErrorAction SilentlyContinue
+                foreach ($video in $nonFeatureVideos) {
+                    $uniquePath = Get-UniqueFilePath -DestDir $extrasDir -FileName $video.Name
+                    $newName = [System.IO.Path]::GetFileName($uniquePath)
+                    if ($newName -ne $video.Name) {
+                        Write-Host "  - $($video.Name) -> $newName (renamed to avoid clash)" -ForegroundColor Yellow
+                    } else {
+                        Write-Host "  - $($video.Name)" -ForegroundColor Gray
+                    }
+                    Move-Item -Path $video.FullName -Destination $uniquePath
+                }
                 Write-Host "Files moved to extras" -ForegroundColor Green
                 Write-Log "Moved $($nonFeatureVideos.Count) non-feature file(s) to extras"
             } else {
