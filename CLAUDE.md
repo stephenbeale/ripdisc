@@ -531,3 +531,66 @@ Two changes:
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-02-23 - Auto-Discover Disc Metadata
+
+**Problem:**
+`rip-disc.ps1` required `-title` as a mandatory parameter, plus manual flags like `-Series`, `-Season`, `-Bluray`. Unlike `rip-audio.ps1` which auto-detects metadata, video disc rips required the user to know and type all metadata upfront.
+
+**Solution:**
+
+**PR #57 - Add Auto-Discovery of Disc Metadata via MakeMKV + TMDb**
+
+When `-title` is omitted, the script now auto-discovers disc metadata:
+
+1. Reads disc info via `makemkvcon -r info` (disc name, type, title count)
+2. Cleans the disc name (strips suffixes like `_D1`, `_WS`, `_DISC2`, replaces underscores, title-cases)
+3. Searches TMDb (The Movie Database) API for the cleaned title
+4. Auto-populates `-title`, `-Bluray`, `-Series`, `-Season`, `-Disc` from results
+5. Prompts for confirmation (Accept / Edit / Abort)
+
+When `-title` is provided, only Blu-ray format auto-detection runs (quick info query).
+
+**Parameter changes:**
+- `-title` changed from `[Parameter(Mandatory=$true)]` to `[Parameter()]` with default `""`
+
+**New functions added to `rip-disc.ps1`:**
+
+| Function | Purpose |
+|----------|---------|
+| `Get-DiscInfo` | Runs `makemkvcon -r info` and parses CINFO/TINFO fields (disc type, name, volume label, per-title duration/chapters/size) |
+| `Clean-DiscName` | Strips suffixes, extracts season/disc hints via regex, replaces underscores, title-cases |
+| `Search-TMDb` | Queries TMDb multi-search API (`search/multi`), filters to movie/tv, presents top 5 for user selection |
+
+**Auto-detection matrix:**
+
+| Parameter | Auto-detected? | Source |
+|-----------|---------------|--------|
+| `-title` | Yes | TMDb → cleaned disc name → manual fallback |
+| `-Bluray` | Yes | MakeMKV CINFO:1 disc type |
+| `-Series` | Yes | TMDb `media_type: "tv"` |
+| `-Season` | Partial | Regex from disc name (e.g. `S01`, `Season 1`) |
+| `-Disc` | Partial | Regex from disc name (e.g. `D2`, `Disc 2`) |
+| Genre flags | No | Always manual (`-Documentary`, `-Music`, etc.) |
+
+**Other changes:**
+- `$makemkvconPath` moved from configuration section to immediately after param block (needed before discovery)
+- `$discSource` built once in discovery section, reused by Step 1 MakeMKV rip
+- Disc format shown in "Ready to Rip" confirmation display when discovered
+- README updated: `-title` marked optional, new Auto-Discovery section with TMDb API key setup, feature parity table updated
+
+**Files changed:**
+- `rip-disc.ps1` — All discovery logic, parameter changes, new functions
+- `README.md` — Documentation for auto-discovery feature and TMDb setup
+
+**Files NOT changed:**
+- `continue-rip.ps1` — Resumes from existing files, title always known, stays mandatory
+
+**Work In Progress:**
+- None — PR merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
