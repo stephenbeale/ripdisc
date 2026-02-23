@@ -6,6 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-02-23
+
+### Added
+- Auto-discovery of disc metadata when `-title` is omitted (#57)
+  - Reads disc info via MakeMKV info mode (disc name, type, title count)
+  - Cleans disc name (strips suffixes, extracts season/disc hints, title-cases)
+  - Searches TMDb API for canonical title and media type
+  - Auto-populates `-title`, `-Bluray`, `-Series`, `-Season`, `-Disc`
+  - Interactive confirmation prompt (Accept / Edit / Abort)
+  - Falls back to manual input if disc name is too generic or TMDb unavailable
+- Blu-ray format auto-detection from disc type even when `-title` is provided (#57)
+- Disc format shown in "Ready to Rip" confirmation display (#57)
+
+### Changed
+- `-title` parameter is now optional (was mandatory) — defaults to auto-discovery (#57)
+- `$makemkvconPath` moved earlier in script to support discovery functions (#57)
+
 ## 2026-02-22
 
 ### Added
