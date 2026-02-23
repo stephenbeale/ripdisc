@@ -25,10 +25,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - `-title` parameter is now optional (was mandatory) — defaults to auto-discovery (#57)
 - `$makemkvconPath` moved earlier in script to support discovery functions (#57)
-- Default disc source changed from `dev:D:` to `disc:0` (MakeMKV auto-finds first optical drive) when no `-DriveIndex` specified (#60)
+- Skip disc query entirely when `-title` is provided — `makemkvcon info` is too slow (30-60s) for just Blu-ray detection (#64)
+- Discovery mode uses `disc:0` (MakeMKV auto-find) via separate `$discoverySource` variable; rip step respects `-Drive` parameter (#60, #65)
 
 ### Fixed
 - `Get-DiscInfo` regex parsing: removed `$` anchors that fail on Windows `\r` line endings, added `.Trim()`, skip `ErrorRecord` objects from stderr (#60)
+- `-Drive` parameter was being ignored — `disc:0` was always used instead of `dev:$driveLetter` (#65)
+- `$discType` variable collision with `$script:DiscType` caused "Disc Format: Main Feature" instead of actual disc type — renamed to `$discTypeLabel` (#65)
 
 ## 2026-02-22
 
