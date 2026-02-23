@@ -438,6 +438,7 @@ if ($title -eq "") {
     Write-Host "AUTO-DISCOVERY MODE" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "No -title provided. Scanning $driveHint ($discSource)..." -ForegroundColor Yellow
+    Write-Host "(This may take a minute while MakeMKV reads the disc)" -ForegroundColor Gray
 
     $discInfo = Get-DiscInfo -DiscSource $discSource
 
@@ -551,17 +552,9 @@ if ($title -eq "") {
             exit 1
         }
     }
-} elseif (-not $Bluray) {
-    # Title was provided but no -Bluray flag - silently check disc format
-    $discInfo = Get-DiscInfo -DiscSource $discSource
-    if ($discInfo) {
-        $script:DiscType = $discInfo.DiscType
-        if ($discInfo.DiscType -match '(?i)blu-?ray') {
-            $Bluray = $true
-            Write-Host "Blu-ray disc detected" -ForegroundColor Green
-        }
-    }
 }
+# When -title is provided, skip disc query entirely (too slow for just Blu-ray detection).
+# User should pass -Bluray manually when ripping Blu-ray discs with -title.
 
 # ========== TITLE VALIDATION ==========
 # Warn if title appears to contain metadata that should be separate parameters
