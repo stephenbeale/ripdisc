@@ -417,30 +417,36 @@ $driveDescription = if ($DriveIndex -ge 0) {
 }
 
 # ========== AUTO-DISCOVERY ==========
-# Build disc source string for MakeMKV queries
-# When no DriveIndex specified, use disc:0 to let MakeMKV find the first available disc
-# (dev:D: assumes a specific drive letter which may not be the optical drive)
+# Build disc source string for MakeMKV
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
-    $driveHint = switch ($DriveIndex) {
-        0 { "D: internal" }
-        1 { "G: ASUS external" }
-        default { "drive index $DriveIndex" }
-    }
 } else {
-    $discSource = "disc:0"
-    $driveHint = "first available drive"
+    $discSource = "dev:$driveLetter"
 }
 
 if ($title -eq "") {
     # No title provided - run full discovery
+    # For discovery, use disc:0 to let MakeMKV find the first available disc
+    # (unless user specified a specific drive)
+    if ($DriveIndex -ge 0) {
+        $discoverySource = "disc:$DriveIndex"
+        $driveHint = switch ($DriveIndex) {
+            0 { "D: internal" }
+            1 { "G: ASUS external" }
+            default { "drive index $DriveIndex" }
+        }
+    } else {
+        $discoverySource = "disc:0"
+        $driveHint = "first available drive"
+    }
+
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "AUTO-DISCOVERY MODE" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "No -title provided. Scanning $driveHint ($discSource)..." -ForegroundColor Yellow
+    Write-Host "No -title provided. Scanning $driveHint ($discoverySource)..." -ForegroundColor Yellow
     Write-Host "(This may take a minute while MakeMKV reads the disc)" -ForegroundColor Gray
 
-    $discInfo = Get-DiscInfo -DiscSource $discSource
+    $discInfo = Get-DiscInfo -DiscSource $discoverySource
 
     if ($discInfo) {
         $script:DiscType = $discInfo.DiscType
@@ -595,8 +601,8 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
 if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
     $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } else { "Surf" }
-    $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: $genreLabel - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
+    $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
+    Write-Host "Type: $genreLabel - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 } elseif ($Series) {
     if ($Season -gt 0) {
         $seasonTagPreview = "S{0:D2}" -f $Season
@@ -605,8 +611,8 @@ if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
         Write-Host "Type: TV Series - Disc $Disc (no season folder)" -ForegroundColor White
     }
 } else {
-    $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: Movie - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
+    $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
+    Write-Host "Type: Movie - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 }
 if ($script:DiscType) {
     Write-Host "Disc Format: $($script:DiscType)" -ForegroundColor Yellow
@@ -872,7 +878,7 @@ Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 if ($DriveIndex -ge 0) {
     Write-Host "Using drive index: $DriveIndex" -ForegroundColor Green
 } else {
-    Write-Host "Using disc:0 (first available optical drive)" -ForegroundColor Green
+    Write-Host "Using drive: $driveLetter" -ForegroundColor Green
 }
 
 Write-Host "Creating directory: $makemkvOutputDir" -ForegroundColor Yellow
