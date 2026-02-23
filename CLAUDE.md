@@ -588,8 +588,31 @@ When `-title` is provided, only Blu-ray format auto-detection runs (quick info q
 **Files NOT changed:**
 - `continue-rip.ps1` — Resumes from existing files, title always known, stays mandatory
 
+**PR #60 - Fix Disc Discovery Parsing and Add Coffee Link**
+
+Three fixes:
+
+**1. Get-DiscInfo regex parsing fix:**
+- Removed `$` anchors from all regex patterns — they fail on Windows `\r` line endings because MakeMKV outputs `\r\n` but PowerShell keeps the `\r` in captured strings
+- Added `.Trim()` to each line before matching
+- Added `ErrorRecord` filtering — `2>&1` merges stderr as `ErrorRecord` objects, not strings, which caused silent match failures
+
+**2. Disc source default fix:**
+- Changed default from `dev:$driveLetter` (`dev:D:`) to `disc:0` when no `-DriveIndex` specified
+- `disc:0` lets MakeMKV auto-find the first available optical drive
+- The old `dev:D:` assumed D: was always the optical drive, which isn't always correct
+
+**3. Buy Me a Coffee link:**
+- Added `https://buymeacoffee.com/stephenbeale` nudge to all successful completion outputs
+- Three locations: normal completion (rip-disc.ps1), queue completion (rip-disc.ps1), continue completion (continue-rip.ps1)
+- Styled: gray message text, cyan URL
+
+**Files changed:**
+- `rip-disc.ps1` — Regex fix, disc source fix, coffee link (2 locations)
+- `continue-rip.ps1` — Coffee link (1 location)
+
 **Work In Progress:**
-- None — PR merged, working tree clean
+- None — all PRs merged, working tree clean
 
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)

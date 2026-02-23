@@ -19,9 +19,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Blu-ray format auto-detection from disc type even when `-title` is provided (#57)
 - Disc format shown in "Ready to Rip" confirmation display (#57)
 
+### Added (cont.)
+- "Buy me a coffee" link shown after successful completion in both scripts (#60)
+
 ### Changed
 - `-title` parameter is now optional (was mandatory) — defaults to auto-discovery (#57)
 - `$makemkvconPath` moved earlier in script to support discovery functions (#57)
+- Default disc source changed from `dev:D:` to `disc:0` (MakeMKV auto-finds first optical drive) when no `-DriveIndex` specified (#60)
+
+### Fixed
+- `Get-DiscInfo` regex parsing: removed `$` anchors that fail on Windows `\r` line endings, added `.Trim()`, skip `ErrorRecord` objects from stderr (#60)
 
 ## 2026-02-22
 
