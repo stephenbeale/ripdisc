@@ -208,7 +208,6 @@ function Get-DiscInfo {
     param([string]$DiscSource)
 
     try {
-        Write-Host "Reading disc info from $DiscSource..." -ForegroundColor Yellow
         $output = & $makemkvconPath -r info $DiscSource 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "WARNING: MakeMKV info query failed (exit code $LASTEXITCODE)" -ForegroundColor Yellow
@@ -552,14 +551,14 @@ if ($title -eq "") {
             exit 1
         }
     }
-} else {
-    # Title was provided - only auto-detect disc format (quick info query)
+} elseif (-not $Bluray) {
+    # Title was provided but no -Bluray flag - silently check disc format
     $discInfo = Get-DiscInfo -DiscSource $discSource
     if ($discInfo) {
         $script:DiscType = $discInfo.DiscType
-        if (-not $Bluray -and $discInfo.DiscType -match '(?i)blu-?ray') {
+        if ($discInfo.DiscType -match '(?i)blu-?ray') {
             $Bluray = $true
-            Write-Host "Blu-ray detected - enabling Blu-ray mode" -ForegroundColor Green
+            Write-Host "Blu-ray disc detected" -ForegroundColor Green
         }
     }
 }
