@@ -611,6 +611,38 @@ Three fixes:
 - `rip-disc.ps1` — Regex fix, disc source fix, coffee link (2 locations)
 - `continue-rip.ps1` — Coffee link (1 location)
 
+**PR #62 - Show Drive Hint During Auto-Discovery**
+- Display which drive is being scanned (e.g. "first available drive (disc:0)" or "G: ASUS external (disc:1)")
+- Moved status message out of `Get-DiscInfo` into callers for context-appropriate messaging
+
+**PR #63 - Silence Disc Format Check When -title Is Provided**
+- Removed "Reading disc info..." message when `-title` is provided (confusing — looked like full discovery)
+- Skip disc query entirely if both `-title` and `-Bluray` are provided (nothing to detect)
+
+**PR #64 - Skip Slow Disc Query When -title Is Provided**
+- Removed `Get-DiscInfo` call entirely from the title-provided path
+- `makemkvcon info` takes 30-60+ seconds — not worth it just for Blu-ray auto-detection
+- Users should pass `-Bluray` manually when providing `-title`
+- Added "(This may take a minute while MakeMKV reads the disc)" hint for discovery mode
+
+**PR #65 - Fix -Drive Parameter Ignored and Variable Collision**
+
+Two bugs:
+
+**1. `-Drive` parameter being ignored:**
+- PR #60 changed default `$discSource` from `dev:$driveLetter` to `disc:0` for all cases
+- This meant `-Drive G:` was ignored — MakeMKV always used disc:0 (D: internal)
+- Fix: restored `dev:$driveLetter` as default for ripping; discovery mode (no title) uses separate `$discoverySource = "disc:0"` variable
+
+**2. `$discType` variable name collision:**
+- Local `$discType` ("Main Feature") in the "Ready to Rip" block collided with `$script:DiscType` (MakeMKV disc type like "DVD disc")
+- PowerShell variables are case-insensitive, and at script scope `$discType` IS `$script:DiscType`
+- Caused "Disc Format: Main Feature" instead of actual disc type
+- Fix: renamed local variable to `$discTypeLabel`
+
+**Files changed:**
+- `rip-disc.ps1` — All fixes above
+
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 
