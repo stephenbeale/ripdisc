@@ -1,6 +1,6 @@
 ﻿param(
-    [Parameter(Mandatory=$true)]
-    [string]$title,
+    [Parameter()]
+    [string]$title = "",
 
     [Parameter()]
     [switch]$Series,
@@ -47,6 +47,9 @@
     [Parameter()]
     [int]$StartEpisode = 1
 )
+
+# ========== TOOL PATHS ==========
+$makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
 
 # ========== STEP TRACKING ==========
 # Define the 4 processing steps
@@ -200,6 +203,203 @@ function Write-Log {
     }
 }
 
+# ========== DISC DISCOVERY FUNCTIONS ==========
+function Get-DiscInfo {
+    param([string]$DiscSource)
+
+    try {
+        Write-Host "Reading disc info..." -ForegroundColor Yellow
+        $output = & $makemkvconPath -r info $DiscSource 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "WARNING: MakeMKV info query failed (exit code $LASTEXITCODE)" -ForegroundColor Yellow
+            return $null
+        }
+
+        $discType = $null
+        $discName = $null
+        $volumeLabel = $null
+        $titles = @()
+
+        foreach ($line in $output) {
+            $lineStr = "$line"
+            # CINFO:1 = disc type
+            if ($lineStr -match '^CINFO:1,\d+,"(.+)"$') {
+                $discType = $Matches[1]
+            }
+            # CINFO:2 = disc name (best title source)
+            elseif ($lineStr -match '^CINFO:2,\d+,"(.+)"$') {
+                $discName = $Matches[1]
+            }
+            # CINFO:32 = volume label (fallback)
+            elseif ($lineStr -match '^CINFO:32,\d+,"(.+)"$') {
+                $volumeLabel = $Matches[1]
+            }
+            # TINFO:n,9 = duration per title
+            elseif ($lineStr -match '^TINFO:(\d+),9,\d+,"(.+)"$') {
+                $titleIdx = [int]$Matches[1]
+                while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
+                $titles[$titleIdx].Duration = $Matches[2]
+            }
+            # TINFO:n,8 = chapter count per title
+            elseif ($lineStr -match '^TINFO:(\d+),8,\d+,"(\d+)"$') {
+                $titleIdx = [int]$Matches[1]
+                while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
+                $titles[$titleIdx].Chapters = [int]$Matches[2]
+            }
+            # TINFO:n,11 = size in bytes per title
+            elseif ($lineStr -match '^TINFO:(\d+),11,\d+,"(\d+)"$') {
+                $titleIdx = [int]$Matches[1]
+                while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
+                $titles[$titleIdx].Size = [long]$Matches[2]
+            }
+        }
+
+        # Use disc name if available, fall back to volume label
+        if (-not $discName) { $discName = $volumeLabel }
+
+        if (-not $discName -and -not $discType) {
+            Write-Host "WARNING: Could not parse disc info from MakeMKV output" -ForegroundColor Yellow
+            return $null
+        }
+
+        return @{
+            DiscType = $discType
+            DiscName = $discName
+            VolumeLabel = $volumeLabel
+            Titles = $titles
+        }
+    } catch {
+        Write-Host "WARNING: Disc info query failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Clean-DiscName {
+    param([string]$RawName)
+
+    $cleaned = $RawName
+
+    # Extract season hint before cleaning
+    $seasonHint = 0
+    if ($cleaned -match '(?i)S(\d{1,2})(?:E\d|D\d|\b)') {
+        $seasonHint = [int]$Matches[1]
+    } elseif ($cleaned -match '(?i)Season[\s._]?(\d{1,2})') {
+        $seasonHint = [int]$Matches[1]
+    }
+
+    # Extract disc hint before cleaning
+    $discHint = 0
+    if ($cleaned -match '(?i)D(\d{1,2})(?:\b|_)') {
+        $discHint = [int]$Matches[1]
+    } elseif ($cleaned -match '(?i)Disc[\s._]?(\d{1,2})') {
+        $discHint = [int]$Matches[1]
+    }
+
+    # Strip known suffixes
+    $cleaned = $cleaned -replace '(?i)_D\d+', ''
+    $cleaned = $cleaned -replace '(?i)_WS$', ''
+    $cleaned = $cleaned -replace '(?i)_FS$', ''
+    $cleaned = $cleaned -replace '(?i)_SE$', ''
+    $cleaned = $cleaned -replace '(?i)_CE$', ''
+    $cleaned = $cleaned -replace '(?i)_DISC\d+', ''
+    $cleaned = $cleaned -replace '(?i)S\d{1,2}D\d{1,2}', ''
+    $cleaned = $cleaned -replace '(?i)Season[\s._]?\d+', ''
+    $cleaned = $cleaned -replace '(?i)Disc[\s._]?\d+', ''
+
+    # Replace underscores with spaces
+    $cleaned = $cleaned -replace '_', ' '
+
+    # Collapse multiple spaces and trim
+    $cleaned = ($cleaned -replace '\s+', ' ').Trim()
+
+    # Title case
+    $cleaned = (Get-Culture).TextInfo.ToTitleCase($cleaned.ToLower())
+
+    return @{
+        CleanedTitle = $cleaned
+        SeasonHint = $seasonHint
+        DiscHint = $discHint
+    }
+}
+
+function Search-TMDb {
+    param([string]$SearchTitle)
+
+    $apiKey = $env:TMDB_API_KEY
+    if (-not $apiKey) {
+        Write-Host "TMDB_API_KEY not set - skipping TMDb search" -ForegroundColor Yellow
+        return $null
+    }
+
+    try {
+        $encodedTitle = [System.Uri]::EscapeDataString($SearchTitle)
+        $url = "https://api.themoviedb.org/3/search/multi?query=$encodedTitle&api_key=$apiKey"
+        Write-Host "Searching TMDb for: $SearchTitle" -ForegroundColor Yellow
+
+        $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 10
+        $results = $response.results | Where-Object { $_.media_type -eq "movie" -or $_.media_type -eq "tv" }
+
+        if (-not $results -or $results.Count -eq 0) {
+            Write-Host "No TMDb results found" -ForegroundColor Yellow
+            return $null
+        }
+
+        # Take top 5
+        $top = @($results | Select-Object -First 5)
+
+        if ($top.Count -eq 1) {
+            $r = $top[0]
+            $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
+            $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
+            Write-Host "TMDb match: $tmdbTitle ($tmdbYear) [$($r.media_type)]" -ForegroundColor Green
+            return @{
+                Title = $tmdbTitle
+                Year = $tmdbYear
+                MediaType = $r.media_type
+                Overview = $r.overview
+            }
+        }
+
+        # Multiple results - let user pick
+        Write-Host "`nTMDb results:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $top.Count; $i++) {
+            $r = $top[$i]
+            $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
+            $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
+            $typeLabel = if ($r.media_type -eq "tv") { "TV" } else { "Movie" }
+            Write-Host "  [$($i + 1)] $tmdbTitle ($tmdbYear) [$typeLabel]" -ForegroundColor White
+        }
+        Write-Host "  [0] None of these" -ForegroundColor Gray
+
+        $choice = $null
+        while ($null -eq $choice) {
+            $input = Read-Host "Select (0-$($top.Count))"
+            if ($input -match '^\d+$' -and [int]$input -ge 0 -and [int]$input -le $top.Count) {
+                $choice = [int]$input
+            } else {
+                Write-Host "Invalid choice. Enter 0-$($top.Count)." -ForegroundColor Red
+            }
+        }
+
+        if ($choice -eq 0) {
+            return $null
+        }
+
+        $r = $top[$choice - 1]
+        $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
+        $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
+        return @{
+            Title = $tmdbTitle
+            Year = $tmdbYear
+            MediaType = $r.media_type
+            Overview = $r.overview
+        }
+    } catch {
+        Write-Host "WARNING: TMDb search failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $null
+    }
+}
+
 # ========== DRIVE CONFIRMATION ==========
 # Show which drive will be used and confirm before proceeding
 $driveLetter = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
@@ -213,6 +413,146 @@ $driveDescription = if ($DriveIndex -ge 0) {
 } else {
     "Drive $driveLetter"
 }
+
+# ========== AUTO-DISCOVERY ==========
+# Build disc source string for MakeMKV queries
+if ($DriveIndex -ge 0) {
+    $discSource = "disc:$DriveIndex"
+} else {
+    $discSource = "dev:$driveLetter"
+}
+
+if ($title -eq "") {
+    # No title provided - run full discovery
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "AUTO-DISCOVERY MODE" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "No -title provided. Reading disc metadata..." -ForegroundColor Yellow
+
+    $discInfo = Get-DiscInfo -DiscSource $discSource
+
+    if ($discInfo) {
+        $script:DiscType = $discInfo.DiscType
+        Write-Host "`nDisc Type: $($discInfo.DiscType)" -ForegroundColor White
+        Write-Host "Disc Name: $($discInfo.DiscName)" -ForegroundColor White
+        if ($discInfo.VolumeLabel -and $discInfo.VolumeLabel -ne $discInfo.DiscName) {
+            Write-Host "Volume Label: $($discInfo.VolumeLabel)" -ForegroundColor Gray
+        }
+        Write-Host "Titles on disc: $($discInfo.Titles.Count)" -ForegroundColor White
+
+        # Auto-detect Blu-ray from disc type
+        if ($discInfo.DiscType -match '(?i)blu-?ray') {
+            $Bluray = $true
+            Write-Host "Blu-ray detected - enabling Blu-ray mode" -ForegroundColor Green
+        }
+
+        # Clean the disc name for searching
+        $cleanResult = Clean-DiscName -RawName $discInfo.DiscName
+        Write-Host "`nCleaned title: $($cleanResult.CleanedTitle)" -ForegroundColor White
+        if ($cleanResult.SeasonHint -gt 0) {
+            Write-Host "Season hint: $($cleanResult.SeasonHint)" -ForegroundColor White
+        }
+        if ($cleanResult.DiscHint -gt 0) {
+            Write-Host "Disc hint: $($cleanResult.DiscHint)" -ForegroundColor White
+        }
+
+        # Search TMDb if API key is available
+        $tmdbResult = $null
+        if ($cleanResult.CleanedTitle -and $cleanResult.CleanedTitle -ne "" -and
+            $cleanResult.CleanedTitle -notmatch '(?i)^(dvd.?video|disc|blank)$') {
+            $tmdbResult = Search-TMDb -SearchTitle $cleanResult.CleanedTitle
+        } else {
+            Write-Host "Disc name too generic for TMDb search" -ForegroundColor Yellow
+        }
+
+        # Populate metadata from discovery
+        if ($tmdbResult) {
+            $title = $tmdbResult.Title
+            if ($tmdbResult.MediaType -eq "tv" -and -not $Series) {
+                $Series = $true
+                Write-Host "TV series detected - enabling Series mode" -ForegroundColor Green
+            }
+        } else {
+            # Use cleaned disc name as title
+            $title = $cleanResult.CleanedTitle
+        }
+
+        # Apply season/disc hints if not already set by user
+        if ($cleanResult.SeasonHint -gt 0 -and $Season -eq 0) {
+            $Season = $cleanResult.SeasonHint
+        }
+        if ($cleanResult.DiscHint -gt 0 -and $Disc -eq 1) {
+            $Disc = $cleanResult.DiscHint
+        }
+
+        # Show discovered metadata summary
+        Write-Host "`n--- Discovered Metadata ---" -ForegroundColor Cyan
+        Write-Host "  Title:  $title" -ForegroundColor White
+        Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
+        Write-Host "  Type:   $(if ($Series) { 'TV Series' } else { 'Movie' })" -ForegroundColor White
+        if ($Series) {
+            if ($Season -gt 0) {
+                Write-Host "  Season: $Season" -ForegroundColor White
+            }
+            Write-Host "  Disc:   $Disc" -ForegroundColor White
+        }
+        Write-Host "----------------------------" -ForegroundColor Cyan
+
+        # Prompt for confirmation
+        $discoveryChoice = $null
+        while ($null -eq $discoveryChoice) {
+            $input = Read-Host "[Y] Accept / [E] Edit title / [A] Abort"
+            switch ($input.ToUpper()) {
+                'Y' { $discoveryChoice = 'Y' }
+                'E' {
+                    $newTitle = Read-Host "Enter title"
+                    if ($newTitle -ne "") {
+                        $title = $newTitle
+                    }
+                    # Allow toggling Series mode
+                    $seriesInput = Read-Host "Is this a TV series? (y/N)"
+                    if ($seriesInput -eq 'y' -or $seriesInput -eq 'Y') {
+                        $Series = $true
+                        if ($Season -eq 0) {
+                            $seasonInput = Read-Host "Season number (0 for none)"
+                            if ($seasonInput -match '^\d+$') { $Season = [int]$seasonInput }
+                        }
+                    } else {
+                        $Series = $false
+                    }
+                    $discoveryChoice = 'Y'
+                }
+                'A' {
+                    Write-Host "Aborted." -ForegroundColor Yellow
+                    exit 0
+                }
+                default { Write-Host "Invalid choice. Enter Y, E, or A." -ForegroundColor Red }
+            }
+        }
+    } else {
+        Write-Host "Disc info not available." -ForegroundColor Yellow
+    }
+
+    # Final fallback: manual input if still no title
+    if ($title -eq "") {
+        $title = Read-Host "Enter title manually"
+        if ($title -eq "") {
+            Write-Host "ERROR: No title provided. Cannot continue." -ForegroundColor Red
+            exit 1
+        }
+    }
+} else {
+    # Title was provided - only auto-detect disc format (quick info query)
+    $discInfo = Get-DiscInfo -DiscSource $discSource
+    if ($discInfo) {
+        $script:DiscType = $discInfo.DiscType
+        if (-not $Bluray -and $discInfo.DiscType -match '(?i)blu-?ray') {
+            $Bluray = $true
+            Write-Host "Blu-ray detected - enabling Blu-ray mode" -ForegroundColor Green
+        }
+    }
+}
+
 # ========== TITLE VALIDATION ==========
 # Warn if title appears to contain metadata that should be separate parameters
 $titleWarnings = @()
@@ -264,6 +604,9 @@ if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
 } else {
     $discType = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
     Write-Host "Type: Movie - $discType$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
+}
+if ($script:DiscType) {
+    Write-Host "Disc Format: $($script:DiscType)" -ForegroundColor Yellow
 }
 Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
@@ -336,7 +679,6 @@ if ($Extras -and -not $Series) {
     $finalOutputDir = Join-Path $finalOutputDir "extras"
 }
 
-$makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
 $handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
 
 # ========== LOGGING SETUP ==========
@@ -523,13 +865,10 @@ $script:LastWorkingDirectory = $makemkvOutputDir
 Write-Log "STEP 1/4: Starting MakeMKV rip..."
 Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 
-# Use disc: syntax with index if provided (completely bypasses drive enumeration)
-# Otherwise fall back to dev: syntax which still enumerates drives
+# $discSource was already set in the auto-discovery section above
 if ($DriveIndex -ge 0) {
-    $discSource = "disc:$DriveIndex"
     Write-Host "Using drive index: $DriveIndex (bypasses drive enumeration)" -ForegroundColor Green
 } else {
-    $discSource = "dev:$driveLetter"
     Write-Host "Using drive: $driveLetter (may enumerate other drives)" -ForegroundColor Yellow
     Write-Host "Tip: Use -DriveIndex to bypass drive enumeration" -ForegroundColor Gray
 }

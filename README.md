@@ -13,6 +13,7 @@ The PowerShell version is the primary implementation and has the most features. 
 
 ## Features
 
+- **Auto-discovery of disc metadata** via MakeMKV + TMDb (title, format, series detection)
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
 - **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Music, Surf) with different organization strategies
@@ -32,6 +33,47 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Window title management** for tracking concurrent operations
 - **Console close button protection** prevents accidental window closure
 - **Automatic disc ejection** after successful rip
+
+## Auto-Discovery
+
+When `-title` is omitted, the PowerShell script automatically discovers disc metadata:
+
+1. **Reads disc info** via MakeMKV's info mode (disc name, type, title count)
+2. **Cleans the disc name** (strips suffixes like `_D1`, `_WS`, replaces underscores, title-cases)
+3. **Searches TMDb** (The Movie Database) for the cleaned title
+4. **Auto-populates** `-title`, `-Bluray`, `-Series`, `-Season`, and `-Disc` based on results
+5. **Prompts for confirmation** — accept, edit, or abort
+
+If `-title` is provided, discovery is skipped (only disc format auto-detection for `-Bluray` runs).
+
+### What Gets Auto-Detected
+
+| Parameter | Auto-detected? | Source |
+|-----------|---------------|--------|
+| `-title` | Yes | TMDb search, cleaned disc name, or manual fallback |
+| `-Bluray` | Yes | MakeMKV disc type (`Blu-ray disc`) |
+| `-Series` | Yes | TMDb media type (`tv`) |
+| `-Season` | Partial | Regex from disc name (e.g. `S01`, `Season 1`) |
+| `-Disc` | Partial | Regex from disc name (e.g. `D2`, `Disc 2`) |
+| Genre flags | No | Always manual (`-Documentary`, `-Music`, etc.) |
+| `-Extras` | No | Always manual |
+| `-StartEpisode` | No | Always manual |
+
+### TMDb API Key Setup
+
+To enable TMDb searching, set the `TMDB_API_KEY` environment variable:
+
+```powershell
+# Set for current session
+$env:TMDB_API_KEY = "your_api_key_here"
+
+# Set permanently (user-level)
+[Environment]::SetEnvironmentVariable("TMDB_API_KEY", "your_api_key_here", "User")
+```
+
+Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api).
+
+Without a TMDb key, the script still works — it uses the cleaned disc name as the title and falls back to manual input if the name is too generic.
 
 ## Quick Start
 
@@ -61,7 +103,7 @@ cd RipDisc\RipDisc\bin\Release\net8.0-windows
 Both versions use the same command-line parameters:
 
 ```
--title <string>         (Required) Title of the movie or series
+-title <string>         (Optional) Title of the movie or series (auto-discovered if omitted)
 -series                 Flag for TV series
 -season <int>           Season number (default: 0)
 -disc <int>             Disc number (default: 1)
@@ -80,6 +122,11 @@ Both versions use the same command-line parameters:
 ```
 
 ### Examples
+
+**Rip a disc with auto-discovery (no title needed):**
+```powershell
+.\rip-disc.ps1
+```
 
 **Rip a movie:**
 ```powershell
@@ -249,6 +296,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 
 | Feature | PowerShell | C# |
 |---------|:---:|:---:|
+| Auto-discovery (disc metadata + TMDb) | Yes | No |
 | Core rip/encode/organize workflow | Yes | Yes |
 | Movie mode (Feature file + extras) | Yes | Yes |
 | Multi-disc concurrent ripping | Yes | Yes |
