@@ -208,7 +208,7 @@ function Get-DiscInfo {
     param([string]$DiscSource)
 
     try {
-        Write-Host "Reading disc info..." -ForegroundColor Yellow
+        Write-Host "Reading disc info from $DiscSource..." -ForegroundColor Yellow
         $output = & $makemkvconPath -r info $DiscSource 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "WARNING: MakeMKV info query failed (exit code $LASTEXITCODE)" -ForegroundColor Yellow
@@ -423,8 +423,14 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # (dev:D: assumes a specific drive letter which may not be the optical drive)
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
+    $driveHint = switch ($DriveIndex) {
+        0 { "D: internal" }
+        1 { "G: ASUS external" }
+        default { "drive index $DriveIndex" }
+    }
 } else {
     $discSource = "disc:0"
+    $driveHint = "first available drive"
 }
 
 if ($title -eq "") {
@@ -432,7 +438,7 @@ if ($title -eq "") {
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "AUTO-DISCOVERY MODE" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "No -title provided. Reading disc metadata..." -ForegroundColor Yellow
+    Write-Host "No -title provided. Scanning $driveHint ($discSource)..." -ForegroundColor Yellow
 
     $discInfo = Get-DiscInfo -DiscSource $discSource
 
