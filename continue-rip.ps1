@@ -941,7 +941,10 @@ if ($script:EncodedFilesTooSmall) {
     Write-Host "  Total size: $totalSize GB" -ForegroundColor White
     Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
 }
-Write-Host "========================================`n" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "`nEnjoy! Consider buying me a coffee to support continued development:" -ForegroundColor Gray
+Write-Host "https://buymeacoffee.com/stephenbeale" -ForegroundColor Cyan
+Write-Host ""
 
 Write-Log "========== CONTINUE SESSION COMPLETE =========="
 Write-Log "Final location: $finalOutputDir"

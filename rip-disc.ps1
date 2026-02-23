@@ -221,33 +221,36 @@ function Get-DiscInfo {
         $titles = @()
 
         foreach ($line in $output) {
-            $lineStr = "$line"
+            # Skip ErrorRecord objects from stderr, only process string output
+            if ($line -is [System.Management.Automation.ErrorRecord]) { continue }
+            # Trim whitespace and \r to handle Windows line endings
+            $lineStr = "$line".Trim()
             # CINFO:1 = disc type
-            if ($lineStr -match '^CINFO:1,\d+,"(.+)"$') {
+            if ($lineStr -match '^CINFO:1,\d+,"(.+)"') {
                 $discType = $Matches[1]
             }
             # CINFO:2 = disc name (best title source)
-            elseif ($lineStr -match '^CINFO:2,\d+,"(.+)"$') {
+            elseif ($lineStr -match '^CINFO:2,\d+,"(.+)"') {
                 $discName = $Matches[1]
             }
             # CINFO:32 = volume label (fallback)
-            elseif ($lineStr -match '^CINFO:32,\d+,"(.+)"$') {
+            elseif ($lineStr -match '^CINFO:32,\d+,"(.+)"') {
                 $volumeLabel = $Matches[1]
             }
             # TINFO:n,9 = duration per title
-            elseif ($lineStr -match '^TINFO:(\d+),9,\d+,"(.+)"$') {
+            elseif ($lineStr -match '^TINFO:(\d+),9,\d+,"(.+)"') {
                 $titleIdx = [int]$Matches[1]
                 while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
                 $titles[$titleIdx].Duration = $Matches[2]
             }
             # TINFO:n,8 = chapter count per title
-            elseif ($lineStr -match '^TINFO:(\d+),8,\d+,"(\d+)"$') {
+            elseif ($lineStr -match '^TINFO:(\d+),8,\d+,"(\d+)"') {
                 $titleIdx = [int]$Matches[1]
                 while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
                 $titles[$titleIdx].Chapters = [int]$Matches[2]
             }
             # TINFO:n,11 = size in bytes per title
-            elseif ($lineStr -match '^TINFO:(\d+),11,\d+,"(\d+)"$') {
+            elseif ($lineStr -match '^TINFO:(\d+),11,\d+,"(\d+)"') {
                 $titleIdx = [int]$Matches[1]
                 while ($titles.Count -le $titleIdx) { $titles += @(@{ Duration = ""; Chapters = 0; Size = 0 }) }
                 $titles[$titleIdx].Size = [long]$Matches[2]
@@ -416,10 +419,12 @@ $driveDescription = if ($DriveIndex -ge 0) {
 
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV queries
+# When no DriveIndex specified, use disc:0 to let MakeMKV find the first available disc
+# (dev:D: assumes a specific drive letter which may not be the optical drive)
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    $discSource = "dev:$driveLetter"
+    $discSource = "disc:0"
 }
 
 if ($title -eq "") {
@@ -867,10 +872,9 @@ Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 
 # $discSource was already set in the auto-discovery section above
 if ($DriveIndex -ge 0) {
-    Write-Host "Using drive index: $DriveIndex (bypasses drive enumeration)" -ForegroundColor Green
+    Write-Host "Using drive index: $DriveIndex" -ForegroundColor Green
 } else {
-    Write-Host "Using drive: $driveLetter (may enumerate other drives)" -ForegroundColor Yellow
-    Write-Host "Tip: Use -DriveIndex to bypass drive enumeration" -ForegroundColor Gray
+    Write-Host "Using disc:0 (first available optical drive)" -ForegroundColor Green
 }
 
 Write-Host "Creating directory: $makemkvOutputDir" -ForegroundColor Yellow
@@ -1104,7 +1108,10 @@ if ($Queue) {
     Write-Host "Queue file: $queueFilePath" -ForegroundColor White
     Write-Host "Total jobs in queue: $($queue.Count)" -ForegroundColor White
     Write-Host "`nRun 'RipDisc -processQueue' to encode all queued jobs sequentially" -ForegroundColor Yellow
-    Write-Host "========================================`n" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "`nEnjoy! Consider buying me a coffee to support continued development:" -ForegroundColor Gray
+    Write-Host "https://buymeacoffee.com/stephenbeale" -ForegroundColor Cyan
+    Write-Host ""
 
     Write-Log "QUEUE MODE: Job added to queue ($($queue.Count) total jobs)"
     Write-Log "Queue file: $queueFilePath"
@@ -1670,7 +1677,10 @@ if ($script:EncodedFilesTooSmall) {
     Write-Host "  Total size: $totalSize GB" -ForegroundColor White
     Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
 }
-Write-Host "========================================`n" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "`nEnjoy! Consider buying me a coffee to support continued development:" -ForegroundColor Gray
+Write-Host "https://buymeacoffee.com/stephenbeale" -ForegroundColor Cyan
+Write-Host ""
 
 Write-Log "========== RIP SESSION COMPLETE =========="
 Write-Log "Final location: $finalOutputDir"
