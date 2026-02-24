@@ -1440,13 +1440,18 @@ if ($Series) {
     if ($isMainFeatureDisc) {
         Write-Host "`nPrefixing files with directory name..." -ForegroundColor Yellow
         $dirName = (Get-Item $finalOutputDir).Name
-        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($dirName + "-*") -and $_.Name -notlike ($dirName + "_*") }
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($dirName + "-*") }
         if ($filesToPrefix) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
             $filesToPrefix | ForEach-Object {
                 $file = $_
-                $newName = $dirName + "-" + $file.Name
+                if ($file.Name -like ($dirName + "_*")) {
+                    # Replace underscore with hyphen (e.g. Southpaw_t01.mp4 -> Southpaw-t01.mp4)
+                    $newName = $dirName + "-" + $file.Name.Substring($dirName.Length + 1)
+                } else {
+                    $newName = $dirName + "-" + $file.Name
+                }
                 $maxRetries = 5
                 $retryDelay = 3
                 for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
@@ -1472,12 +1477,16 @@ if ($Series) {
     } elseif ($Extras) {
         # Extras disc: prefix with title only (no "-extras" or "-Special Features" in name)
         Write-Host "`nPrefixing extras files with title..." -ForegroundColor Yellow
-        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$title-*") -and $_.Name -notlike ("$title_*") }
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$title-*") }
         if ($filesToPrefix) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object {
                 $file = $_
-                $newName = "$title-" + $file.Name
+                if ($file.Name -like ("$title" + "_*")) {
+                    $newName = "$title-" + $file.Name.Substring($title.Length + 1)
+                } else {
+                    $newName = "$title-" + $file.Name
+                }
                 Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
                 $maxRetries = 5
                 $retryDelay = 3
@@ -1505,12 +1514,16 @@ if ($Series) {
         # Disc 2+: prefix with "MovieName-Special Features-originalfilename"
         Write-Host "`nPrefixing special features files..." -ForegroundColor Yellow
         $dirName = (Get-Item $finalOutputDir).Name
-        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($dirName + "-*") -and $_.Name -notlike ($dirName + "_*") }
+        $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ($dirName + "-*") }
         if ($filesToPrefix) {
             Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
             $filesToPrefix | ForEach-Object {
                 $file = $_
-                $newName = $dirName + "-Special Features-" + $file.Name
+                if ($file.Name -like ($dirName + "_*")) {
+                    $newName = $dirName + "-Special Features-" + $file.Name.Substring($dirName.Length + 1)
+                } else {
+                    $newName = $dirName + "-Special Features-" + $file.Name
+                }
                 Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
                 $maxRetries = 5
                 $retryDelay = 3
