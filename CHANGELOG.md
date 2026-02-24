@@ -32,6 +32,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `Get-DiscInfo` regex parsing: removed `$` anchors that fail on Windows `\r` line endings, added `.Trim()`, skip `ErrorRecord` objects from stderr (#60)
 - `-Drive` parameter was being ignored — `disc:0` was always used instead of `dev:$driveLetter` (#65)
 - `$discType` variable collision with `$script:DiscType` caused "Disc Format: Main Feature" instead of actual disc type — renamed to `$discTypeLabel` (#65)
+- Blu-ray PGS subtitles no longer burned in — uses `--subtitle scan --subtitle-burned` to only burn forced/foreign-language subs (#67)
 
 ## 2026-02-22
 

@@ -643,6 +643,19 @@ Two bugs:
 **Files changed:**
 - `rip-disc.ps1` — All fixes above
 
+**PR #67 - Fix Blu-ray Subtitle Handling**
+- Blu-ray PGS subtitles were getting burned in despite `--subtitle-burned=none`
+- Replaced `--all-subtitles --subtitle-burned=none` with `--subtitle scan --subtitle-burned`
+- Now scans for forced/foreign-language subs only (e.g. alien dialogue in English films) and burns those in
+- Full PGS subtitle tracks are excluded entirely
+- Removed the try-then-retry fallback pattern — no longer needed
+- DVD behaviour unchanged (all subtitles as separate tracks)
+- Updated in 3 places per script: main encoding, recovery script generation, comments
+
+**Files changed:**
+- `rip-disc.ps1` — Subtitle handling fix
+- `continue-rip.ps1` — Subtitle handling fix
+
 **Work In Progress:**
 - None — all PRs merged, working tree clean
 
