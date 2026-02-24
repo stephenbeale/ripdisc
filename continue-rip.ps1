@@ -470,16 +470,11 @@ if ($StartFromStepNumber -le 2) {
         $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
         $recoveryLines += "# --- $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB) ---"
         $recoveryLines += "if (!(Test-Path `"$outputFile`")) {"
+        $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
         if ($Bluray) {
-            $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
-            $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
-            $recoveryLines += "    if (`$LASTEXITCODE -ne 0) {"
-            $recoveryLines += "        Write-Host `"Subtitle encoding failed - retrying without subtitles...`" -ForegroundColor Yellow"
-            $recoveryLines += "        if (Test-Path `"$outputFile`") { Remove-Item `"$outputFile`" -Force }"
-            $recoveryLines += "        & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --verbose=1"
-            $recoveryLines += "    }"
+            # Blu-ray: scan for forced/foreign-language subs only, burn them in
+            $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --subtitle scan --subtitle-burned --verbose=1"
         } else {
-            $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
             $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
         }
         $recoveryLines += "} else {"
@@ -506,39 +501,32 @@ if ($StartFromStepNumber -le 2) {
 
         Write-Host "`nExecuting HandBrake..." -ForegroundColor Yellow
 
-        # Always try with subtitles first (not burned in)
-        $handbrakeArgs = @(
-            "-i", $inputFile,
-            "-o", $outputFile,
-            "--preset", "Fast 1080p30",
-            "--all-audio",
-            "--all-subtitles",
-            "--subtitle-burned=none",
-            "--verbose=1"
-        )
-        & $handbrakePath @handbrakeArgs
-        $handbrakeExitCode = $LASTEXITCODE
-
-        # For Bluray: if subtitle encoding fails, retry without subtitles (PGS incompatibility)
-        if ($handbrakeExitCode -ne 0 -and $Bluray) {
-            Write-Host "`nBluray subtitle encoding failed - retrying without subtitles..." -ForegroundColor Yellow
-            Write-Log "Bluray subtitle encoding failed for $($mkv.Name) - retrying without subtitles"
-
-            # Delete partial output if exists
-            if (Test-Path $outputFile) {
-                Remove-Item $outputFile -Force
-            }
-
-            $handbrakeArgsNoSubs = @(
+        # Blu-ray: scan for forced/foreign-language subs and burn them in (e.g. alien dialogue in English films)
+        #          Skip all other PGS subtitle tracks (image-based, get burned in despite --subtitle-burned=none)
+        # DVD: include all subtitles as separate tracks (VOB subs work fine in MP4)
+        if ($Bluray) {
+            $handbrakeArgs = @(
                 "-i", $inputFile,
                 "-o", $outputFile,
                 "--preset", "Fast 1080p30",
                 "--all-audio",
+                "--subtitle", "scan",
+                "--subtitle-burned",
                 "--verbose=1"
             )
-            & $handbrakePath @handbrakeArgsNoSubs
-            $handbrakeExitCode = $LASTEXITCODE
+        } else {
+            $handbrakeArgs = @(
+                "-i", $inputFile,
+                "-o", $outputFile,
+                "--preset", "Fast 1080p30",
+                "--all-audio",
+                "--all-subtitles",
+                "--subtitle-burned=none",
+                "--verbose=1"
+            )
         }
+        & $handbrakePath @handbrakeArgs
+        $handbrakeExitCode = $LASTEXITCODE
 
         if ($handbrakeExitCode -ne 0) {
             Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message "HandBrake exited with code $handbrakeExitCode while encoding $($mkv.Name)"
