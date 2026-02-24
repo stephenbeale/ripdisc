@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-02-24
+
+### Added
+- `-Bluray` disc type now routes output to `<OutputDrive>:\Bluray\<title>\` instead of `DVDs\<title>\` (#69)
+- Queue entry includes `Bluray` flag for downstream processing (#69)
+
+### Fixed
+- File rename no longer double-prefixes when MakeMKV filename already contains the title with underscore separator (#70, #71)
+  - `Southpaw_t01.mp4` was becoming `Southpaw-Southpaw_t01.mp4`; now correctly becomes `Southpaw-t01.mp4`
+  - Applied to all prefix paths: Disc 1 main feature, Extras disc, and Disc 2+ special features
+
 ## 2026-02-23
 
 ### Added

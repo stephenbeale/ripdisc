@@ -662,3 +662,36 @@ Two bugs:
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-02-24 - Blu-ray Output Directory & Rename Fix
+
+**PR #69 - Route Blu-ray Output to Dedicated Directory**
+- `-Bluray` now routes to `<OutputDrive>:\Bluray\<title>\` instead of `DVDs\<title>\`
+- All `$contentType` chains show "Blu-ray" as type label (Get-TitleSummary, Write-Log, Ready to Rip display)
+- Queue entry includes `Bluray = [bool]$Bluray` for downstream processing
+- Genre flags still take priority (e.g. `-Documentary -Bluray` goes to `Documentaries\`)
+- Applied to both scripts
+
+**PR #70 - Fix Double-Prefix in File Renaming**
+- MakeMKV names files like `Southpaw_t01.mp4` (title + underscore)
+- Prefix check only looked for `Title-*` (hyphen), missing `Title_*` (underscore)
+- Result: `Southpaw_t01.mp4` got double-prefixed to `Southpaw-Southpaw_t01.mp4`
+- Fixed all 6 prefix checks (3 per script) to also match `Title_*`
+
+**PR #71 - Replace Underscore with Hyphen in Renamed Files**
+- PR #70 skipped `Title_*` files entirely, leaving underscore separators in filenames
+- Now detects `Title_*` and replaces the underscore with a hyphen: `Southpaw_t01.mp4` -> `Southpaw-t01.mp4`
+- Applied to all 3 prefix paths (Disc 1, Extras, Disc 2+) in both scripts
+
+**Files changed:**
+- `rip-disc.ps1` — Bluray directory routing, content type labels, queue entry, prefix rename logic
+- `continue-rip.ps1` — Bluray directory routing, content type labels, prefix rename logic
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
