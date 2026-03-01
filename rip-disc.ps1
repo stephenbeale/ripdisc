@@ -936,8 +936,8 @@ Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
 Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120" -ForegroundColor Gray
 Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
 
-# Capture MakeMKV output to analyze for specific errors
-$makemkvOutput = & $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput
+# Stream MakeMKV output to console and capture for error analysis
+& $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput | ForEach-Object { Write-Host $_ }
 $makemkvExitCode = $LASTEXITCODE
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
