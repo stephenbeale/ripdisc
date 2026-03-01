@@ -665,7 +665,7 @@ Two bugs:
 
 ---
 
-### 2026-02-24 - Blu-ray Output Directory & Rename Fix
+### 2026-03-01 - Blu-ray Output Directory, Rename Fix & MakeMKV Progress
 
 **PR #69 - Route Blu-ray Output to Dedicated Directory**
 - `-Bluray` now routes to `<OutputDrive>:\Bluray\<title>\` instead of `DVDs\<title>\`
@@ -685,8 +685,13 @@ Two bugs:
 - Now detects `Title_*` and replaces the underscore with a hyphen: `Southpaw_t01.mp4` -> `Southpaw-t01.mp4`
 - Applied to all 3 prefix paths (Disc 1, Extras, Disc 2+) in both scripts
 
+**PR #72 - Stream MakeMKV Output to Console**
+- MakeMKV rip output was silently captured — `$makemkvOutput = ... | Tee-Object` swallowed console output
+- Removed variable assignment and piped through `ForEach-Object { Write-Host $_ }` for real-time streaming
+- `Tee-Object -Variable makemkvFullOutput` still captures everything for error analysis
+
 **Files changed:**
-- `rip-disc.ps1` — Bluray directory routing, content type labels, queue entry, prefix rename logic
+- `rip-disc.ps1` — Bluray directory routing, content type labels, queue entry, prefix rename logic, MakeMKV output streaming
 - `continue-rip.ps1` — Bluray directory routing, content type labels, prefix rename logic
 
 **Work In Progress:**

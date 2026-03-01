@@ -6,11 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## 2026-02-24
+## 2026-03-01
 
 ### Added
 - `-Bluray` disc type now routes output to `<OutputDrive>:\Bluray\<title>\` instead of `DVDs\<title>\` (#69)
 - Queue entry includes `Bluray` flag for downstream processing (#69)
+- MakeMKV rip output now streams to the console in real time (#72)
 
 ### Fixed
 - File rename no longer double-prefixes when MakeMKV filename already contains the title with underscore separator (#70, #71)
