@@ -21,7 +21,8 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
 - **HandBrake queue mode** for sequential encoding after concurrent rips
-- **Blu-ray subtitle fallback** (tries subtitles first, retries without on PGS failure)
+- **Blu-ray subtitle handling** (scans for forced/foreign-language subs only, burns them in)
+- **Real-time MakeMKV progress** streamed to console during rip
 - **Feature file identification** (automatically identifies main feature)
 - **Extras folder management** for special features
 - **Resume failed rips** from any step with `continue-rip.ps1`
@@ -112,7 +113,7 @@ Both versions use the same command-line parameters:
 -outputDrive <string>   Output drive letter (default: E:)
 -extras                 Flag for extras-only disc
 -queue                  Queue encoding instead of running immediately
--bluray                 Blu-ray mode (subtitle fallback for PGS)
+-bluray                 Blu-ray mode (outputs to Bluray folder, forced subtitle scan)
 -documentary            Documentary mode (outputs to Documentaries folder)
 -tutorial               Tutorial mode (outputs to Tutorials folder)
 -fitness                Fitness mode (outputs to Fitness folder)
@@ -251,6 +252,16 @@ E:\Surf\SurfTitle\
     └── SurfTitle-bonus.mp4
 ```
 
+### Blu-ray
+
+```
+F:\Bluray\MovieName\
+├── MovieName-Feature.mp4
+└── extras\
+    ├── MovieName-t01.mp4
+    └── MovieName-t02.mp4
+```
+
 ## Processing Steps
 
 Both versions execute the same 4-step workflow:
@@ -300,7 +311,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Core rip/encode/organize workflow | Yes | Yes |
 | Movie mode (Feature file + extras) | Yes | Yes |
 | Multi-disc concurrent ripping | Yes | Yes |
-| `-Bluray` subtitle fallback | Yes | Yes |
+| `-Bluray` output dir + forced subtitle scan | Yes | No |
 | `-Queue` / `-ProcessQueue` | Yes | Yes |
 | Window title management | Yes | Yes |
 | Session logging | Yes | Yes |
