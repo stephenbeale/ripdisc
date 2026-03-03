@@ -418,10 +418,19 @@ $driveDescription = if ($DriveIndex -ge 0) {
 
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV
+# MakeMKV's dev: prefix requires a physical device path (\\.\CdRomN), not a Windows drive letter.
+# Map the drive letter to its CdRomN device ID via Win32_CDROMDrive so MakeMKV finds the right drive.
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    $discSource = "dev:$driveLetter"
+    $cdromDevice = Get-CimInstance Win32_CDROMDrive | Where-Object { $_.Drive -eq $driveLetter } | Select-Object -First 1
+    if ($cdromDevice) {
+        # DeviceID is e.g. "CdRom0" — build the \\.\CdRomN path MakeMKV expects
+        $discSource = "dev:\\.\$($cdromDevice.DeviceID)"
+    } else {
+        Write-Host "ERROR: Drive $driveLetter not found. Check the drive letter is correct and the drive is connected." -ForegroundColor Red
+        exit 1
+    }
 }
 
 if ($title -eq "") {
