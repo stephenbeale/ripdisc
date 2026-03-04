@@ -700,3 +700,36 @@ Two bugs:
 **Outstanding Work for Future Sessions:**
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+- Test PR #75 drive fix on next real rip (disc:N mapping + drive wake-up)
+
+---
+
+### 2026-03-04 - Drive Path Fix & Documentation
+
+**PR #73 - Update README, CHANGELOG, and Session Notes**
+- Added Blu-ray directory structure example to README
+- Updated `-bluray` usage description and feature parity table
+- Fixed session date from 2026-02-24 to 2026-03-01
+- Added PR #72 (MakeMKV streaming) to changelog and session notes
+
+**PR #75 - Fix MakeMKV Drive Device Path**
+- `Win32_CDROMDrive.DeviceID` is a PNP device ID (e.g. `USBSTOR\CDROM&VEN_...`), not `CdRomN`
+- `dev:\\.\<PNP-DeviceID>` caused "Unknown device" / "Failed to open disc" for all USB drives
+- Replaced with `disc:N` format using the drive's position in WMI `Win32_CDROMDrive` enumeration
+- Added drive wake-up (`Test-Path`) before WMI query and before Step 1 to spin up dormant USB drives
+- Error output now lists all available drives when target drive not found
+- Untested on real disc — user's drives were all in use; to verify next session
+
+**Files changed:**
+- `rip-disc.ps1` — Drive source mapping rewrite, drive wake-up
+- `README.md` — Blu-ray directory structure, feature descriptions
+- `CHANGELOG.md` — 2026-03-01 and 2026-03-04 sections
+- `CLAUDE.md` — Session notes
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Test PR #75 drive fix on next real rip
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
