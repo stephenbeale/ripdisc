@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-03-04
+
+### Fixed
+- MakeMKV drive path: replaced broken `dev:\\.\<PNP-DeviceID>` with `disc:N` format using WMI enumeration index (#75)
+  - USB drives returned USBSTOR device paths which MakeMKV doesn't understand
+  - Now maps drive letter to MakeMKV disc index via `Win32_CDROMDrive` enumeration
+  - Added drive wake-up (`Test-Path`) before WMI query and Step 1 to spin up dormant USB drives
+  - Error output now lists all available drives when target not found
+
 ## 2026-03-01
 
 ### Added
