@@ -635,7 +635,24 @@ if ($StartFromStepNumber -le 3) {
             $_.Extension -match '\.(mp4|mkv)$'
         } | Sort-Object Name
 
+        # Auto-detect next episode number from existing files in destination folder
         $episodeNum = $StartEpisode
+        if (Test-Path $seriesSeasonDir) {
+            $existingEpisodes = Get-ChildItem -Path $seriesSeasonDir -File | Where-Object {
+                $_.Name -match "^[^-]+-${seasonTag}E(\d+)\."
+            }
+            if ($existingEpisodes) {
+                $highestExisting = ($existingEpisodes | ForEach-Object {
+                    if ($_.Name -match "E(\d+)\.") { [int]$Matches[1] }
+                } | Measure-Object -Maximum).Maximum
+                if ($highestExisting -ge $episodeNum) {
+                    $episodeNum = $highestExisting + 1
+                    Write-Host "  Found existing episodes in destination (up to E$("{0:D2}" -f $highestExisting)), starting at E$("{0:D2}" -f $episodeNum)" -ForegroundColor Cyan
+                    Write-Log "Auto-detected existing episodes up to E$("{0:D2}" -f $highestExisting), starting at E$("{0:D2}" -f $episodeNum)"
+                }
+            }
+        }
+
         foreach ($file in $episodeFiles) {
             $episodeTag = "E{0:D2}" -f $episodeNum
             $newName = "$title-$seasonTag$episodeTag$($file.Extension)"
@@ -666,11 +683,16 @@ if ($StartFromStepNumber -le 3) {
         $renamedFiles = Get-ChildItem -Path $finalOutputDir -File
         foreach ($file in $renamedFiles) {
             $destPath = Join-Path $seriesSeasonDir $file.Name
+            if (Test-Path $destPath) {
+                Write-Host "  WARNING: $($file.Name) already exists in destination - skipping to avoid overwrite" -ForegroundColor Red
+                Write-Log "WARNING: Skipped move of $($file.Name) - file already exists at $destPath"
+                continue
+            }
             $maxRetries = 5
             $retryDelay = 3
             for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                 try {
-                    Move-Item -LiteralPath $file.FullName -Destination $destPath -Force -ErrorAction Stop
+                    Move-Item -LiteralPath $file.FullName -Destination $destPath -ErrorAction Stop
                     break
                 } catch [System.IO.IOException] {
                     if ($attempt -eq $maxRetries) {
