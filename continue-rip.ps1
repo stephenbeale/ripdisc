@@ -565,7 +565,7 @@ if ($StartFromStepNumber -le 2) {
     if ($encodedFiles.Count -gt 0) {
         $largestEncoded = $encodedFiles | Sort-Object Length -Descending | Select-Object -First 1
         $largestSizeMB = [math]::Round($largestEncoded.Length / 1MB, 2)
-        $minSizeMB = 100
+        $minSizeMB = 10
 
         if ($largestSizeMB -lt $minSizeMB) {
             $script:EncodedFilesTooSmall = $true
