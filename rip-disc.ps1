@@ -965,7 +965,16 @@ Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minl
 Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
 
 # Stream MakeMKV output to console and capture for error analysis
-& $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput | ForEach-Object { Write-Host $_ }
+# Suppress consecutive duplicate lines — MakeMKV often repeats the same message many times
+# (e.g. region mismatch warnings). All output is still captured in $makemkvFullOutput for error analysis.
+$script:lastPrintedLine = $null
+& $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput | ForEach-Object {
+    $line = "$_"
+    if ($line -ne $script:lastPrintedLine) {
+        Write-Host $line
+        $script:lastPrintedLine = $line
+    }
+}
 $makemkvExitCode = $LASTEXITCODE
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
