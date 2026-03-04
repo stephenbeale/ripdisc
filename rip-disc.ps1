@@ -418,17 +418,31 @@ $driveDescription = if ($DriveIndex -ge 0) {
 
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV
-# MakeMKV's dev: prefix requires a physical device path (\\.\CdRomN), not a Windows drive letter.
-# Map the drive letter to its CdRomN device ID via Win32_CDROMDrive so MakeMKV finds the right drive.
+# Use disc:N format which lets MakeMKV find drives by its own enumeration index.
+# Win32_CDROMDrive.DeviceID is a PNP device ID (e.g. USBSTOR\...), not a CdRomN name,
+# so dev:\\.\ paths don't work for USB drives. disc:N is reliable across all drive types.
+# Wake up the target drive first — USB optical drives go dormant and WMI/MakeMKV stalls waiting for spin-up
+$null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    $cdromDevice = Get-CimInstance Win32_CDROMDrive | Where-Object { $_.Drive -eq $driveLetter } | Select-Object -First 1
-    if ($cdromDevice) {
-        # DeviceID is e.g. "CdRom0" — build the \\.\CdRomN path MakeMKV expects
-        $discSource = "dev:\\.\$($cdromDevice.DeviceID)"
+    $allCdromDrives = @(Get-CimInstance Win32_CDROMDrive)
+    $matchedIndex = -1
+    for ($i = 0; $i -lt $allCdromDrives.Count; $i++) {
+        if ($allCdromDrives[$i].Drive -eq $driveLetter) {
+            $matchedIndex = $i
+            break
+        }
+    }
+    if ($matchedIndex -ge 0) {
+        $discSource = "disc:$matchedIndex"
+        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($allCdromDrives[$matchedIndex].Caption))" -ForegroundColor Gray
     } else {
         Write-Host "ERROR: Drive $driveLetter not found. Check the drive letter is correct and the drive is connected." -ForegroundColor Red
+        Write-Host "Available drives:" -ForegroundColor Yellow
+        foreach ($d in $allCdromDrives) {
+            Write-Host "  $($d.Drive) - $($d.Caption)" -ForegroundColor Gray
+        }
         exit 1
     }
 }
@@ -887,6 +901,11 @@ Set-CurrentStep -StepNumber 1
 $script:LastWorkingDirectory = $makemkvOutputDir
 Write-Log "STEP 1/4: Starting MakeMKV rip..."
 Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
+
+# Wake up dormant USB drives by accessing the drive letter (triggers spin-up)
+Write-Host "Waking drive $driveLetter..." -ForegroundColor Gray
+$null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
+Write-Log "Drive wake-up: $driveLetter"
 
 # $discSource was already set in the auto-discovery section above
 if ($DriveIndex -ge 0) {
