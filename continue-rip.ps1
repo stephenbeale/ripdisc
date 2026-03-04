@@ -626,36 +626,19 @@ if ($StartFromStepNumber -le 3) {
     }
 
     if ($Series) {
-        # ========== SERIES MODE: Rename to Jellyfin episode format ==========
-        Write-Host "`nRenaming episodes to Jellyfin format..." -ForegroundColor Yellow
+        # ========== SERIES MODE: Prefix files with title + season-disc tag ==========
+        # Keeps original MakeMKV filenames (t00, t01...) for episode ordering
+        Write-Host "`nPrefixing series files..." -ForegroundColor Yellow
         $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
+        $discTag = "D$Disc"
+        $prefix = "$title-$seasonTag-$discTag"
 
-        # Get video files sorted by name (MakeMKV title order = episode order)
         $episodeFiles = Get-ChildItem -File | Where-Object {
             $_.Extension -match '\.(mp4|mkv)$'
         } | Sort-Object Name
 
-        # Auto-detect next episode number from existing files in destination folder
-        $episodeNum = $StartEpisode
-        if (Test-Path $seriesSeasonDir) {
-            $existingEpisodes = Get-ChildItem -Path $seriesSeasonDir -Recurse -File | Where-Object {
-                $_.Name -match "^[^-]+-${seasonTag}E(\d+)\."
-            }
-            if ($existingEpisodes) {
-                $highestExisting = ($existingEpisodes | ForEach-Object {
-                    if ($_.Name -match "E(\d+)\.") { [int]$Matches[1] }
-                } | Measure-Object -Maximum).Maximum
-                if ($highestExisting -ge $episodeNum) {
-                    $episodeNum = $highestExisting + 1
-                    Write-Host "  Found existing episodes in destination (up to E$("{0:D2}" -f $highestExisting)), starting at E$("{0:D2}" -f $episodeNum)" -ForegroundColor Cyan
-                    Write-Log "Auto-detected existing episodes up to E$("{0:D2}" -f $highestExisting), starting at E$("{0:D2}" -f $episodeNum)"
-                }
-            }
-        }
-
         foreach ($file in $episodeFiles) {
-            $episodeTag = "E{0:D2}" -f $episodeNum
-            $newName = "$title-$seasonTag$episodeTag$($file.Extension)"
+            $newName = "$prefix-$($file.Name)"
             Write-Host "  $($file.Name) -> $newName" -ForegroundColor Gray
             $maxRetries = 5
             $retryDelay = 3
@@ -673,10 +656,9 @@ if ($StartFromStepNumber -le 3) {
                     Start-Sleep -Seconds $retryDelay
                 }
             }
-            $episodeNum++
         }
-        Write-Host "Renamed $($episodeFiles.Count) episode(s)" -ForegroundColor Green
-        Write-Log "Renamed $($episodeFiles.Count) episode(s) to Jellyfin format"
+        Write-Host "Renamed $($episodeFiles.Count) file(s)" -ForegroundColor Green
+        Write-Log "Prefixed $($episodeFiles.Count) file(s) with $prefix"
 
         # Keep files in disc subdirectory (Jellyfin scans recursively)
         Write-Host "Episodes kept in disc directory: $finalOutputDir" -ForegroundColor Green
