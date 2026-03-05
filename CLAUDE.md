@@ -733,3 +733,39 @@ Two bugs:
 - Test PR #75 drive fix on next real rip
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-03-05 - Drive Index: WMI Retry then Direct MakeMKV Query
+
+**Problem:**
+PR #75 mapped drive letters to `disc:N` using the drive's position in WMI `Win32_CDROMDrive` enumeration. WMI ordering and MakeMKV's internal enumeration can disagree — particularly for USB drives — causing MakeMKV to rip from the wrong drive.
+
+**PR #82 merged: `fix/makemkv-drive-index`**
+- Initial fix: WMI-first approach with auto-retry fallback
+- Added `Find-MakeMkvDriveIndex` helper that queries `disc:9999` to map drive letters to MakeMKV disc indices
+- Added README explanation of why the Disc1 subdirectory is used
+
+**PR #83 open: `fix/drive-index-direct`** (branch: `fix/drive-index-direct`, CodeRabbit passing)
+- Replaces WMI-first-then-retry with direct `disc:9999` MakeMKV query every time
+- Removes WMI lookup entirely, removes retry block, removes `Find-MakeMkvDriveIndex` helper
+- Simpler, correct, and consistent — always asks MakeMKV which index owns a given drive letter
+- Awaiting human approval to merge (branch protection)
+
+**CodeRabbit comments on PR #83 (outside diff — address before or after merge):**
+1. Harden `disc:9999` exit-code check: if `$LASTEXITCODE -ne 0` after the MakeMKV call, write error and `exit 1`
+2. Normalize drive letter comparison: `TrimEnd('\')`, `TrimEnd(':')`, `ToUpperInvariant()` on both sides
+3. Add `disc:0` fallback when `-Drive` was not explicitly passed (preserves single-drive backward compat)
+
+**Files changed in PR #83:**
+- `rip-disc.ps1` — Drive index logic replaced with direct `disc:9999` query
+
+**Work In Progress:**
+- PR #83 open — awaiting merge
+
+**Outstanding Work for Future Sessions:**
+- Merge PR #83 (`fix/drive-index-direct`) — CodeRabbit passing, needs human approval
+- Consider applying CodeRabbit's 3 hardening suggestions to the merged code as a follow-up PR
+- Test drive index fix on next real disc rip
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
