@@ -419,29 +419,44 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV
 # Use disc:N format which lets MakeMKV find drives by its own enumeration index.
-# Win32_CDROMDrive.DeviceID is a PNP device ID (e.g. USBSTOR\...), not a CdRomN name,
-# so dev:\\.\ paths don't work for USB drives. disc:N is reliable across all drive types.
+# IMPORTANT: WMI Win32_CDROMDrive enumeration order does NOT match MakeMKV's disc:N order.
+# We must query MakeMKV directly (info disc:9999) to get its DRV: lines and match by drive letter.
 # Wake up the target drive first — USB optical drives go dormant and WMI/MakeMKV stalls waiting for spin-up
 $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    $allCdromDrives = @(Get-CimInstance Win32_CDROMDrive)
+    # Query MakeMKV's own drive enumeration to find the correct disc:N for this drive letter
+    Write-Host "Querying MakeMKV drive list..." -ForegroundColor Gray
+    $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
     $matchedIndex = -1
-    for ($i = 0; $i -lt $allCdromDrives.Count; $i++) {
-        if ($allCdromDrives[$i].Drive -eq $driveLetter) {
-            $matchedIndex = $i
-            break
+    $drvLines = @()
+    foreach ($line in $drvOutput) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
+            $idx = [int]$Matches[1]
+            $drvFlag = [int]$Matches[2]
+            $drvName = $Matches[3]
+            $drvDiscName = $Matches[4]
+            $drvLetter = $Matches[5]
+            # Only consider real drives (flag < 256)
+            if ($drvFlag -lt 256) {
+                $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
+            }
+            if ($drvLetter -eq $driveLetter) {
+                $matchedIndex = $idx
+            }
         }
     }
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
-        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($allCdromDrives[$matchedIndex].Caption))" -ForegroundColor Gray
+        $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
+        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Gray
     } else {
-        Write-Host "ERROR: Drive $driveLetter not found. Check the drive letter is correct and the drive is connected." -ForegroundColor Red
-        Write-Host "Available drives:" -ForegroundColor Yellow
-        foreach ($d in $allCdromDrives) {
-            Write-Host "  $($d.Drive) - $($d.Caption)" -ForegroundColor Gray
+        Write-Host "ERROR: Drive $driveLetter not found in MakeMKV drive list." -ForegroundColor Red
+        Write-Host "Available MakeMKV drives:" -ForegroundColor Yellow
+        foreach ($d in $drvLines) {
+            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)" -ForegroundColor Gray
         }
         exit 1
     }
@@ -449,18 +464,14 @@ if ($DriveIndex -ge 0) {
 
 if ($title -eq "") {
     # No title provided - run full discovery
-    # For discovery, use disc:0 to let MakeMKV find the first available disc
-    # (unless user specified a specific drive)
+    # Use the already-resolved $discSource (correct MakeMKV index for the target drive)
+    $discoverySource = $discSource
     if ($DriveIndex -ge 0) {
-        $discoverySource = "disc:$DriveIndex"
-        $driveHint = switch ($DriveIndex) {
-            0 { "D: internal" }
-            1 { "G: ASUS external" }
-            default { "drive index $DriveIndex" }
-        }
+        $driveHint = "drive index $DriveIndex ($discoverySource)"
+    } elseif ($Drive) {
+        $driveHint = "$driveLetter ($discoverySource)"
     } else {
-        $discoverySource = "disc:0"
-        $driveHint = "first available drive"
+        $driveHint = "first available drive ($discoverySource)"
     }
 
     Write-Host "`n========================================" -ForegroundColor Cyan
