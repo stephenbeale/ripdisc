@@ -277,7 +277,7 @@ Each step is tracked, and the system shows completion status and provides recove
 
 Both versions support ripping multiple discs simultaneously:
 
-- Each disc uses a separate temporary directory
+- Each disc uses an isolated temporary directory (`C:\Video\{title}\Disc1\`, `C:\Video\{title}\Disc2\`, etc.) — even single-disc rips use `Disc1\` so that a concurrent extras rip on Disc 2 won't collide with identically-named MakeMKV output files
 - Window titles show which disc is being processed
 - Status suffixes indicate state: `-INPUT`, `-ERROR`, `-DONE`
 - For movies, disc 2+ shows `-extras` in the window title
