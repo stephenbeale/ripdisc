@@ -419,13 +419,16 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV
 # Use disc:N format which lets MakeMKV find drives by its own enumeration index.
-# Win32_CDROMDrive.DeviceID is a PNP device ID (e.g. USBSTOR\...), not a CdRomN name,
-# so dev:\\.\ paths don't work for USB drives. disc:N is reliable across all drive types.
+# NOTE: WMI Win32_CDROMDrive enumeration order may not match MakeMKV's disc:N order.
+# When -Drive is passed with -title, we use WMI index for speed (instant) and auto-retry
+# via MakeMKV's own drive list if the rip fails. For discovery mode (no -title), we query
+# MakeMKV upfront since we need disc info anyway.
 # Wake up the target drive first — USB optical drives go dormant and WMI/MakeMKV stalls waiting for spin-up
 $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
+    # Use WMI index as fast initial guess — will be verified/corrected if rip fails
     $allCdromDrives = @(Get-CimInstance Win32_CDROMDrive)
     $matchedIndex = -1
     for ($i = 0; $i -lt $allCdromDrives.Count; $i++) {
@@ -447,20 +450,50 @@ if ($DriveIndex -ge 0) {
     }
 }
 
+# Helper function: query MakeMKV's own drive list and find the correct disc:N for a drive letter
+function Find-MakeMkvDriveIndex {
+    param([string]$TargetDriveLetter)
+    Write-Host "Querying MakeMKV drive list to find correct index..." -ForegroundColor Yellow
+    $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
+    $matchedIdx = -1
+    $drvLines = @()
+    foreach ($line in $drvOutput) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
+            $idx = [int]$Matches[1]
+            $drvFlag = [int]$Matches[2]
+            $drvName = $Matches[3]
+            $drvDiscName = $Matches[4]
+            $drvLetter = $Matches[5]
+            if ($drvFlag -lt 256) {
+                $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
+            }
+            if ($drvLetter -eq $TargetDriveLetter) {
+                $matchedIdx = $idx
+            }
+        }
+    }
+    return @{ Index = $matchedIdx; Drives = $drvLines }
+}
+
 if ($title -eq "") {
     # No title provided - run full discovery
-    # For discovery, use disc:0 to let MakeMKV find the first available disc
-    # (unless user specified a specific drive)
-    if ($DriveIndex -ge 0) {
-        $discoverySource = "disc:$DriveIndex"
-        $driveHint = switch ($DriveIndex) {
-            0 { "D: internal" }
-            1 { "G: ASUS external" }
-            default { "drive index $DriveIndex" }
+    # Discovery needs accurate disc:N, so query MakeMKV upfront (we need disc info anyway)
+    if ($DriveIndex -lt 0 -and $Drive) {
+        $result = Find-MakeMkvDriveIndex -TargetDriveLetter $driveLetter
+        if ($result.Index -ge 0) {
+            $discSource = "disc:$($result.Index)"
+            $matchedDrv = $result.Drives | Where-Object { $_.Index -eq $result.Index }
+            Write-Host "Corrected: drive $driveLetter is MakeMKV disc:$($result.Index) ($($matchedDrv.Name))" -ForegroundColor Gray
         }
+    }
+    $discoverySource = $discSource
+    if ($DriveIndex -ge 0) {
+        $driveHint = "drive index $DriveIndex ($discoverySource)"
+    } elseif ($Drive) {
+        $driveHint = "$driveLetter ($discoverySource)"
     } else {
-        $discoverySource = "disc:0"
-        $driveHint = "first available drive"
+        $driveHint = "first available drive ($discoverySource)"
     }
 
     Write-Host "`n========================================" -ForegroundColor Cyan
@@ -979,6 +1012,41 @@ $makemkvExitCode = $LASTEXITCODE
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
 # Check if MakeMKV succeeded - provide specific error messages for common issues
+# If "Failed to open disc" and we used WMI index, auto-retry with MakeMKV's own drive list
+if ($makemkvExitCode -ne 0 -and
+    ($makemkvOutputText -match "Failed to open disc" -or $makemkvOutputText -match "no disc" -or
+     $makemkvOutputText -match "can't find" -or $makemkvOutputText -match "invalid drive") -and
+    $DriveIndex -lt 0 -and $Drive) {
+
+    Write-Host "`nWMI drive index ($discSource) didn't match MakeMKV — looking up correct index..." -ForegroundColor Yellow
+    $result = Find-MakeMkvDriveIndex -TargetDriveLetter $driveLetter
+    if ($result.Index -ge 0 -and "disc:$($result.Index)" -ne $discSource) {
+        $discSource = "disc:$($result.Index)"
+        $matchedDrv = $result.Drives | Where-Object { $_.Index -eq $result.Index }
+        Write-Host "Found: $driveLetter is MakeMKV disc:$($result.Index) ($($matchedDrv.Name))" -ForegroundColor Green
+        Write-Host "Retrying rip with corrected drive index...`n" -ForegroundColor Yellow
+
+        $script:lastPrintedLine = $null
+        & $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput | ForEach-Object {
+            $line = "$_"
+            if ($line -ne $script:lastPrintedLine) {
+                Write-Host $line
+                $script:lastPrintedLine = $line
+            }
+        }
+        $makemkvExitCode = $LASTEXITCODE
+        $makemkvOutputText = $makemkvFullOutput -join "`n"
+    } else {
+        Write-Host "`nERROR: Drive $driveLetter not found in MakeMKV drive list." -ForegroundColor Red
+        if ($result.Drives.Count -gt 0) {
+            Write-Host "Available MakeMKV drives:" -ForegroundColor Yellow
+            foreach ($d in $result.Drives) {
+                Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)" -ForegroundColor Gray
+            }
+        }
+    }
+}
+
 if ($makemkvExitCode -ne 0) {
     # Analyze output to determine the specific error
     $errorMessage = "MakeMKV exited with code $makemkvExitCode"
