@@ -123,6 +123,27 @@ function Show-StepsSummary {
     }
 }
 
+function Show-CoffeeBadge {
+    $vt = [char]0x2551
+    $w  = 60
+    $hz = [string]::new([char]0x2550, $w)
+    $tl = [char]0x2554
+    $tr = [char]0x2557
+    $bl = [char]0x255A
+    $br = [char]0x255D
+    Write-Host ""
+    Write-Host "  $tl$hz$tr" -ForegroundColor DarkGray
+    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   ) ) )".PadRight($w)) -NoNewline -ForegroundColor DarkYellow; Write-Host "$vt" -ForegroundColor DarkGray
+    $c = "  (_____)  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host ("Enjoying this app? Consider buying me a coffee!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor White; Write-Host "$vt" -ForegroundColor DarkGray
+    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("  |     |".PadRight($w)) -NoNewline -ForegroundColor DarkYellow; Write-Host "$vt" -ForegroundColor DarkGray
+    $c = "  |     |  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host (">> https://buymeacoffee.com/stephenbeale".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Yellow; Write-Host "$vt" -ForegroundColor DarkGray
+    $c = "  '-----'"; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host ("            ^^^ click here! ^^^".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
+    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("".PadRight($w)) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray
+    $c = "  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline; Write-Host ("Hosting by SiteGround - https://www.siteground.co.uk".PadRight($w - $c.Length)) -NoNewline -ForegroundColor DarkGray; Write-Host "$vt" -ForegroundColor DarkGray
+    Write-Host "  $bl$hz$br" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 # ========== CLOSE BUTTON PROTECTION ==========
 Add-Type -Name 'ConsoleCloseProtection' -Namespace 'Win32' -MemberDefinition @'
     [DllImport("kernel32.dll")]
@@ -915,9 +936,7 @@ if ($script:EncodedFilesTooSmall) {
     Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
 }
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "`nEnjoy! Consider buying me a coffee to support continued development:" -ForegroundColor Gray
-Write-Host "https://buymeacoffee.com/stephenbeale" -ForegroundColor Cyan
-Write-Host ""
+Show-CoffeeBadge
 
 Write-Log "========== CONTINUE SESSION COMPLETE =========="
 Write-Log "Final location: $finalOutputDir"
