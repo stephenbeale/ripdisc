@@ -812,3 +812,32 @@ End result: a friend can download the zip, double-click `Start.bat`, follow the 
 - Real-disc testing of drive index fix still pending (any rip will exercise this)
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-03-11 - Revert Drive Lookup to WMI (PR #92)
+
+**Problem:**
+PR #83 (`fix/drive-index-direct`) replaced WMI enumeration with a direct `disc:9999` MakeMKV query to map a drive letter to a `disc:N` index. The MakeMKV query approach had a critical flaw: it physically scanned all optical drives in the system, including drives that were mid-rip in concurrent sessions. This caused interference between concurrent rips.
+
+**PR #92 merged: `fix/revert-drive-lookup`**
+- Reverted the drive letter to `disc:N` mapping back to WMI `Win32_CDROMDrive` enumeration
+- WMI queries Windows only — it never touches physical drives or disturbs active rip sessions
+- The `disc:9999` MakeMKV approach (from PR #83) is fully removed
+
+**Current approach (post PR #92):**
+- Drive letter is mapped to `disc:N` index by enumerating `Win32_CDROMDrive` via WMI
+- WMI drive order is assumed to match MakeMKV's internal `disc:N` enumeration for the same hardware
+
+**Implication for PR #83:**
+- PR #83 (`fix/drive-index-direct`) is now OBSOLETE — the approach it implemented has been reverted
+- PR #83 should be closed on GitHub as superseded by PR #92
+
+**Work In Progress:**
+- None — main branch clean, fully synchronized with origin/main
+
+**Outstanding Work for Future Sessions:**
+- Close PR #83 on GitHub (obsolete — superseded by PR #92 revert to WMI)
+- Real-disc testing to verify WMI index mapping works correctly for G: (USB DVD drive)
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
