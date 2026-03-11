@@ -49,23 +49,38 @@ function Install-ViaChocolatey {
 
     $choco = Get-Command choco -ErrorAction SilentlyContinue
     if (-not $choco) {
-        Write-Host "Chocolatey is not installed." -ForegroundColor Yellow
-        Write-Host "Install Chocolatey first: https://chocolatey.org/install" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Chocolatey is not installed yet." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Chocolatey is a package manager for Windows (like apt or brew)." -ForegroundColor Gray
+        Write-Host "  It lets you install and update software from the command line." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  To install Chocolatey:" -ForegroundColor White
+        Write-Host "    1. Open PowerShell as Administrator (right-click > Run as Administrator)" -ForegroundColor Gray
+        Write-Host "    2. Run this command:" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "       Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "    3. Close and reopen PowerShell, then re-run: .\setup.ps1" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  More info: https://chocolatey.org/install" -ForegroundColor DarkGray
         return $false
     }
 
-    Write-Host "Installing $DisplayName via Chocolatey..." -ForegroundColor Cyan
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) {
-        Write-Host "ERROR: Chocolatey install requires an elevated (Admin) PowerShell." -ForegroundColor Red
-        Write-Host "Re-run setup.ps1 as Administrator, or install $DisplayName manually." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Chocolatey needs an elevated (Admin) PowerShell to install packages." -ForegroundColor Yellow
+        Write-Host "  Right-click PowerShell > 'Run as Administrator', then re-run: .\setup.ps1" -ForegroundColor Gray
+        Write-Host ""
         return $false
     }
 
+    Write-Host "  Installing $DisplayName via Chocolatey..." -ForegroundColor Cyan
     try {
         & choco install $PackageName -y 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "$DisplayName installed successfully." -ForegroundColor Green
+            Write-Host "  $DisplayName installed successfully." -ForegroundColor Green
 
             # Refresh PATH so we can find the newly installed exe
             $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
@@ -76,8 +91,30 @@ function Install-ViaChocolatey {
         }
     } catch {}
 
-    Write-Host "Chocolatey install failed." -ForegroundColor Red
+    Write-Host "  Chocolatey install failed." -ForegroundColor Red
     return $false
+}
+
+# ========== HELPER: MANUAL DOWNLOAD GUIDANCE ==========
+function Show-ManualDownloadHelp {
+    param(
+        [string]$ToolName,
+        [string]$Url,
+        [string]$ExeName,
+        [string]$InstallTip
+    )
+
+    Start-Process $Url
+    Write-Host ""
+    Write-Host "  Download page opened in your browser." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  After downloading:" -ForegroundColor White
+    Write-Host "    - Run the installer (or extract the zip)" -ForegroundColor Gray
+    Write-Host "    - $InstallTip" -ForegroundColor Gray
+    Write-Host "    - Re-run .\setup.ps1 and it will find $ExeName automatically" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Alternatively, note where $ExeName ends up and choose" -ForegroundColor DarkGray
+    Write-Host "  'Enter path manually' next time." -ForegroundColor DarkGray
 }
 
 # ========== DETECT / INSTALL MAKEMKV ==========
@@ -100,11 +137,14 @@ if ($makemkvPath) {
 } else {
     Write-Host "  MakeMKV not found." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  How would you like to install MakeMKV?" -ForegroundColor White
-    Write-Host "  [1] Install via Chocolatey (choco install makemkv)" -ForegroundColor Gray
-    Write-Host "  [2] Open download page (https://www.makemkv.com/download/)" -ForegroundColor Gray
-    Write-Host "  [3] Enter path manually" -ForegroundColor Gray
-    Write-Host "  [4] Skip (configure later)" -ForegroundColor Gray
+    Write-Host "  MakeMKV reads DVD and Blu-ray discs. RipDisc uses its command-line" -ForegroundColor Gray
+    Write-Host "  tool (makemkvcon) to extract video files from your discs." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  How would you like to install it?" -ForegroundColor White
+    Write-Host "  [1] Install via Chocolatey  - automatic, one command (recommended)" -ForegroundColor Gray
+    Write-Host "  [2] Download from website   - manual install from makemkv.com" -ForegroundColor Gray
+    Write-Host "  [3] Enter path manually     - if you already have it somewhere" -ForegroundColor Gray
+    Write-Host "  [4] Skip for now" -ForegroundColor Gray
     $choice = Read-Host "  Choice [1-4]"
 
     switch ($choice) {
@@ -117,10 +157,18 @@ if ($makemkvPath) {
             }
         }
         "2" {
-            Start-Process "https://www.makemkv.com/download/"
-            Write-Host "  Download page opened. After installing, re-run setup.ps1." -ForegroundColor Yellow
+            Show-ManualDownloadHelp `
+                -ToolName "MakeMKV" `
+                -Url "https://www.makemkv.com/download/" `
+                -ExeName "makemkvcon64.exe" `
+                -InstallTip "The default install location (Program Files) works fine"
         }
         "3" {
+            Write-Host ""
+            Write-Host "  Typical locations:" -ForegroundColor DarkGray
+            Write-Host "    C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -ForegroundColor DarkGray
+            Write-Host "    C:\Program Files\MakeMKV\makemkvcon64.exe" -ForegroundColor DarkGray
+            Write-Host ""
             $manual = Read-Host "  Full path to makemkvcon64.exe (or makemkvcon.exe)"
             if ($manual -and (Test-Path $manual)) {
                 $makemkvPath = $manual
@@ -149,11 +197,17 @@ if ($handbrakePath) {
 } else {
     Write-Host "  HandBrakeCLI not found." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  How would you like to install HandBrakeCLI?" -ForegroundColor White
-    Write-Host "  [1] Install via Chocolatey (choco install handbrake-cli)" -ForegroundColor Gray
-    Write-Host "  [2] Open download page (https://handbrake.fr/downloads2.php)" -ForegroundColor Gray
-    Write-Host "  [3] Enter path manually" -ForegroundColor Gray
-    Write-Host "  [4] Skip (configure later)" -ForegroundColor Gray
+    Write-Host "  HandBrakeCLI is the command-line version of HandBrake. RipDisc uses" -ForegroundColor Gray
+    Write-Host "  it to encode the raw MKV files from MakeMKV into smaller MP4 files." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Note: This is the CLI (command-line) version, not the GUI app." -ForegroundColor White
+    Write-Host "  They are separate downloads." -ForegroundColor White
+    Write-Host ""
+    Write-Host "  How would you like to install it?" -ForegroundColor White
+    Write-Host "  [1] Install via Chocolatey  - automatic, one command (recommended)" -ForegroundColor Gray
+    Write-Host "  [2] Download from website   - manual download from handbrake.fr" -ForegroundColor Gray
+    Write-Host "  [3] Enter path manually     - if you already have it somewhere" -ForegroundColor Gray
+    Write-Host "  [4] Skip for now" -ForegroundColor Gray
     $choice = Read-Host "  Choice [1-4]"
 
     switch ($choice) {
@@ -163,10 +217,19 @@ if ($handbrakePath) {
             }
         }
         "2" {
-            Start-Process "https://handbrake.fr/downloads2.php"
-            Write-Host "  Download page opened. After installing, re-run setup.ps1." -ForegroundColor Yellow
+            Show-ManualDownloadHelp `
+                -ToolName "HandBrakeCLI" `
+                -Url "https://handbrake.fr/downloads2.php" `
+                -ExeName "HandBrakeCLI.exe" `
+                -InstallTip "The download is a zip file - extract it and put HandBrakeCLI.exe somewhere permanent (e.g. C:\Tools\HandBrakeCLI.exe)"
         }
         "3" {
+            Write-Host ""
+            Write-Host "  Typical locations:" -ForegroundColor DarkGray
+            Write-Host "    C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe  (if installed via Chocolatey)" -ForegroundColor DarkGray
+            Write-Host "    C:\Program Files\HandBrake\HandBrakeCLI.exe     (if installed via MSI)" -ForegroundColor DarkGray
+            Write-Host "    Wherever you extracted the zip download" -ForegroundColor DarkGray
+            Write-Host ""
             $manual = Read-Host "  Full path to HandBrakeCLI.exe"
             if ($manual -and (Test-Path $manual)) {
                 $handbrakePath = $manual
@@ -180,7 +243,12 @@ if ($handbrakePath) {
 }
 
 # ========== CONFIGURE TEMP ROOT ==========
-Write-Host "`n[3/5] Temp working directory (for MakeMKV rips, logs, queue)" -ForegroundColor White
+Write-Host "`n[3/5] Temp working directory" -ForegroundColor White
+Write-Host ""
+Write-Host "  MakeMKV rips raw files here before encoding. These files are large" -ForegroundColor Gray
+Write-Host "  (a DVD is ~4-8 GB, a Blu-ray can be 25-50 GB) but are deleted" -ForegroundColor Gray
+Write-Host "  automatically after encoding. Logs and queue files also go here." -ForegroundColor Gray
+Write-Host ""
 
 $defaultTempRoot = "C:\Video"
 Write-Host "  Default: $defaultTempRoot" -ForegroundColor Gray
@@ -197,26 +265,71 @@ if (!(Test-Path $tempRoot)) {
 
 # ========== CONFIGURE DRIVES ==========
 Write-Host "`n[4/5] Default drive letters" -ForegroundColor White
+Write-Host ""
+Write-Host "  Input drive  = your DVD/Blu-ray disc drive" -ForegroundColor Gray
+Write-Host "  Output drive = where encoded files are saved (e.g. a media hard drive)" -ForegroundColor Gray
 
+# Try to detect optical drives to help the user
+try {
+    $opticalDrives = Get-CimInstance Win32_CDROMDrive -ErrorAction SilentlyContinue
+    if ($opticalDrives) {
+        Write-Host ""
+        Write-Host "  Detected optical drive(s):" -ForegroundColor DarkCyan
+        foreach ($od in $opticalDrives) {
+            $odLetter = ($od.Drive -replace '\\$', '')
+            $odName = if ($od.Caption) { $od.Caption } else { "Unknown" }
+            Write-Host "    $odLetter  $odName" -ForegroundColor DarkCyan
+        }
+    }
+} catch {}
+
+Write-Host ""
 $defaultInputDrive = "D:"
 Write-Host "  Default input (disc) drive: $defaultInputDrive" -ForegroundColor Gray
 $inputDriveInput = Read-Host "  Press Enter to accept, or type your disc drive letter (e.g. G:)"
 $inputDrive = if ($inputDriveInput) { $inputDriveInput.TrimEnd(":") + ":" } else { $defaultInputDrive }
 
+# Show available volumes to help pick output drive
+try {
+    $volumes = Get-Volume -ErrorAction SilentlyContinue | Where-Object {
+        $_.DriveLetter -and $_.DriveType -eq 'Fixed' -and $_.DriveLetter -ne 'C'
+    } | Sort-Object DriveLetter
+    if ($volumes) {
+        Write-Host ""
+        Write-Host "  Available storage drives:" -ForegroundColor DarkCyan
+        foreach ($v in $volumes) {
+            $freeGB = [math]::Round($v.SizeRemaining / 1GB, 0)
+            $totalGB = [math]::Round($v.Size / 1GB, 0)
+            $label = if ($v.FileSystemLabel) { $v.FileSystemLabel } else { "Local Disk" }
+            Write-Host "    $($v.DriveLetter):  $label ($freeGB GB free of $totalGB GB)" -ForegroundColor DarkCyan
+        }
+    }
+} catch {}
+
+Write-Host ""
 $defaultOutputDrive = "E:"
 Write-Host "  Default output drive: $defaultOutputDrive" -ForegroundColor Gray
 $outputDriveInput = Read-Host "  Press Enter to accept, or type your output drive letter (e.g. F:)"
 $outputDrive = if ($outputDriveInput) { $outputDriveInput.TrimEnd(":") + ":" } else { $defaultOutputDrive }
 
 # ========== CONFIGURE TMDB API KEY ==========
-Write-Host "`n[5/5] TMDb API key (optional - enables auto-discovery of disc titles)" -ForegroundColor White
+Write-Host "`n[5/5] TMDb API key (optional)" -ForegroundColor White
+Write-Host ""
+Write-Host "  TMDb (The Movie Database) lets RipDisc auto-detect the title," -ForegroundColor Gray
+Write-Host "  type (movie/series), and season from your disc. Without it," -ForegroundColor Gray
+Write-Host "  you just type the title manually with -title." -ForegroundColor Gray
+Write-Host ""
+Write-Host "  To get a free API key:" -ForegroundColor Gray
+Write-Host "    1. Create an account at themoviedb.org" -ForegroundColor Gray
+Write-Host "    2. Go to: https://www.themoviedb.org/settings/api" -ForegroundColor Gray
+Write-Host "    3. Request an API key (choose 'Developer', any use case is fine)" -ForegroundColor Gray
+Write-Host ""
 
 $existingKey = $env:TMDB_API_KEY
 if ($existingKey) {
     Write-Host "  Found existing TMDB_API_KEY environment variable." -ForegroundColor Green
     $tmdbKey = $existingKey
 } else {
-    Write-Host "  Get a free key at: https://www.themoviedb.org/settings/api" -ForegroundColor Gray
     $tmdbKey = Read-Host "  TMDb API key (or press Enter to skip)"
 }
 
