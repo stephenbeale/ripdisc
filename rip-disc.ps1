@@ -445,70 +445,34 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # ========== AUTO-DISCOVERY ==========
 # Build disc source string for MakeMKV
 # Use disc:N format which lets MakeMKV find drives by its own enumeration index.
-# WMI Win32_CDROMDrive enumeration order does NOT match MakeMKV's disc:N order,
-# so we always query MakeMKV directly via `info disc:9999` to get the correct index.
-# Drive mapping is cached to a temp file (5-minute TTL) to avoid slow re-queries.
-# Wake up the target drive first — USB optical drives go dormant and MakeMKV stalls waiting for spin-up
+# We use WMI Win32_CDROMDrive to map drive letters to disc indices — this is fast
+# and does NOT touch any physical drives (unlike querying MakeMKV directly, which
+# scans all optical drives and can interfere with concurrent rip sessions).
+# Wake up the target drive first — USB optical drives go dormant and WMI/MakeMKV stalls waiting for spin-up
 $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    # Check for cached drive mapping (5-minute TTL)
-    $drvCacheFile = Join-Path $env:TEMP "makemkv-drive-cache.txt"
-    $drvCacheTTL = 5  # minutes
-    $drvOutput = $null
-    if (Test-Path $drvCacheFile) {
-        $cacheAge = (Get-Date) - (Get-Item $drvCacheFile).LastWriteTime
-        if ($cacheAge.TotalMinutes -lt $drvCacheTTL) {
-            Write-Host "Looking up drive $driveLetter (cached)..." -ForegroundColor Gray
-            $drvOutput = Get-Content $drvCacheFile
-        }
-    }
-    if (-not $drvOutput) {
-        Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
-        $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: MakeMKV drive query failed (exit code $LASTEXITCODE)" -ForegroundColor Red
-            exit 1
-        }
-        # Cache the output for subsequent runs
-        $drvOutput | Set-Content $drvCacheFile -Force
-    }
+    $allCdromDrives = @(Get-CimInstance Win32_CDROMDrive)
     $matchedIndex = -1
-    $drvLines = @()
-    foreach ($line in $drvOutput) {
-        $trimmed = "$line".Trim()
-        if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
-            $idx = [int]$Matches[1]
-            $drvFlag = [int]$Matches[2]
-            $drvName = $Matches[3]
-            $drvDiscName = $Matches[4]
-            $drvLetter = $Matches[5]
-            if ($drvFlag -lt 256) {
-                $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
-            }
-            if ($drvLetter -eq $driveLetter) {
-                $matchedIndex = $idx
-            }
+    for ($i = 0; $i -lt $allCdromDrives.Count; $i++) {
+        if ($allCdromDrives[$i].Drive -eq $driveLetter) {
+            $matchedIndex = $i
+            break
         }
     }
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
-        $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
-        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Gray
+        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($allCdromDrives[$matchedIndex].Caption))" -ForegroundColor Gray
     } else {
-        # Cache miss or stale — clear cache and retry once
-        if (Test-Path $drvCacheFile) {
-            Remove-Item $drvCacheFile -Force
-        }
-        Write-Host "ERROR: Drive $driveLetter not found in MakeMKV drive list." -ForegroundColor Red
-        if ($drvLines.Count -gt 0) {
-            Write-Host "Available MakeMKV drives:" -ForegroundColor Yellow
-            foreach ($d in $drvLines) {
-                Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)" -ForegroundColor Gray
+        Write-Host "ERROR: Drive $driveLetter not found. Check the drive letter is correct and the drive is connected." -ForegroundColor Red
+        if ($allCdromDrives.Count -gt 0) {
+            Write-Host "Available drives:" -ForegroundColor Yellow
+            foreach ($d in $allCdromDrives) {
+                Write-Host "  $($d.Drive) - $($d.Caption)" -ForegroundColor Gray
             }
         } else {
-            Write-Host "No optical drives detected by MakeMKV." -ForegroundColor Yellow
+            Write-Host "No optical drives detected." -ForegroundColor Yellow
         }
         exit 1
     }
