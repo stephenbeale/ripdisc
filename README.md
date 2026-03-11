@@ -62,13 +62,11 @@ If `-title` is provided, discovery is skipped (only disc format auto-detection f
 
 ### TMDb API Key Setup
 
-To enable TMDb searching, set the `TMDB_API_KEY` environment variable:
+To enable TMDb searching, either:
+- Run `setup.ps1` and enter your key when prompted (saved to `ripdisc-config.json`)
+- Or set the `TMDB_API_KEY` environment variable:
 
 ```powershell
-# Set for current session
-$env:TMDB_API_KEY = "your_api_key_here"
-
-# Set permanently (user-level)
 [Environment]::SetEnvironmentVariable("TMDB_API_KEY", "your_api_key_here", "User")
 ```
 
@@ -76,13 +74,33 @@ Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/s
 
 Without a TMDb key, the script still works — it uses the cleaned disc name as the title and falls back to manual input if the name is too generic.
 
-## Quick Start
+## Getting Started
 
-### PowerShell Version
+### New to this? Start here:
+
+1. **Download** — Click the green **Code** button above, then **Download ZIP**. Extract it somewhere (e.g. `C:\RipDisc\`).
+2. **Double-click `Start.bat`** — This launches the setup wizard, which will:
+   - Check for MakeMKV and HandBrakeCLI on your system
+   - Help you install anything that's missing
+   - Ask you to pick your disc drive and output drive
+   - Save your settings so you only do this once
+3. **Rip a disc** — Open PowerShell in the RipDisc folder and run:
 
 ```powershell
 .\rip-disc.ps1 -title "The Matrix"
 ```
+
+Or let it auto-detect the disc title (requires a free TMDb API key — setup will explain):
+
+```powershell
+.\rip-disc.ps1
+```
+
+That's it. Insert a disc, run the script, and it handles ripping, encoding, and organising the files.
+
+### Already familiar with PowerShell?
+
+Run `.\setup.ps1` directly instead of the bat file. Or skip setup entirely — the scripts auto-detect tool locations and fall back to sensible defaults.
 
 ### C# Version
 
@@ -93,11 +111,21 @@ cd RipDisc\RipDisc\bin\Release\net8.0-windows
 
 ## Requirements
 
-- **Windows OS**
-- **MakeMKV** installed at `C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`
-- **HandBrake CLI** installed at `C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe`
-- **PowerShell 5.1+** (for PowerShell version)
-- **.NET 8.0+** (for C# version)
+- **Windows 10/11**
+- **[MakeMKV](https://www.makemkv.com/download/)** — reads DVD and Blu-ray discs (setup will help you install it)
+- **[HandBrakeCLI](https://handbrake.fr/downloads2.php)** — encodes video files (setup will help you install it)
+- **PowerShell 5.1+** (included with Windows 10/11)
+- **.NET 8.0+** (only needed for the C# version)
+
+## Configuration
+
+All paths and defaults are stored in `ripdisc-config.json` (created by `setup.ps1`). You can also create it manually from the sample:
+
+```powershell
+Copy-Item ripdisc-config.sample.json ripdisc-config.json
+```
+
+If no config file exists, the scripts auto-detect tool locations by searching the PATH, Windows registry, and common install directories.
 
 ## Usage
 
@@ -403,6 +431,10 @@ All other parameters work the same as `rip-disc.ps1`:
 
 ```
 ripdisc/
+├── Start.bat              # Double-click to get started (launches setup)
+├── setup.ps1              # First-run setup (detects/installs tools, creates config)
+├── Load-Config.ps1        # Shared config loader (dot-sourced by scripts)
+├── ripdisc-config.sample.json  # Sample configuration file
 ├── rip-disc.ps1           # PowerShell implementation
 ├── continue-rip.ps1       # Resume failed rips from a specific step
 ├── series-cleanup.ps1     # Series cleanup utility
