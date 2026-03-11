@@ -769,3 +769,46 @@ PR #75 mapped drive letters to `disc:N` using the drive's position in WMI `Win32
 - Test drive index fix on next real disc rip
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-03-11 - Config System, Setup Wizard, and v1.0.0 Release
+
+**Problem:**
+All tool paths (MakeMKV, HandBrake, TMDb API key, etc.) were hard-coded in both scripts. A new user downloading the repo would need to manually edit the scripts before they could run anything — not shareable.
+
+**PR #91 merged: `feature/config-system`**
+
+New files added:
+
+| File | Purpose |
+|------|---------|
+| `setup.ps1` | Interactive first-run wizard — guides through Chocolatey install, manual download fallback, drive detection, TMDb API key setup; writes `ripdisc-config.json` |
+| `Load-Config.ps1` | Shared config loader — reads `ripdisc-config.json`, falls back to auto-detection via registry, PATH scan, and common install paths |
+| `ripdisc-config.sample.json` | Sample config committed to repo — users copy and fill in |
+| `Start.bat` | Double-click entry point — runs `setup.ps1` with `-ExecutionPolicy Bypass` so users never need to touch PowerShell settings |
+
+Changes to existing scripts:
+
+- All hard-coded paths in `rip-disc.ps1` and `continue-rip.ps1` replaced with config variables loaded from `Load-Config.ps1`
+- `ripdisc-config.json` added to `.gitignore` (user-specific, never committed)
+- README updated with "Getting Started" section aimed at new users, linking to `Start.bat` and `setup.ps1`
+
+End result: a friend can download the zip, double-click `Start.bat`, follow the wizard, and be ready to rip.
+
+**GitHub Release v1.0.0 published**
+- URL: https://github.com/stephenbeale/ripdisc/releases/tag/v1.0.0
+- Includes a self-contained C# exe (65MB) as a downloadable release asset
+- Release notes include getting started instructions
+
+**PowerShell Gallery publishing**
+- Considered and started; abandoned at user's request
+
+**Work In Progress:**
+- PR #83 open: `fix/drive-index-direct` — CodeRabbit passing; needs human approval (branch protection)
+
+**Outstanding Work for Future Sessions:**
+- Merge PR #83 (`fix/drive-index-direct`) — CodeRabbit passing, needs human approval
+- Real-disc testing of drive index fix still pending (any rip will exercise this)
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
