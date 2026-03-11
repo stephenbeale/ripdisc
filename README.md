@@ -74,25 +74,33 @@ Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/s
 
 Without a TMDb key, the script still works — it uses the cleaned disc name as the title and falls back to manual input if the name is too generic.
 
-## Quick Start
+## Getting Started
 
-### 1. Run Setup
+### New to this? Start here:
 
-```powershell
-.\setup.ps1
-```
-
-This will:
-- **Auto-detect** MakeMKV and HandBrakeCLI on your system
-- **Offer to install** missing tools via [Chocolatey](https://chocolatey.org/) or open download pages
-- **Configure** drive letters, temp directory, and TMDb API key
-- **Save** everything to `ripdisc-config.json`
-
-### 2. Rip a Disc
+1. **Download** — Click the green **Code** button above, then **Download ZIP**. Extract it somewhere (e.g. `C:\RipDisc\`).
+2. **Double-click `Start.bat`** — This launches the setup wizard, which will:
+   - Check for MakeMKV and HandBrakeCLI on your system
+   - Help you install anything that's missing
+   - Ask you to pick your disc drive and output drive
+   - Save your settings so you only do this once
+3. **Rip a disc** — Open PowerShell in the RipDisc folder and run:
 
 ```powershell
 .\rip-disc.ps1 -title "The Matrix"
 ```
+
+Or let it auto-detect the disc title (requires a free TMDb API key — setup will explain):
+
+```powershell
+.\rip-disc.ps1
+```
+
+That's it. Insert a disc, run the script, and it handles ripping, encoding, and organising the files.
+
+### Already familiar with PowerShell?
+
+Run `.\setup.ps1` directly instead of the bat file. Or skip setup entirely — the scripts auto-detect tool locations and fall back to sensible defaults.
 
 ### C# Version
 
@@ -103,11 +111,11 @@ cd RipDisc\RipDisc\bin\Release\net8.0-windows
 
 ## Requirements
 
-- **Windows OS**
-- **[MakeMKV](https://www.makemkv.com/download/)** (auto-detected or configured via setup)
-- **[HandBrakeCLI](https://handbrake.fr/downloads2.php)** (auto-detected or configured via setup)
-- **PowerShell 5.1+** (for PowerShell version)
-- **.NET 8.0+** (for C# version)
+- **Windows 10/11**
+- **[MakeMKV](https://www.makemkv.com/download/)** — reads DVD and Blu-ray discs (setup will help you install it)
+- **[HandBrakeCLI](https://handbrake.fr/downloads2.php)** — encodes video files (setup will help you install it)
+- **PowerShell 5.1+** (included with Windows 10/11)
+- **.NET 8.0+** (only needed for the C# version)
 
 ## Configuration
 
@@ -423,6 +431,7 @@ All other parameters work the same as `rip-disc.ps1`:
 
 ```
 ripdisc/
+├── Start.bat              # Double-click to get started (launches setup)
 ├── setup.ps1              # First-run setup (detects/installs tools, creates config)
 ├── Load-Config.ps1        # Shared config loader (dot-sourced by scripts)
 ├── ripdisc-config.sample.json  # Sample configuration file
