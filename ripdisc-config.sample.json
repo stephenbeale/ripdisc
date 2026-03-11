@@ -1,0 +1,12 @@
+{
+  "makemkvPath": "",
+  "handbrakePath": "",
+  "tempRoot": "C:\\Video",
+  "defaultInputDrive": "D:",
+  "defaultOutputDrive": "E:",
+  "driveLabels": {
+    "0": "Internal drive",
+    "1": "External drive"
+  },
+  "tmdbApiKey": ""
+}

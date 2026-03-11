@@ -5,6 +5,7 @@ obj/
 
 # Local settings
 .claude/settings.local.json
+ripdisc-config.json
 
 # Temporary files
 nul

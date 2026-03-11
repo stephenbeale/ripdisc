@@ -43,6 +43,12 @@
     [int]$StartEpisode = 1
 )
 
+# ========== LOAD CONFIG ==========
+. (Join-Path $PSScriptRoot "Load-Config.ps1")
+
+# Apply config defaults to parameters that weren't explicitly passed
+if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
+
 # ========== STEP MAPPING ==========
 $StepMapping = @{
     "handbrake" = 2
@@ -226,13 +232,14 @@ function Write-Log {
 }
 
 # ========== CONFIGURATION ==========
+$tempRoot = $script:Config_TempRoot
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
-    $makemkvOutputDir = "C:\Video\$title\Extras"
+    $makemkvOutputDir = "$tempRoot\$title\Extras"
 } elseif ($Series -and $Season -gt 0) {
-    $makemkvOutputDir = "C:\Video\$title\Season$Season\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$title\Season$Season\Disc$Disc"
 } else {
-    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$title\Disc$Disc"
 }
 
 # Normalize output drive letter
@@ -272,10 +279,10 @@ if ($Extras -and -not $Series) {
     $finalOutputDir = Join-Path $finalOutputDir "extras"
 }
 
-$handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
+$handbrakePath = $script:Config_HandBrakePath
 
 # ========== LOGGING SETUP ==========
-$logDir = "C:\Video\logs"
+$logDir = Join-Path $tempRoot "logs"
 if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logDiscLabel = if ($Extras) { "extras" } else { "disc${Disc}" }
@@ -479,7 +486,7 @@ if ($StartFromStepNumber -le 2) {
     # ========== GENERATE RECOVERY SCRIPT ==========
     $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
     $dateStamp = Get-Date -Format "yyyy-MM-dd"
-    $recoveryScriptPath = "C:\Video\recovery_${safeTitle}_${dateStamp}.ps1"
+    $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
     $recoveryLines = @(
         "# HandBrake recovery script for: $title"
         "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
@@ -608,9 +615,9 @@ if ($StartFromStepNumber -le 2) {
             Write-Host "Temporary files removed successfully" -ForegroundColor Green
             Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
 
-            # Clean up empty parent directories left behind (e.g. C:\Video\Title\, C:\Video\Title\Season1\)
+            # Clean up empty parent directories left behind (stop at temp root)
             $parentDir = Split-Path $makemkvOutputDir -Parent
-            while ($parentDir -and $parentDir -ne "C:\Video" -and (Test-Path $parentDir)) {
+            while ($parentDir -and $parentDir -ne $tempRoot -and (Test-Path $parentDir)) {
                 $remaining = Get-ChildItem -Path $parentDir -Force -ErrorAction SilentlyContinue
                 if ($remaining.Count -eq 0) {
                     Remove-Item -Path $parentDir -Force

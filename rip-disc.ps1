@@ -48,8 +48,13 @@
     [int]$StartEpisode = 1
 )
 
-# ========== TOOL PATHS ==========
-$makemkvconPath = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
+# ========== LOAD CONFIG ==========
+. (Join-Path $PSScriptRoot "Load-Config.ps1")
+$makemkvconPath = $script:Config_MakeMkvPath
+
+# Apply config defaults to parameters that weren't explicitly passed
+if (-not $PSBoundParameters.ContainsKey('Drive')) { $Drive = $script:Config_DefaultInputDrive }
+if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
 
 # ========== STEP TRACKING ==========
 # Define the 4 processing steps
@@ -352,9 +357,9 @@ function Clean-DiscName {
 function Search-TMDb {
     param([string]$SearchTitle)
 
-    $apiKey = $env:TMDB_API_KEY
+    $apiKey = if ($script:Config_TmdbApiKey) { $script:Config_TmdbApiKey } else { $env:TMDB_API_KEY }
     if (-not $apiKey) {
-        Write-Host "TMDB_API_KEY not set - skipping TMDb search" -ForegroundColor Yellow
+        Write-Host "TMDb API key not set - skipping TMDb search (run setup.ps1 or set TMDB_API_KEY)" -ForegroundColor Yellow
         return $null
     }
 
@@ -431,11 +436,7 @@ function Search-TMDb {
 # Show which drive will be used and confirm before proceeding
 $driveLetter = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
 $driveDescription = if ($DriveIndex -ge 0) {
-    $hint = switch ($DriveIndex) {
-        0 { "D: internal" }
-        1 { "G: ASUS external" }
-        default { "unknown drive" }
-    }
+    $hint = if ($script:Config_DriveLabels.ContainsKey("$DriveIndex")) { $script:Config_DriveLabels["$DriveIndex"] } else { "unknown drive" }
     "Drive Index $DriveIndex ($hint)"
 } else {
     "Drive $driveLetter"
@@ -727,13 +728,14 @@ if ($Series) {
 $host.UI.RawUI.WindowTitle = $windowTitle
 
 # ========== CONFIGURATION ==========
+$tempRoot = $script:Config_TempRoot
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
-    $makemkvOutputDir = "C:\Video\$title\Extras"
+    $makemkvOutputDir = "$tempRoot\$title\Extras"
 } elseif ($Series -and $Season -gt 0) {
-    $makemkvOutputDir = "C:\Video\$title\Season$Season\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$title\Season$Season\Disc$Disc"
 } else {
-    $makemkvOutputDir = "C:\Video\$title\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$title\Disc$Disc"
 }
 
 # Normalize output drive letter (add colon if missing)
@@ -777,10 +779,10 @@ if ($Extras -and -not $Series) {
     $finalOutputDir = Join-Path $finalOutputDir "extras"
 }
 
-$handbrakePath = "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe"
+$handbrakePath = $script:Config_HandBrakePath
 
 # ========== LOGGING SETUP ==========
-$logDir = "C:\Video\logs"
+$logDir = Join-Path $script:Config_TempRoot "logs"
 if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logDiscLabel = if ($Extras) { "extras" } else { "disc${Disc}" }
@@ -932,11 +934,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Title: $title" -ForegroundColor White
 Write-Host "Type: $contentType" -ForegroundColor White
 if ($DriveIndex -ge 0) {
-    $driveHint = switch ($DriveIndex) {
-        0 { "D: internal" }
-        1 { "G: ASUS external" }
-        default { "unknown" }
-    }
+    $driveHint = if ($script:Config_DriveLabels.ContainsKey("$DriveIndex")) { $script:Config_DriveLabels["$DriveIndex"] } else { "unknown" }
     Write-Host "Drive Index: $DriveIndex ($driveHint)" -ForegroundColor White
 } else {
     Write-Host "Drive: $driveLetter" -ForegroundColor White
@@ -1063,11 +1061,7 @@ if ($makemkvExitCode -ne 0) {
             $makemkvOutputText -match "no disc in drive" -or
             $makemkvOutputText -match "insert a disc") {
         if ($DriveIndex -ge 0) {
-            $driveHintMsg = switch ($DriveIndex) {
-                0 { "D: internal" }
-                1 { "G: ASUS external" }
-                default { "drive index $DriveIndex" }
-            }
+            $driveHintMsg = if ($script:Config_DriveLabels.ContainsKey("$DriveIndex")) { $script:Config_DriveLabels["$DriveIndex"] } else { "drive index $DriveIndex" }
             $errorMessage = "Drive is empty ($driveHintMsg) - please insert a disc"
         } else {
             $errorMessage = "Drive $driveLetter is empty - please insert a disc"
@@ -1159,7 +1153,7 @@ if ($Queue) {
     Write-Log "QUEUE MODE: Writing encoding job to queue file..."
     Write-Host "`n[QUEUE MODE] Adding encoding job to queue..." -ForegroundColor Green
 
-    $queueFilePath = "C:\Video\handbrake-queue.json"
+    $queueFilePath = Join-Path $tempRoot "handbrake-queue.json"
     $lockFilePath = "$queueFilePath.lock"
 
     $entry = @{
@@ -1287,7 +1281,7 @@ if ($Series -and $mkvFiles.Count -ge 3) {
 # If encoding fails, the user can run this script to resume encoding manually.
 $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
 $dateStamp = Get-Date -Format "yyyy-MM-dd"
-$recoveryScriptPath = "C:\Video\recovery_${safeTitle}_${dateStamp}.ps1"
+$recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
 $recoveryLines = @(
     "# HandBrake recovery script for: $title"
     "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
@@ -1420,9 +1414,9 @@ if ($encodedFiles.Count -gt 0) {
         Write-Host "Temporary files removed successfully" -ForegroundColor Green
         Write-Log "Temporary MKV directory removed: $makemkvOutputDir"
 
-        # Clean up empty parent directories left behind (e.g. C:\Video\Title\, C:\Video\Title\Season1\)
+        # Clean up empty parent directories left behind (stop at temp root)
         $parentDir = Split-Path $makemkvOutputDir -Parent
-        while ($parentDir -and $parentDir -ne "C:\Video" -and (Test-Path $parentDir)) {
+        while ($parentDir -and $parentDir -ne $tempRoot -and (Test-Path $parentDir)) {
             $remaining = Get-ChildItem -Path $parentDir -Force -ErrorAction SilentlyContinue
             if ($remaining.Count -eq 0) {
                 Remove-Item -Path $parentDir -Force

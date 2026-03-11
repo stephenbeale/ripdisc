@@ -62,13 +62,11 @@ If `-title` is provided, discovery is skipped (only disc format auto-detection f
 
 ### TMDb API Key Setup
 
-To enable TMDb searching, set the `TMDB_API_KEY` environment variable:
+To enable TMDb searching, either:
+- Run `setup.ps1` and enter your key when prompted (saved to `ripdisc-config.json`)
+- Or set the `TMDB_API_KEY` environment variable:
 
 ```powershell
-# Set for current session
-$env:TMDB_API_KEY = "your_api_key_here"
-
-# Set permanently (user-level)
 [Environment]::SetEnvironmentVariable("TMDB_API_KEY", "your_api_key_here", "User")
 ```
 
@@ -78,7 +76,19 @@ Without a TMDb key, the script still works — it uses the cleaned disc name as 
 
 ## Quick Start
 
-### PowerShell Version
+### 1. Run Setup
+
+```powershell
+.\setup.ps1
+```
+
+This will:
+- **Auto-detect** MakeMKV and HandBrakeCLI on your system
+- **Offer to install** missing tools via [Chocolatey](https://chocolatey.org/) or open download pages
+- **Configure** drive letters, temp directory, and TMDb API key
+- **Save** everything to `ripdisc-config.json`
+
+### 2. Rip a Disc
 
 ```powershell
 .\rip-disc.ps1 -title "The Matrix"
@@ -94,10 +104,20 @@ cd RipDisc\RipDisc\bin\Release\net8.0-windows
 ## Requirements
 
 - **Windows OS**
-- **MakeMKV** installed at `C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`
-- **HandBrake CLI** installed at `C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe`
+- **[MakeMKV](https://www.makemkv.com/download/)** (auto-detected or configured via setup)
+- **[HandBrakeCLI](https://handbrake.fr/downloads2.php)** (auto-detected or configured via setup)
 - **PowerShell 5.1+** (for PowerShell version)
 - **.NET 8.0+** (for C# version)
+
+## Configuration
+
+All paths and defaults are stored in `ripdisc-config.json` (created by `setup.ps1`). You can also create it manually from the sample:
+
+```powershell
+Copy-Item ripdisc-config.sample.json ripdisc-config.json
+```
+
+If no config file exists, the scripts auto-detect tool locations by searching the PATH, Windows registry, and common install directories.
 
 ## Usage
 
@@ -403,6 +423,9 @@ All other parameters work the same as `rip-disc.ps1`:
 
 ```
 ripdisc/
+├── setup.ps1              # First-run setup (detects/installs tools, creates config)
+├── Load-Config.ps1        # Shared config loader (dot-sourced by scripts)
+├── ripdisc-config.sample.json  # Sample configuration file
 ├── rip-disc.ps1           # PowerShell implementation
 ├── continue-rip.ps1       # Resume failed rips from a specific step
 ├── series-cleanup.ps1     # Series cleanup utility
