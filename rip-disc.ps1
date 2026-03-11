@@ -1006,11 +1006,26 @@ if ($makemkvExitCode -ne 0) {
     # Analyze output to determine the specific error
     $errorMessage = "MakeMKV exited with code $makemkvExitCode"
 
-    # Check for drive not found / doesn't exist
-    if ($makemkvOutputText -match "Failed to open disc" -or
-        $makemkvOutputText -match "no disc" -or
-        $makemkvOutputText -match "can't find" -or
-        $makemkvOutputText -match "invalid drive") {
+    # Check for "Failed to open disc" — could be drive not found OR unreadable disc
+    # If MakeMKV output mentions disc structure (IFO/BUP/VOB/VTS), the drive was found
+    # but the disc itself is corrupt or unreadable
+    if ($makemkvOutputText -match "Failed to open disc") {
+        if ($makemkvOutputText -match "IFO|BUP|VOB|VTS") {
+            $errorMessage = "Disc is corrupt or unreadable - MakeMKV found the drive but could not read the disc structure"
+            Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+        } else {
+            if ($DriveIndex -ge 0) {
+                $errorMessage = "Drive not found: Drive index $DriveIndex does not exist or is not accessible"
+            } else {
+                $errorMessage = "Drive not found: $driveLetter - verify the drive letter is correct"
+            }
+            Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+        }
+    }
+    # Check for drive not found / doesn't exist (other patterns)
+    elseif ($makemkvOutputText -match "no disc" -or
+            $makemkvOutputText -match "can't find" -or
+            $makemkvOutputText -match "invalid drive") {
         if ($DriveIndex -ge 0) {
             $errorMessage = "Drive not found: Drive index $DriveIndex does not exist or is not accessible"
         } else {
@@ -1037,7 +1052,7 @@ if ($makemkvExitCode -ne 0) {
             $makemkvOutputText -match "read error" -or
             $makemkvOutputText -match "cannot read" -or
             $makemkvOutputText -match "failed to read") {
-        $errorMessage = "No disc detected in drive - the disc may be damaged or unreadable"
+        $errorMessage = "Disc is corrupt or unreadable - the disc may be damaged"
         Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
     }
 
