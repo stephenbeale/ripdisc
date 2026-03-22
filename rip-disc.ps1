@@ -1010,7 +1010,10 @@ if ($makemkvExitCode -ne 0) {
     # If MakeMKV output mentions disc structure (IFO/BUP/VOB/VTS), the drive was found
     # but the disc itself is corrupt or unreadable
     if ($makemkvOutputText -match "Failed to open disc") {
-        if ($makemkvOutputText -match "IFO|BUP|VOB|VTS") {
+        if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS TRACK|Scsi error") {
+            $errorMessage = "Disc copy protection (CSS) prevented reading - the drive was found but MakeMKV could not authenticate the disc. Try reinserting the disc or check that MakeMKV has a valid licence key"
+            Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+        } elseif ($makemkvOutputText -match "IFO|BUP|VOB|VTS") {
             $errorMessage = "Disc is corrupt or unreadable - MakeMKV found the drive but could not read the disc structure"
             Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
         } else {
