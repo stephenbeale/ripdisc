@@ -401,6 +401,18 @@ If a rip fails after the MakeMKV step, use `continue-rip.ps1` to resume from whe
 .\continue-rip.ps1 -title "The Matrix" -FromStep open
 ```
 
+### Handling Partial Files
+
+If encoding failed partway through, a corrupt `.mp4` may exist in the output directory. Both `continue-rip.ps1` and recovery scripts skip files that already have a matching `.mp4`, so you need to delete the partial file first:
+
+```powershell
+# Delete the corrupt output from the failed encode
+Remove-Item "F:\DVDs\Django Unchained\Django Unchained-O1_t00.mp4"
+
+# Then resume — it will re-encode the deleted file and skip the rest
+.\continue-rip.ps1 -title "Django Unchained" -FromStep handbrake -OutputDrive F
+```
+
 ### FromStep Options
 
 | Value | Step | Prerequisites |
