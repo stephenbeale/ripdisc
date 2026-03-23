@@ -473,10 +473,19 @@ if ($DriveIndex -ge 0) {
             }
         }
     }
+    # List all detected drives
+    if ($drvLines.Count -gt 0) {
+        Write-Host "MakeMKV drives:" -ForegroundColor Gray
+        foreach ($d in $drvLines) {
+            $marker = if ($d.Index -eq $matchedIndex) { " <--" } else { "" }
+            $discLabel = if ($d.DiscName) { " [$($d.DiscName)]" } else { "" }
+            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$marker" -ForegroundColor Gray
+        }
+    }
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
         $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
-        Write-Host "Mapped drive $driveLetter to MakeMKV disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Gray
+        Write-Host "Using disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Green
     } else {
         Write-Host "ERROR: Drive $driveLetter not found in MakeMKV drive list." -ForegroundColor Red
         if ($drvLines.Count -gt 0) {
