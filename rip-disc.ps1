@@ -452,29 +452,54 @@ $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
-    # Query MakeMKV's own drive enumeration to find the correct disc:N for this drive letter
+    # Find which disc:N indices are already in use by running makemkvcon processes
+    $busyIndices = @()
+    $mkvProcs = Get-Process -Name "makemkvcon64","makemkvcon" -ErrorAction SilentlyContinue
+    foreach ($proc in $mkvProcs) {
+        try {
+            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmdLine -match 'disc:(\d+)') {
+                $busyIndices += [int]$Matches[1]
+            }
+        } catch {}
+    }
+
+    # Query each disc:N individually, skipping drives already in use
     Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
-    $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
     $matchedIndex = -1
     $drvLines = @()
-    foreach ($line in $drvOutput) {
-        $trimmed = $line.Trim()
-        if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
-            $idx = [int]$Matches[1]
-            $drvFlag = [int]$Matches[2]
-            $drvName = $Matches[3]
-            $drvDiscName = $Matches[4]
-            $drvLetter = $Matches[5]
-            if ($drvFlag -lt 256) {
-                $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
-            }
-            if ($drvLetter -eq $driveLetter) {
-                $matchedIndex = $idx
+    $maxDrives = 10  # safety cap
+    for ($idx = 0; $idx -lt $maxDrives; $idx++) {
+        if ($busyIndices -contains $idx) {
+            Write-Host "  disc:$idx - skipped (in use by another rip)" -ForegroundColor DarkYellow
+            continue
+        }
+        $drvOutput = & $makemkvconPath -r info "disc:$idx" 2>&1 | Where-Object { $_ -is [string] }
+        $foundDrive = $false
+        foreach ($line in $drvOutput) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
+                $drvFlag = [int]$Matches[2]
+                $drvName = $Matches[3]
+                $drvDiscName = $Matches[4]
+                $drvLetter = $Matches[5]
+                if ($drvFlag -lt 256) {
+                    $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
+                    $foundDrive = $true
+                    if ($drvLetter -eq $driveLetter) {
+                        $matchedIndex = $idx
+                    }
+                }
             }
         }
+        # No more drives to enumerate
+        if (-not $foundDrive) { break }
+        # Found our target — no need to check further
+        if ($matchedIndex -ge 0) { break }
     }
-    # List all detected drives
-    if ($drvLines.Count -gt 0) {
+
+    # List all detected drives (including busy ones)
+    if ($drvLines.Count -gt 0 -or $busyIndices.Count -gt 0) {
         Write-Host "MakeMKV drives:" -ForegroundColor Gray
         foreach ($d in $drvLines) {
             $marker = if ($d.Index -eq $matchedIndex) { " <--" } else { "" }
