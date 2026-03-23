@@ -841,3 +841,39 @@ PR #83 (`fix/drive-index-direct`) replaced WMI enumeration with a direct `disc:9
 - Real-disc testing to verify WMI index mapping works correctly for G: (USB DVD drive)
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-03-23 - Drive Index Mapping Fix (PRs #96–#98)
+
+**Problem:**
+WMI `Win32_CDROMDrive` enumeration order does not reliably match MakeMKV's internal `disc:N` ordering, particularly for USB optical drives. This caused the script to rip from the wrong physical drive when using `-Drive G:`.
+
+**PR #96 merged: `fix/drive-index-makemkv-query`**
+- Replaced WMI `Win32_CDROMDrive` drive lookup with a direct MakeMKV `disc:9999` query
+- `disc:9999` causes MakeMKV to enumerate all connected optical drives and return their drive letters alongside their `disc:N` indices
+- Script parses the output and maps the requested drive letter to the correct `disc:N` index
+- WMI is removed entirely from the drive lookup path
+
+**PR #97 merged: `fix/drive-enumeration-display`**
+- At startup, all drives detected by MakeMKV are listed (e.g. `disc:0 D: HL-DT-ST`, `disc:1 G: GP75N`)
+- An arrow marker (`-->`) highlights the selected drive
+- Allows the user to visually verify the correct physical drive is being used before the rip begins
+
+**PR #98 merged: `fix/skip-busy-drives`**
+- Changed from `disc:9999` (probes all drives simultaneously) to iterating `disc:0`, `disc:1`, etc. individually
+- Detects running `makemkvcon` processes and reads their command lines to identify which `disc:N` indices are in use
+- Skips busy indices to avoid interfering with concurrent rip sessions
+- Stops iterating once the target drive letter is found — no unnecessary probing
+
+**Verified working:**
+- Tested with `-Drive G:` — correctly mapped to `disc:1` (GP75N)
+- Rip completed successfully with 18 titles
+
+**Work In Progress:**
+- None — all PRs merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI — run `makemkvcon mkv disc:2 all "C:\Video\test" --minlength=120` directly to isolate CLI vs GUI difference
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed

@@ -6,6 +6,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-03-23
+
+### Fixed
+- Drive index mapping: replaced WMI `Win32_CDROMDrive` enumeration with direct MakeMKV `disc:N` iteration (#96)
+  - WMI ordering did not match MakeMKV's internal disc index, causing rips from the wrong physical drive
+  - Now iterates `disc:0`, `disc:1`, etc. via MakeMKV and matches against the requested drive letter
+- Concurrent rip safety: detects running `makemkvcon` processes and skips their active `disc:N` indices (#98)
+  - Prevents the drive lookup from interfering with any concurrent rip sessions
+
+### Added
+- Startup drive list: all MakeMKV-detected optical drives are displayed at launch with an arrow on the selected drive (#97)
+  - Allows visual confirmation that the correct physical drive is selected before ripping begins
+
 ## 2026-03-04
 
 ### Fixed
