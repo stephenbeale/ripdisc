@@ -499,7 +499,7 @@ if ($DriveIndex -ge 0) {
             if ($drvFlag -lt 256) {
                 $isBusy = $busyIndices -contains $drvIdx
                 $drvLines += [PSCustomObject]@{ Index = $drvIdx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter; Busy = $isBusy }
-                if ($drvLetter -eq $driveLetter -and -not $isBusy) {
+                if ($drvLetter -eq $driveLetter) {
                     $matchedIndex = $drvIdx
                 }
             }
@@ -1049,7 +1049,7 @@ Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`"
 # Stream MakeMKV output to console and capture for error analysis
 # Monitors for stuck retry loops (repeated errors at the same offset) and kills the process
 # if it detects MakeMKV is stuck. Titles already saved to disk are preserved.
-# Uses cmd /c to merge stderr into stdout so we only need one stream (PS 5.1 compatible).
+# Stderr is not redirected — it flows to console natively. Error lines come on stdout.
 $script:lastPrintedLine = $null
 $stuckOffsetCount = 0
 $stuckOffset = ""
@@ -1057,17 +1057,17 @@ $stuckThreshold = 5  # kill after this many consecutive errors at the same offse
 $wasKilledForStuck = $false
 
 $proc = New-Object System.Diagnostics.Process
-$proc.StartInfo.FileName = "cmd.exe"
-$proc.StartInfo.Arguments = "/c `"`"$makemkvconPath`" mkv $discSource all `"$makemkvOutputDir`" --minlength=120 2>&1`""
+$proc.StartInfo.FileName = $makemkvconPath
+$proc.StartInfo.Arguments = "mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
 $proc.StartInfo.UseShellExecute = $false
 $proc.StartInfo.RedirectStandardOutput = $true
 $proc.StartInfo.RedirectStandardError = $false
-$proc.StartInfo.CreateNoWindow = $true
+$proc.StartInfo.CreateNoWindow = $false
 $proc.Start() | Out-Null
 
 $makemkvFullOutput = New-Object System.Collections.ArrayList
 
-# Read merged stdout+stderr line by line, checking for stuck retry loops
+# Read stdout line by line, checking for stuck retry loops
 while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
     [void]$makemkvFullOutput.Add($line)
 
