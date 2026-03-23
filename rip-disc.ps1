@@ -1035,17 +1035,80 @@ Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minl
 Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
 
 # Stream MakeMKV output to console and capture for error analysis
-# Suppress consecutive duplicate lines — MakeMKV often repeats the same message many times
-# (e.g. region mismatch warnings). All output is still captured in $makemkvFullOutput for error analysis.
-$script:lastPrintedLine = $null
-& $makemkvconPath mkv $discSource all $makemkvOutputDir --minlength=120 2>&1 | Tee-Object -Variable makemkvFullOutput | ForEach-Object {
-    $line = "$_"
-    if ($line -ne $script:lastPrintedLine) {
+# Monitors for stuck retry loops (repeated errors at the same offset) and kills the process
+# if it detects MakeMKV is stuck. Titles already saved to disk are preserved.
+$makemkvFullOutput = [System.Collections.Generic.List[string]]::new()
+$lastPrintedLine = $null
+$stuckOffsetCount = 0
+$stuckOffset = ""
+$stuckThreshold = 5  # kill after this many consecutive errors at the same offset
+$wasKilledForStuck = $false
+
+$proc = New-Object System.Diagnostics.Process
+$proc.StartInfo.FileName = $makemkvconPath
+$proc.StartInfo.Arguments = "mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
+$proc.StartInfo.UseShellExecute = $false
+$proc.StartInfo.RedirectStandardOutput = $true
+$proc.StartInfo.RedirectStandardError = $true
+$proc.StartInfo.CreateNoWindow = $true
+$proc.Start() | Out-Null
+
+# Drain stderr in background to prevent deadlock
+$stderrLines = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+$stderrThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
+    while ($null -ne ($errLine = $proc.StandardError.ReadLine())) {
+        $stderrLines.Enqueue($errLine)
+    }
+})
+$stderrThread.IsBackground = $true
+$stderrThread.Start()
+
+# Read stdout line by line, checking for stuck retry loops
+while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
+    $makemkvFullOutput.Add($line)
+
+    # Detect repeated errors at same offset (stuck retry loop)
+    if ($line -match "at offset '(\d+)'") {
+        $currentOffset = $Matches[1]
+        if ($currentOffset -eq $stuckOffset) {
+            $stuckOffsetCount++
+        } else {
+            $stuckOffset = $currentOffset
+            $stuckOffsetCount = 1
+        }
+        if ($stuckOffsetCount -ge $stuckThreshold) {
+            $wasKilledForStuck = $true
+            Write-Host "`nWARNING: MakeMKV stuck retrying the same bad sector ($stuckOffsetCount attempts at offset $stuckOffset)" -ForegroundColor Yellow
+            Write-Host "Killing MakeMKV to salvage titles already saved to disk..." -ForegroundColor Yellow
+            $proc.Kill()
+            break
+        }
+    } else {
+        # Reset stuck counter when we see a non-error line (progress is being made)
+        $stuckOffsetCount = 0
+        $stuckOffset = ""
+    }
+
+    if ($line -ne $lastPrintedLine) {
         Write-Host $line
-        $script:lastPrintedLine = $line
+        $lastPrintedLine = $line
     }
 }
-$makemkvExitCode = $LASTEXITCODE
+
+# Drain any remaining stderr
+$stderrThread.Join(5000) | Out-Null
+$errLine = $null
+while ($stderrLines.TryDequeue([ref]$errLine)) {
+    $makemkvFullOutput.Add($errLine)
+    if ($errLine -ne $lastPrintedLine) {
+        Write-Host $errLine
+        $lastPrintedLine = $errLine
+    }
+}
+
+$proc.WaitForExit()
+$makemkvExitCode = if ($wasKilledForStuck) { 0 } else { $proc.ExitCode }
+
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
 # Check if MakeMKV succeeded - provide specific error messages for common issues
@@ -1127,8 +1190,14 @@ if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
     Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message $errorMessage
 }
 
-Write-Host "`nMakeMKV rip complete!" -ForegroundColor Green
-Write-Host "Files ripped: $($rippedFiles.Count)" -ForegroundColor White
+if ($wasKilledForStuck) {
+    Write-Host "`nMakeMKV rip partially complete (killed due to stuck read error)" -ForegroundColor Yellow
+    Write-Host "Files salvaged: $($rippedFiles.Count)" -ForegroundColor White
+    Write-Log "MakeMKV killed after $stuckThreshold consecutive read errors at offset $stuckOffset - $($rippedFiles.Count) file(s) salvaged"
+} else {
+    Write-Host "`nMakeMKV rip complete!" -ForegroundColor Green
+    Write-Host "Files ripped: $($rippedFiles.Count)" -ForegroundColor White
+}
 Write-Log "STEP 1/4: MakeMKV rip complete - $($rippedFiles.Count) file(s)"
 foreach ($file in $rippedFiles) {
     Write-Host "  - $($file.Name) ($([math]::Round($file.Length/1GB, 2)) GB)" -ForegroundColor Gray
