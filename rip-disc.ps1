@@ -464,47 +464,57 @@ if ($DriveIndex -ge 0) {
         } catch {}
     }
 
-    # Query each disc:N individually, skipping drives already in use
-    Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
+    # Check for cached drive mapping (5-minute TTL) to avoid slow re-queries
+    $drvCacheFile = Join-Path $env:TEMP "makemkv-drive-cache.txt"
+    $drvCacheTTL = 5  # minutes
+    $drvOutput = $null
+    if (Test-Path $drvCacheFile) {
+        $cacheAge = (Get-Date) - (Get-Item $drvCacheFile).LastWriteTime
+        if ($cacheAge.TotalMinutes -lt $drvCacheTTL) {
+            Write-Host "Looking up drive $driveLetter (cached)..." -ForegroundColor Gray
+            $drvOutput = Get-Content $drvCacheFile
+        }
+    }
+    if (-not $drvOutput) {
+        Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
+        $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: MakeMKV drive query failed (exit code $LASTEXITCODE)" -ForegroundColor Red
+            exit 1
+        }
+        # Cache the output for subsequent runs
+        $drvOutput | Set-Content $drvCacheFile -Force
+    }
+
     $matchedIndex = -1
     $drvLines = @()
-    $maxDrives = 10  # safety cap
-    for ($idx = 0; $idx -lt $maxDrives; $idx++) {
-        if ($busyIndices -contains $idx) {
-            Write-Host "  disc:$idx - skipped (in use by another rip)" -ForegroundColor DarkYellow
-            continue
-        }
-        $drvOutput = & $makemkvconPath -r info "disc:$idx" 2>&1 | Where-Object { $_ -is [string] }
-        $foundDrive = $false
-        foreach ($line in $drvOutput) {
-            $trimmed = $line.Trim()
-            if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
-                $drvFlag = [int]$Matches[2]
-                $drvName = $Matches[3]
-                $drvDiscName = $Matches[4]
-                $drvLetter = $Matches[5]
-                if ($drvFlag -lt 256) {
-                    $drvLines += [PSCustomObject]@{ Index = $idx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter }
-                    $foundDrive = $true
-                    if ($drvLetter -eq $driveLetter) {
-                        $matchedIndex = $idx
-                    }
+    foreach ($line in $drvOutput) {
+        $trimmed = "$line".Trim()
+        if ($trimmed -match '^DRV:(\d+),(\d+),\d+,\d+,"([^"]*)","([^"]*)","([^"]*)"') {
+            $drvIdx = [int]$Matches[1]
+            $drvFlag = [int]$Matches[2]
+            $drvName = $Matches[3]
+            $drvDiscName = $Matches[4]
+            $drvLetter = $Matches[5]
+            if ($drvFlag -lt 256) {
+                $isBusy = $busyIndices -contains $drvIdx
+                $drvLines += [PSCustomObject]@{ Index = $drvIdx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter; Busy = $isBusy }
+                if ($drvLetter -eq $driveLetter -and -not $isBusy) {
+                    $matchedIndex = $drvIdx
                 }
             }
         }
-        # No more drives to enumerate
-        if (-not $foundDrive) { break }
-        # Found our target — no need to check further
-        if ($matchedIndex -ge 0) { break }
     }
 
-    # List all detected drives (including busy ones)
-    if ($drvLines.Count -gt 0 -or $busyIndices.Count -gt 0) {
+    # List all detected drives
+    if ($drvLines.Count -gt 0) {
         Write-Host "MakeMKV drives:" -ForegroundColor Gray
         foreach ($d in $drvLines) {
             $marker = if ($d.Index -eq $matchedIndex) { " <--" } else { "" }
+            $busyTag = if ($d.Busy) { " (busy)" } else { "" }
             $discLabel = if ($d.DiscName) { " [$($d.DiscName)]" } else { "" }
-            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$marker" -ForegroundColor Gray
+            $color = if ($d.Busy) { "DarkYellow" } else { "Gray" }
+            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$busyTag$marker" -ForegroundColor $color
         }
     }
     if ($matchedIndex -ge 0) {
@@ -512,6 +522,8 @@ if ($DriveIndex -ge 0) {
         $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
         Write-Host "Using disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Green
     } else {
+        # Clear stale cache on failure
+        if (Test-Path $drvCacheFile) { Remove-Item $drvCacheFile -Force }
         Write-Host "ERROR: Drive $driveLetter not found in MakeMKV drive list." -ForegroundColor Red
         if ($drvLines.Count -gt 0) {
             Write-Host "Available MakeMKV drives:" -ForegroundColor Yellow
@@ -1037,35 +1049,27 @@ Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`"
 # Stream MakeMKV output to console and capture for error analysis
 # Monitors for stuck retry loops (repeated errors at the same offset) and kills the process
 # if it detects MakeMKV is stuck. Titles already saved to disk are preserved.
-$makemkvFullOutput = [System.Collections.Generic.List[string]]::new()
-$lastPrintedLine = $null
+# Uses cmd /c to merge stderr into stdout so we only need one stream (PS 5.1 compatible).
+$script:lastPrintedLine = $null
 $stuckOffsetCount = 0
 $stuckOffset = ""
 $stuckThreshold = 5  # kill after this many consecutive errors at the same offset
 $wasKilledForStuck = $false
 
 $proc = New-Object System.Diagnostics.Process
-$proc.StartInfo.FileName = $makemkvconPath
-$proc.StartInfo.Arguments = "mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
+$proc.StartInfo.FileName = "cmd.exe"
+$proc.StartInfo.Arguments = "/c `"`"$makemkvconPath`" mkv $discSource all `"$makemkvOutputDir`" --minlength=120 2>&1`""
 $proc.StartInfo.UseShellExecute = $false
 $proc.StartInfo.RedirectStandardOutput = $true
-$proc.StartInfo.RedirectStandardError = $true
+$proc.StartInfo.RedirectStandardError = $false
 $proc.StartInfo.CreateNoWindow = $true
 $proc.Start() | Out-Null
 
-# Drain stderr in background to prevent deadlock
-$stderrLines = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-$stderrThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
-    while ($null -ne ($errLine = $proc.StandardError.ReadLine())) {
-        $stderrLines.Enqueue($errLine)
-    }
-})
-$stderrThread.IsBackground = $true
-$stderrThread.Start()
+$makemkvFullOutput = New-Object System.Collections.ArrayList
 
-# Read stdout line by line, checking for stuck retry loops
+# Read merged stdout+stderr line by line, checking for stuck retry loops
 while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
-    $makemkvFullOutput.Add($line)
+    [void]$makemkvFullOutput.Add($line)
 
     # Detect repeated errors at same offset (stuck retry loop)
     if ($line -match "at offset '(\d+)'") {
@@ -1080,7 +1084,7 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
             $wasKilledForStuck = $true
             Write-Host "`nWARNING: MakeMKV stuck retrying the same bad sector ($stuckOffsetCount attempts at offset $stuckOffset)" -ForegroundColor Yellow
             Write-Host "Killing MakeMKV to salvage titles already saved to disk..." -ForegroundColor Yellow
-            $proc.Kill()
+            try { $proc.Kill() } catch {}
             break
         }
     } else {
@@ -1089,24 +1093,13 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
         $stuckOffset = ""
     }
 
-    if ($line -ne $lastPrintedLine) {
+    if ($line -ne $script:lastPrintedLine) {
         Write-Host $line
-        $lastPrintedLine = $line
+        $script:lastPrintedLine = $line
     }
 }
 
-# Drain any remaining stderr
-$stderrThread.Join(5000) | Out-Null
-$errLine = $null
-while ($stderrLines.TryDequeue([ref]$errLine)) {
-    $makemkvFullOutput.Add($errLine)
-    if ($errLine -ne $lastPrintedLine) {
-        Write-Host $errLine
-        $lastPrintedLine = $errLine
-    }
-}
-
-$proc.WaitForExit()
+try { $proc.WaitForExit() } catch {}
 $makemkvExitCode = if ($wasKilledForStuck) { 0 } else { $proc.ExitCode }
 
 $makemkvOutputText = $makemkvFullOutput -join "`n"
