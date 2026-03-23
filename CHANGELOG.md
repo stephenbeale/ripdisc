@@ -14,6 +14,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Now iterates `disc:0`, `disc:1`, etc. via MakeMKV and matches against the requested drive letter
 - Concurrent rip safety: detects running `makemkvcon` processes and skips their active `disc:N` indices (#98)
   - Prevents the drive lookup from interfering with any concurrent rip sessions
+- Stuck sector detection: kills MakeMKV when 5 consecutive errors occur at the same byte offset (#99)
+  - Prevents indefinite stalls on physically damaged discs
+- Stuck sector detection PS 5.1 compatibility: rewrote `Thread`/`ConcurrentQueue` approach to direct `Process` execution (#100)
+  - PS 5.1 does not support the threading primitives used in the original implementation
+- Busy-drive guard removed: `-not $isBusy` check incorrectly blocked selecting drives that were in use by a previous rip attempt (#101)
+  - A drive can be "busy" in the process list while still available for a new rip session
+- Exit code crash: replaced cmd.exe wrapper (which returned exit code 2 due to path quoting) with direct `Process` object execution (#101)
+  - cmd.exe quoting caused makemkvcon to fail with exit code 2; direct invocation passes arguments correctly
 
 ### Added
 - Startup drive list: all MakeMKV-detected optical drives are displayed at launch with an arrow on the selected drive (#97)

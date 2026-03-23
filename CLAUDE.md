@@ -877,3 +877,39 @@ WMI `Win32_CDROMDrive` enumeration order does not reliably match MakeMKV's inter
 - Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI — run `makemkvcon mkv disc:2 all "C:\Video\test" --minlength=120` directly to isolate CLI vs GUI difference
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-03-23 (continued) - Stuck Sector Detection and Bug Fixes (PRs #99–#101)
+
+**PR #99 merged: `fix/detect-stuck-sectors`**
+- Monitors makemkvcon stdout for repeated error messages at the same byte offset
+- Kills makemkvcon process when 5 consecutive errors at the same offset are detected
+- Prevents indefinite stalls caused by physically damaged discs (e.g. bad sectors causing hardware timeouts)
+- Tested scenario: Shutter Island disc was triggering repeated hardware timeout errors without any progress
+
+**PR #100 merged: `fix/stuck-sector-ps51-compat`**
+- Original implementation used `System.Threading.Thread` and `System.Collections.Concurrent.ConcurrentQueue`
+- PS 5.1 does not support these .NET threading primitives in the way the code used them
+- Rewrote using a `cmd.exe` wrapper around makemkvcon with stdout-only redirect and synchronous line reading
+
+**PR #101 merged: `fix/busy-drive-and-exitcode`**
+Two bugs fixed in one PR:
+1. `-not $isBusy` guard removed — this condition blocked selecting a drive that had previously been "busy" in the process scan, even though the drive was now free and available for ripping
+2. `cmd.exe` wrapper replaced with direct `Process` object execution — the cmd.exe approach returned exit code 2 due to path quoting issues; direct Process invocation passes arguments correctly and respects the actual makemkvcon exit code
+
+**Current Architecture Notes:**
+- MakeMKV execution: direct `System.Diagnostics.Process` object, stdout-only redirect, synchronous `ReadLine()` loop
+- Stuck sector detection: 5 consecutive identical offset errors triggers process kill; counter resets on any new offset
+- Drive lookup: `disc:0`, `disc:1`, etc. iterated individually; busy indices (from live `makemkvcon` process cmdlines) are skipped; stops on first match
+- Startup display: all detected drives listed, selected drive marked with `-->`
+
+**Work In Progress / Needs Testing:**
+- Stuck sector detection (PRs #99–#101) needs real-world validation on a damaged disc
+- Shutter Island disc was the test case — hardware timeout errors were occurring; retry the rip to confirm the kill logic fires correctly
+- Direct Process execution (PR #101) replaces the cmd.exe wrapper — verify exit code is captured correctly on both success and failure
+
+**Outstanding Work for Future Sessions:**
+- Validate stuck sector detection on a genuinely damaged disc
+- Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI
+- Port missing features to C# implementation (see Feature Parity table in README)
