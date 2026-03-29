@@ -26,7 +26,8 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Feature file identification** (automatically identifies main feature)
 - **Extras folder management** for special features
 - **Resume failed rips** from any step with `continue-rip.ps1`
-- **HandBrake recovery scripts** generated before encoding
+- **HandBrake recovery scripts** generated automatically before encoding
+- **Corrupt file detection guidance** — diagnose and recover from interrupted rips
 - **Comprehensive error handling** with recovery guidance
 - **Session logging** for debugging and recovery
 - **Drive readiness checks** before operations
@@ -386,9 +387,29 @@ cd RipDisc
 .\publish.bat
 ```
 
-## Resuming Failed Rips
+## Recovering from Failures
 
-If a rip fails after the MakeMKV step, use `continue-rip.ps1` to resume from where it failed:
+When a rip fails, the error output tells you exactly which step failed and what to do next. There are two recovery tools available depending on the situation.
+
+### Recovery Scripts (generated automatically)
+
+Every time `rip-disc.ps1` starts encoding, it generates a recovery script at `C:\Video\recovery_{title}_{date}.ps1`. This script contains the exact HandBrake commands needed to encode any remaining MKV files.
+
+**When to use:** HandBrake crashed, was interrupted, or the system lost power during encoding (Step 2). The MKV source files are intact and just need to be re-encoded.
+
+```powershell
+# Run the recovery script shown in the error output
+cd C:\Video
+& '.\recovery_The Matrix_2026-03-29.ps1'
+```
+
+The recovery script skips any files that already have a matching `.mp4` in the output directory, so it only encodes what's missing.
+
+**Important:** The recovery script is deleted automatically after a successful encode. If the script doesn't exist, use `continue-rip.ps1` instead (see below).
+
+### continue-rip.ps1 (resume from any step)
+
+Use `continue-rip.ps1` to resume from any step after the initial MakeMKV rip:
 
 ```powershell
 # Continue from HandBrake encoding (step 2)
@@ -401,23 +422,11 @@ If a rip fails after the MakeMKV step, use `continue-rip.ps1` to resume from whe
 .\continue-rip.ps1 -title "The Matrix" -FromStep open
 ```
 
-### Handling Partial Files
-
-If encoding failed partway through, a corrupt `.mp4` may exist in the output directory. Both `continue-rip.ps1` and recovery scripts skip files that already have a matching `.mp4`, so you need to delete the partial file first:
-
-```powershell
-# Delete the corrupt output from the failed encode
-Remove-Item "F:\DVDs\Django Unchained\Django Unchained-O1_t00.mp4"
-
-# Then resume — it will re-encode the deleted file and skip the rest
-.\continue-rip.ps1 -title "Django Unchained" -FromStep handbrake -OutputDrive F
-```
-
-### FromStep Options
+#### FromStep Options
 
 | Value | Step | Prerequisites |
 |-------|------|---------------|
-| `handbrake` | 2 | MKV files in `C:\Video\{title}\` |
+| `handbrake` | 2 | MKV files in `C:\Video\{title}\Disc{N}\` |
 | `organize` | 3 | MP4 files in output directory |
 | `open` | 4 | Output directory exists |
 
@@ -432,6 +441,46 @@ All other parameters work the same as `rip-disc.ps1`:
 
 # Resume disc 2 special features
 .\continue-rip.ps1 -title "The Dark Knight" -Disc 2 -FromStep handbrake
+```
+
+### Handling Partial or Corrupt Files
+
+Both `continue-rip.ps1` and recovery scripts skip files that already have a matching `.mp4`, so you may need to delete partial outputs first:
+
+```powershell
+# Delete the corrupt/partial output from the failed encode
+Remove-Item "F:\DVDs\Django Unchained\Django Unchained-O1_t00.mp4"
+
+# Then resume — it will re-encode the deleted file and skip the rest
+.\continue-rip.ps1 -title "Django Unchained" -FromStep handbrake -OutputDrive F
+```
+
+### When Recovery Won't Work (Corrupt MKV)
+
+If the disc was **ejected or removed during the MakeMKV rip** (Step 1), the MKV file may be corrupt even if it appears to be a normal size. Symptoms:
+
+- HandBrake reports: `scan: unrecognized file type` and `found 0 valid title(s)`
+- ffprobe reports: `Invalid data found when processing input`
+
+**To check whether your MKV is usable:**
+
+```powershell
+# Check the file exists and has a reasonable size (feature film = 4-8 GB typically)
+Get-ChildItem 'C:\Video\{title}\Disc1\*.mkv'
+
+# Verify the file is valid (requires ffprobe — included with ffmpeg)
+ffprobe 'C:\Video\{title}\Disc1\A1_t00.mkv'
+```
+
+If ffprobe shows stream info (duration, codec, resolution), the file is fine — run the recovery script or `continue-rip.ps1`. If ffprobe reports `Invalid data found`, the MKV is corrupt and **you must re-rip from disc**:
+
+```powershell
+# Clean up the corrupt files
+Remove-Item 'C:\Video\{title}' -Recurse -Force
+Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
+
+# Re-insert the disc and rip again
+.\rip-disc.ps1
 ```
 
 ## Additional Tools
