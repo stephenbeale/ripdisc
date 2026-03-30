@@ -174,6 +174,12 @@ function Enable-ConsoleClose {
 }
 
 # ========== HELPER FUNCTIONS ==========
+function Write-Timestamp {
+    param([string]$Label)
+    $ts = Get-Date -Format "dd/MM/yyyy HH:mm:ss"
+    Write-Host "[$ts] $Label" -ForegroundColor DarkGray
+}
+
 function Get-UniqueFilePath {
     param([string]$DestDir, [string]$FileName)
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
@@ -733,6 +739,7 @@ Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 $host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
 $response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
+Write-Timestamp "Rip started"
 
 # Disable close button to prevent accidental window closure during rip
 Disable-ConsoleClose
@@ -982,6 +989,7 @@ Write-Host "========================================`n" -ForegroundColor Cyan
 Set-CurrentStep -StepNumber 1
 $script:LastWorkingDirectory = $makemkvOutputDir
 Write-Log "STEP 1/4: Starting MakeMKV rip..."
+Write-Timestamp "Step 1/4: MakeMKV rip"
 Write-Host "[STEP 1/4] Starting MakeMKV rip..." -ForegroundColor Green
 
 # Wake up dormant USB drives by accessing the drive letter (triggers spin-up)
@@ -1183,6 +1191,7 @@ if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
     Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message $errorMessage
 }
 
+Write-Timestamp "Step 1/4: MakeMKV rip finished"
 if ($wasKilledForStuck) {
     Write-Host "`nMakeMKV rip partially complete (killed due to stuck read error)" -ForegroundColor Yellow
     Write-Host "Files salvaged: $($rippedFiles.Count)" -ForegroundColor White
@@ -1199,6 +1208,7 @@ foreach ($file in $rippedFiles) {
 Complete-CurrentStep
 
 # Eject disc (with timeout and retry to prevent hanging if drive is busy)
+Write-Timestamp "Ejecting disc"
 Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
 $ejectSuccess = $false
 for ($ejectAttempt = 1; $ejectAttempt -le 2; $ejectAttempt++) {
@@ -1293,6 +1303,7 @@ if ($Queue) {
 
     $mkvCount = (Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv").Count
 
+    Write-Timestamp "Job queued"
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "QUEUED!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Cyan
@@ -1328,6 +1339,7 @@ if ($Queue) {
 Set-CurrentStep -StepNumber 2
 $script:LastWorkingDirectory = $finalOutputDir
 Write-Log "STEP 2/4: Starting HandBrake encoding..."
+Write-Timestamp "Step 2/4: HandBrake encoding"
 Write-Host "`n[STEP 2/4] Starting HandBrake encoding..." -ForegroundColor Green
 
 # Check if destination drive is ready before attempting to create directories
@@ -1413,6 +1425,7 @@ foreach ($mkv in $mkvFiles) {
     $inputFile = $mkv.FullName
     $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
 
+    Write-Timestamp "Encoding file $fileCount of $($mkvFiles.Count)"
     Write-Host "`n--- Encoding file $fileCount of $($mkvFiles.Count) ---" -ForegroundColor Cyan
     Write-Host "Input:  $($mkv.Name)" -ForegroundColor White
     Write-Host "Output: $($mkv.BaseName).mp4" -ForegroundColor White
@@ -1454,6 +1467,7 @@ foreach ($mkv in $mkvFiles) {
 
     if (Test-Path $outputFile) {
         $encodedSize = (Get-Item $outputFile).Length
+        Write-Timestamp "Encoding complete: $($mkv.Name)"
         Write-Host "`nEncoding complete: $($mkv.Name)" -ForegroundColor Green
         Write-Host "Output size: $([math]::Round($encodedSize/1GB, 2)) GB" -ForegroundColor White
         Write-Log "Encoded: $($mkv.Name) -> $($mkv.BaseName).mp4 ($([math]::Round($encodedSize/1GB, 2)) GB)"
@@ -1528,6 +1542,7 @@ if ($encodedFiles.Count -gt 0) {
 Set-CurrentStep -StepNumber 3
 $script:LastWorkingDirectory = $finalOutputDir
 Write-Log "STEP 3/4: Organizing files..."
+Write-Timestamp "Step 3/4: Organising files"
 Write-Host "`n[STEP 3/4] Organizing files..." -ForegroundColor Green
 cd $finalOutputDir
 
@@ -1811,12 +1826,14 @@ Write-Log "STEP 3/4: File organization complete"
 # ========== STEP 4: OPEN DIRECTORY ==========
 Set-CurrentStep -StepNumber 4
 Write-Log "STEP 4/4: Opening directory..."
+Write-Timestamp "Step 4/4: Opening directory"
 Write-Host "`n[STEP 4/4] Opening film directory..." -ForegroundColor Green
 Write-Host "Opening: $finalOutputDir" -ForegroundColor Yellow
 start $finalOutputDir
 Complete-CurrentStep
 
 Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Timestamp "Complete"
 Write-Host "COMPLETE!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 
