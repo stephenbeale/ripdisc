@@ -1004,6 +1004,7 @@ if ($DriveIndex -ge 0) {
     Write-Host "Using drive: $driveLetter" -ForegroundColor Green
 }
 
+$skipMakeMkvRip = $false
 Write-Host "Creating directory: $makemkvOutputDir" -ForegroundColor Yellow
 if (Test-Path $makemkvOutputDir) {
     $existingFiles = Get-ChildItem -Path $makemkvOutputDir -File -ErrorAction SilentlyContinue
@@ -1022,12 +1023,13 @@ if (Test-Path $makemkvOutputDir) {
         Write-Host "`nChoose an option:" -ForegroundColor Cyan
         Write-Host "  [1] Delete existing files and reuse directory" -ForegroundColor Yellow
         Write-Host "  [2] Use suffixed directory: $suffixedDir" -ForegroundColor Yellow
+        Write-Host "  [3] Continue with existing files (skip MakeMKV rip)" -ForegroundColor Yellow
 
         $choice = $null
-        while ($choice -ne '1' -and $choice -ne '2') {
-            $choice = Read-Host "Enter 1 or 2"
-            if ($choice -ne '1' -and $choice -ne '2') {
-                Write-Host "Invalid choice. Please enter 1 or 2." -ForegroundColor Red
+        while ($choice -ne '1' -and $choice -ne '2' -and $choice -ne '3') {
+            $choice = Read-Host "Enter 1, 2, or 3"
+            if ($choice -ne '1' -and $choice -ne '2' -and $choice -ne '3') {
+                Write-Host "Invalid choice. Please enter 1, 2, or 3." -ForegroundColor Red
             }
         }
 
@@ -1036,11 +1038,15 @@ if (Test-Path $makemkvOutputDir) {
             $existingFiles | Remove-Item -Force
             Write-Host "Deleted $($existingFiles.Count) existing file(s)" -ForegroundColor Green
             Write-Log "User chose to delete $($existingFiles.Count) existing file(s) in $makemkvOutputDir"
-        } else {
+        } elseif ($choice -eq '2') {
             $makemkvOutputDir = $suffixedDir
             New-Item -ItemType Directory -Path $makemkvOutputDir -Force | Out-Null
             Write-Host "Using suffixed directory: $makemkvOutputDir" -ForegroundColor Green
             Write-Log "User chose suffixed directory: $makemkvOutputDir"
+        } else {
+            $skipMakeMkvRip = $true
+            Write-Host "Continuing with existing files — skipping MakeMKV rip" -ForegroundColor Green
+            Write-Log "User chose to continue with $($existingFiles.Count) existing file(s) in $makemkvOutputDir"
         }
     } else {
         Write-Host "Directory exists (empty)" -ForegroundColor Gray
@@ -1049,6 +1055,23 @@ if (Test-Path $makemkvOutputDir) {
     New-Item -ItemType Directory -Path $makemkvOutputDir | Out-Null
     Write-Host "Directory created successfully" -ForegroundColor Green
 }
+
+if ($skipMakeMkvRip) {
+    # User chose to continue with existing files — skip MakeMKV rip and disc eject
+    Write-Timestamp "Step 1/4: Skipped (using existing files)"
+    Write-Host "`n[STEP 1/4] Skipped MakeMKV rip — using existing files" -ForegroundColor Cyan
+    $rippedFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
+    if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
+        Write-Host "`nERROR: No MKV files found in $makemkvOutputDir" -ForegroundColor Red
+        Stop-WithError -Step "STEP 1/4: MakeMKV rip" -Message "No MKV files found in existing directory"
+    }
+    Write-Host "Found $($rippedFiles.Count) existing MKV file(s):" -ForegroundColor Green
+    foreach ($file in $rippedFiles) {
+        Write-Host "  - $($file.Name) ($([math]::Round($file.Length/1GB, 2)) GB)" -ForegroundColor Gray
+    }
+    Write-Log "STEP 1/4: Skipped MakeMKV rip - using $($rippedFiles.Count) existing file(s) in $makemkvOutputDir"
+    Complete-CurrentStep
+} else {
 
 Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
 Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120" -ForegroundColor Gray
@@ -1247,6 +1270,8 @@ if ($ejectSuccess) {
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 }
+
+} # end of MakeMKV rip + eject block
 
 
 # ========== QUEUE MODE: ADD TO QUEUE AND EXIT ==========
