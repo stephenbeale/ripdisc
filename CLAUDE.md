@@ -913,3 +913,41 @@ Two bugs fixed in one PR:
 - Validate stuck sector detection on a genuinely damaged disc
 - Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI
 - Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-04-15 - Continue From Existing Files Option (PR #104)
+
+**Problem:**
+When the MakeMKV output directory already contained files from a previous rip attempt, users were presented with only two options: delete the directory and start over, or use a suffixed directory. There was no way to skip the MakeMKV rip entirely and resume directly at Step 2 (HandBrake encoding) using the files that were already there.
+
+**Solution:**
+
+**PR #104 merged: `feature/continue-from-existing`**
+
+Added a third option to the "MakeMKV output directory already exists" prompt in `rip-disc.ps1`:
+
+- Option [1] — Delete and re-use directory (existing behaviour, unchanged)
+- Option [2] — Use a suffixed directory, e.g. `title-1` (existing behaviour, unchanged)
+- Option [3] — Continue with existing files (skip MakeMKV rip) — NEW
+
+When the user selects option [3]:
+- The MakeMKV rip is skipped entirely
+- Disc eject is skipped (no disc was ripped, so there is nothing to eject)
+- Existing `.mkv` files in the output directory are picked up as the source for Step 2
+- HandBrake encoding and all subsequent steps (organize, rename, cleanup) proceed normally
+
+**Use case:**
+MakeMKV completed successfully in a previous session but the script was interrupted before HandBrake finished. The user can restart `rip-disc.ps1` and select option [3] to resume encoding from the already-ripped files, avoiding a full re-rip.
+
+**Files changed:**
+- `rip-disc.ps1` — Added option [3] branch to the existing-directory prompt; skips `Invoke-MakeMKV` and disc eject when selected; continues to HandBrake with files from the existing directory
+
+**Work In Progress:**
+- None — PR merged, working tree clean, main fully synchronised with origin/main
+
+**Outstanding Work for Future Sessions:**
+- Validate stuck sector detection on a genuinely damaged disc
+- Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Consider whether option [3] should also be added to `continue-rip.ps1` for symmetry
