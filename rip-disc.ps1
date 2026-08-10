@@ -455,6 +455,12 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # so we always query MakeMKV directly via `info disc:9999` to get the correct index.
 # Wake up the target drive first — USB optical drives go dormant and MakeMKV stalls waiting for spin-up
 $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
+
+# MakeMKV's name for the drive we are ripping from (e.g. "DVD+R-DL HL-DT-ST DVDRAM GP75N 1.02 K0GPAID0457").
+# Used in Step 1 to tell our drive's read errors apart from errors MakeMKV reports for OTHER drives
+# while it enumerates them at startup. Empty when -DriveIndex is used (we never see the drive list).
+$script:TargetDriveName = ""
+
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
@@ -488,8 +494,15 @@ if ($DriveIndex -ge 0) {
             Write-Host "ERROR: MakeMKV drive query failed (exit code $LASTEXITCODE)" -ForegroundColor Red
             exit 1
         }
-        # Cache the output for subsequent runs
-        $drvOutput | Set-Content $drvCacheFile -Force
+        # Cache the output for subsequent runs — but only if every drive enumerated cleanly.
+        # A drive that reports read errors (MSG:2003) may be missing or wrong in the DRV: list,
+        # and caching that bad mapping would reuse it for the whole TTL.
+        $drvHadErrors = @($drvOutput | Where-Object { "$_".Trim() -match '^MSG:2003' }).Count -gt 0
+        if ($drvHadErrors) {
+            Write-Host "Not caching drive list — a drive reported read errors during enumeration; will re-query next run." -ForegroundColor DarkYellow
+        } else {
+            $drvOutput | Set-Content $drvCacheFile -Force
+        }
     }
 
     $matchedIndex = -1
@@ -526,6 +539,8 @@ if ($DriveIndex -ge 0) {
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
         $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
+        # Remember MakeMKV's name for this drive so Step 1 can ignore read errors from other drives
+        $script:TargetDriveName = $matchedDrv.Name
         Write-Host "Using disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Green
     } else {
         # Clear stale cache on failure
@@ -1086,6 +1101,16 @@ $stuckOffsetCount = 0
 $stuckOffset = ""
 $stuckThreshold = 5  # kill after this many consecutive errors at the same offset
 $wasKilledForStuck = $false
+# MakeMKV enumerates EVERY optical drive when it starts, so read errors from other drives arrive
+# before our rip begins. Those must not trip the stuck-sector watchdog — only count offset errors
+# once the rip is genuinely under way, and only when the error names the drive we are ripping.
+$ripStarted = $false
+# Safety net for the pre-rip phase: a disc that can never be authenticated would otherwise loop
+# forever at enumeration, so kill after this many consecutive error lines with no rip in sight.
+$preRipErrorCount = 0
+$preRipErrorThreshold = 50
+$preRipErrorDrive = ""
+$wasKilledForAuth = $false
 
 $proc = New-Object System.Diagnostics.Process
 $proc.StartInfo.FileName = $makemkvconPath
@@ -1102,26 +1127,58 @@ $makemkvFullOutput = New-Object System.Collections.ArrayList
 while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
     [void]$makemkvFullOutput.Add($line)
 
+    # Detect the point where MakeMKV stops enumerating drives and starts the actual rip
+    if (-not $ripStarted -and $line -match "Saving \d+ titles|Current progress|Current operation|Title #") {
+        $ripStarted = $true
+    }
+
     # Detect repeated errors at same offset (stuck retry loop)
     if ($line -match "at offset '(\d+)'") {
         $currentOffset = $Matches[1]
-        if ($currentOffset -eq $stuckOffset) {
-            $stuckOffsetCount++
-        } else {
-            $stuckOffset = $currentOffset
-            $stuckOffsetCount = 1
+        # The error names the drive it came from:
+        #   "... occurred while reading '<drive name>' at offset '<n>'"
+        # MakeMKV scans all drives at startup, so this can be a drive we are not ripping from.
+        $errorDrive = ""
+        if ($line -match "occurred while reading '([^']+)' at offset '\d+'") {
+            $errorDrive = $Matches[1]
         }
-        if ($stuckOffsetCount -ge $stuckThreshold) {
-            $wasKilledForStuck = $true
-            Write-Host "`nWARNING: MakeMKV stuck retrying the same bad sector ($stuckOffsetCount attempts at offset $stuckOffset)" -ForegroundColor Yellow
-            Write-Host "Killing MakeMKV to salvage titles already saved to disk..." -ForegroundColor Yellow
-            try { $proc.Kill() } catch {}
-            break
+        # Ours unless we know our drive's name AND the error clearly names a different one.
+        # With -DriveIndex we never see the drive list, so fall back to counting every error.
+        $isOurDrive = ($script:TargetDriveName -eq "") -or ($errorDrive -eq "") -or ($errorDrive -eq $script:TargetDriveName)
+
+        if ($ripStarted -and $isOurDrive) {
+            if ($currentOffset -eq $stuckOffset) {
+                $stuckOffsetCount++
+            } else {
+                $stuckOffset = $currentOffset
+                $stuckOffsetCount = 1
+            }
+            if ($stuckOffsetCount -ge $stuckThreshold) {
+                $wasKilledForStuck = $true
+                Write-Host "`nWARNING: MakeMKV stuck retrying the same bad sector ($stuckOffsetCount attempts at offset $stuckOffset)" -ForegroundColor Yellow
+                Write-Host "Killing MakeMKV to salvage titles already saved to disk..." -ForegroundColor Yellow
+                try { $proc.Kill() } catch {}
+                break
+            }
+        } elseif (-not $ripStarted) {
+            # Still enumerating drives — never a stuck sector, but do not let it spin forever
+            $preRipErrorCount++
+            if ($errorDrive -ne "") { $preRipErrorDrive = $errorDrive }
+            if ($preRipErrorCount -ge $preRipErrorThreshold) {
+                $wasKilledForAuth = $true
+                $preRipDriveLabel = if ($preRipErrorDrive -ne "") { " on '$preRipErrorDrive'" } else { "" }
+                Write-Host "`nERROR: MakeMKV never got past reading the disc$preRipDriveLabel ($preRipErrorCount consecutive read errors before the rip started)" -ForegroundColor Red
+                Write-Host "Killing MakeMKV — the drive could not authenticate or read the disc." -ForegroundColor Red
+                Write-Log "MakeMKV killed before rip started - $preRipErrorCount consecutive read errors$preRipDriveLabel"
+                try { $proc.Kill() } catch {}
+                break
+            }
         }
     } else {
-        # Reset stuck counter when we see a non-error line (progress is being made)
+        # Reset counters when we see a non-error line (progress is being made)
         $stuckOffsetCount = 0
         $stuckOffset = ""
+        $preRipErrorCount = 0
     }
 
     if ($line -ne $script:lastPrintedLine) {
@@ -1131,7 +1188,18 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
 }
 
 try { $proc.WaitForExit() } catch {}
-$makemkvExitCode = if ($wasKilledForStuck) { 0 } else { $proc.ExitCode }
+
+# A killed process reports an unhelpful exit code, so judge it by what actually landed on disk.
+# A stuck-sector kill counts as success ONLY when titles were salvaged; a kill that produced
+# nothing must stay non-zero so the error analysis below runs instead of reporting a bogus success.
+$salvagedFiles = @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue)
+if ($wasKilledForStuck -and $salvagedFiles.Count -gt 0) {
+    $makemkvExitCode = 0
+} elseif ($wasKilledForStuck -or $wasKilledForAuth) {
+    $makemkvExitCode = 1
+} else {
+    $makemkvExitCode = $proc.ExitCode
+}
 
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
@@ -1140,10 +1208,24 @@ if ($makemkvExitCode -ne 0) {
     # Analyze output to determine the specific error
     $errorMessage = "MakeMKV exited with code $makemkvExitCode"
 
+    # Check for CSS authentication failure first — it can occur without "Failed to open disc"
+    if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION") {
+        # CSS authentication failure. MakeMKV often reports only the SCSI errors and never prints
+        # "Failed to open disc", so this must be checked before that branch or it never fires.
+        $cssDrive = ""
+        if ($makemkvOutputText -match "occurred while reading '([^']+)' at offset '\d+'") {
+            $cssDrive = $Matches[1]
+        }
+        $cssDriveLabel = if ($cssDrive -ne "") { " Drive reporting the error: $cssDrive." } else { "" }
+        $errorMessage = "Disc copy protection (CSS) - the drive could not authenticate the disc.$cssDriveLabel"
+        Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+        Write-Host "NOTE: MakeMKV reads ALL optical drives at startup, so this may be a DIFFERENT drive from the one being ripped." -ForegroundColor Yellow
+        Write-Host "Remove discs from any other optical drives and try again." -ForegroundColor Yellow
+    }
     # Check for "Failed to open disc" — could be drive not found OR unreadable disc
     # If MakeMKV output mentions disc structure (IFO/BUP/VOB/VTS), the drive was found
     # but the disc itself is corrupt or unreadable
-    if ($makemkvOutputText -match "Failed to open disc") {
+    elseif ($makemkvOutputText -match "Failed to open disc") {
         if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS TRACK|Scsi error") {
             $errorMessage = "Disc copy protection (CSS) prevented reading - the drive was found but MakeMKV could not authenticate the disc. Try reinserting the disc or check that MakeMKV has a valid licence key"
             Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
