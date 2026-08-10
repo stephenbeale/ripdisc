@@ -9,6 +9,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-10
 
 ### Fixed
+- Disc eject no longer falsely reported as timed out while the disc is sitting in an open tray (#106)
+  - The eject ran via `Start-Job` + `Wait-Job -Timeout 15`, which measured PowerShell child-process startup, not the eject
+  - Under the CPU saturation this script creates itself (12 concurrent `HandBrakeCLI` encodes pinning the CPU at 100%), a `Start-Job` with a trivial `{ 1 }` body was measured at 18.0s, 25.7s and 33.2s — every one of them over the 15s deadline before the eject could report back
+  - Explains why the failure rate climbed through the day and hit all drives equally: 2026-06 logs show zero eject timeouts, and on 2026-08-10 every rip up to 15:14 succeeded while 8 of the 10 after it failed, as concurrent encodes accumulated
+  - The eject is now issued in-process as a direct `IOCTL_STORAGE_EJECT_MEDIA` device call — no child process, and it touches only the target drive, unlike the old `Shell.Application` verb which made Explorer re-enumerate every optical drive and could stall on a sibling drive mid-rip in a concurrent session
+  - Success is confirmed by polling `System.IO.DriveInfo.IsReady` until the drive goes not-ready, rather than by trusting a call to return inside a deadline — it now reports what actually happened rather than how long a process took to spawn
+  - Measured on drive H: at 100% CPU load: IOCTL 1309ms, eject confirmed after 267ms with zero poll iterations
+  - The failure dialog is now reworded, since a genuine failure is no longer a timeout
 - Stuck sector detection no longer aborts rips because of read errors from a different drive (#105)
   - `makemkvcon` enumerates every optical drive at startup, so CSS errors from an unrelated drive arrived before the rip began, tripped the watchdog after 5 lines and killed the rip roughly 2 seconds in
   - Offset errors now only count toward the stuck counter once the rip has actually started (`Saving N titles`, `Current progress`, `Current operation`, or `Title #`)

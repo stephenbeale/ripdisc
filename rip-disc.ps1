@@ -1312,42 +1312,120 @@ foreach ($file in $rippedFiles) {
 }
 Complete-CurrentStep
 
-# Eject disc (with timeout and retry to prevent hanging if drive is busy)
+# Eject disc
+#
+# This used to be Start-Job + Wait-Job -Timeout 15, which measured the wrong thing.
+# Start-Job spawns a child powershell.exe, and when this script's own concurrent
+# HandBrake encodes have the CPU pinned at 100% that spawn alone takes 18-33s
+# (measured). The 15s timeout therefore expired during process startup, before the
+# eject could ever be reported back - so the script announced "eject timed out,
+# please eject manually" while the disc was already sitting in an open tray.
+#
+# Two changes fix that:
+#   1. The eject is issued in-process as a direct device IOCTL. No child process,
+#      no Explorer involvement, and it only touches the target drive - the old
+#      Shell.Application path made the shell re-enumerate every optical drive,
+#      which stalls when sibling drives are mid-rip in a concurrent session.
+#   2. Success is confirmed by watching the drive go not-ready, rather than by
+#      trusting a call to return within a deadline. DriveInfo.IsReady costs
+#      single-digit milliseconds even under full load, so polling is cheap and,
+#      unlike a wall-clock timeout, it reports what actually happened.
 Write-Timestamp "Ejecting disc"
 Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
+
+function Test-OpticalMediaPresent {
+    param([string]$Root)
+    try { return (New-Object System.IO.DriveInfo $Root).IsReady } catch { return $false }
+}
+
+function Invoke-OpticalEject {
+    param([string]$Root)
+
+    if (-not ('RipDiscEject' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class RipDiscEject {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share,
+        IntPtr security, uint disposition, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(IntPtr handle, uint code,
+        IntPtr inBuffer, uint inSize, IntPtr outBuffer, uint outSize,
+        out uint returned, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private const uint GENERIC_READ = 0x80000000;
+    private const uint FILE_SHARE_READ_WRITE = 0x00000003;
+    private const uint OPEN_EXISTING = 3;
+    private const uint IOCTL_STORAGE_EJECT_MEDIA = 0x002D4808;
+
+    public static bool Eject(string driveRoot, out int error) {
+        error = 0;
+        string path = @"\\.\" + driveRoot.TrimEnd('\\').TrimEnd(':') + ":";
+        IntPtr handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ_WRITE,
+            IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        if (handle == new IntPtr(-1)) {
+            error = Marshal.GetLastWin32Error();
+            return false;
+        }
+        try {
+            uint returned;
+            bool ok = DeviceIoControl(handle, IOCTL_STORAGE_EJECT_MEDIA,
+                IntPtr.Zero, 0, IntPtr.Zero, 0, out returned, IntPtr.Zero);
+            if (!ok) { error = Marshal.GetLastWin32Error(); }
+            return ok;
+        } finally {
+            CloseHandle(handle);
+        }
+    }
+}
+'@
+    }
+
+    $ejectError = 0
+    $ok = [RipDiscEject]::Eject($Root, [ref]$ejectError)
+    return @{ Ok = $ok; Error = $ejectError }
+}
+
+$ejectRoot = ($driveLetter.TrimEnd('\').TrimEnd(':')) + ":"
 $ejectSuccess = $false
-for ($ejectAttempt = 1; $ejectAttempt -le 2; $ejectAttempt++) {
+
+for ($ejectAttempt = 1; $ejectAttempt -le 2 -and -not $ejectSuccess; $ejectAttempt++) {
     if ($ejectAttempt -eq 2) {
         Write-Host "Retrying eject (attempt 2)..." -ForegroundColor Yellow
         Write-Log "Retrying disc eject for drive $driveLetter (attempt 2)"
         Start-Sleep -Seconds 2
     }
-    $ejectJob = Start-Job -ScriptBlock {
-        param($drive)
-        $shell = New-Object -comObject Shell.Application
-        $shell.Namespace(17).ParseName($drive).InvokeVerb("Eject")
-    } -ArgumentList $driveLetter
-    $ejectCompleted = $ejectJob | Wait-Job -Timeout 15
-    if ($ejectCompleted) {
-        Remove-Job $ejectJob -Force
-        $ejectSuccess = $true
-        break
-    } else {
-        Stop-Job $ejectJob
-        Remove-Job $ejectJob -Force
+
+    $ejectResult = Invoke-OpticalEject -Root $ejectRoot
+    if (-not $ejectResult.Ok) {
+        Write-Log "Eject request for drive $driveLetter failed on attempt $ejectAttempt (win32 error $($ejectResult.Error))"
+    }
+
+    # Wait for the tray to actually open. Trays typically respond in well under a
+    # second; 20s is a generous ceiling that costs nothing when the eject worked.
+    for ($ejectWaited = 0; $ejectWaited -lt 20; $ejectWaited++) {
+        if (-not (Test-OpticalMediaPresent $ejectRoot)) { $ejectSuccess = $true; break }
+        Start-Sleep -Seconds 1
     }
 }
+
 if ($ejectSuccess) {
     Write-Host "Disc ejected successfully" -ForegroundColor Green
     Write-Log "Disc ejected from drive $driveLetter"
 } else {
-    Write-Host "Disc eject timed out after 2 attempts - please eject manually" -ForegroundColor Yellow
-    Write-Log "WARNING: Disc eject timed out for drive $driveLetter after 2 attempts"
+    Write-Host "Could not eject disc after 2 attempts - please eject manually" -ForegroundColor Yellow
+    Write-Log "WARNING: Disc still present in drive $driveLetter after 2 eject attempts"
     # Show Windows dialog box so user is notified even when not watching the terminal
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        "Disc eject timed out for '$title' on drive $driveLetter.`n`nIt is safe to eject the disc manually.",
-        "RipDisc - Eject Timeout",
+        "Could not eject the disc for '$title' on drive $driveLetter.`n`nPlease eject it manually.",
+        "RipDisc - Eject Failed",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null

@@ -1010,3 +1010,57 @@ Verification step for the next session: remove the disc from H:, re-run the G: r
 - Validate stuck sector detection on a genuinely damaged disc
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Auto-discovery is PowerShell only — add to C# if needed
+
+---
+
+### 2026-08-10 (continued) - Eject False Timeout (PR #106)
+
+**Problem:**
+Rips were reporting `Disc eject timed out after 2 attempts - please eject manually` while the disc had, in fact, already been ejected — the tray was open. It happened on many discs across all three drives.
+
+**Root cause — the timeout was measuring the wrong thing:**
+The eject ran on a background job:
+
+```powershell
+$ejectJob = Start-Job -ScriptBlock { ... InvokeVerb("Eject") } -ArgumentList $driveLetter
+$ejectCompleted = $ejectJob | Wait-Job -Timeout 15
+```
+
+`Start-Job` spawns an entire child `powershell.exe`. Measured on this machine while 12 concurrent `HandBrakeCLI` encodes had the CPU pinned at 100%, a `Start-Job` with a trivial `{ 1 }` body took **18.0s, 25.7s and 33.2s** across three runs. The 15s deadline was therefore consumed by process startup, before the eject had any chance to report back. The child eventually ran and the disc came out; the script had already declared failure.
+
+The saturation is self-inflicted: this is the same tool running several rips at once, so the more concurrent sessions, the worse it gets.
+
+**Evidence in `C:\Video\logs`:**
+- All of June 2026 — zero eject timeouts, across D:, E: and G:
+- 2026-08-10 — every rip up to 15:14 succeeded; 8 of the 10 after it failed, as concurrent encodes accumulated through the afternoon
+- Failures hit E:, G: and H: equally — not drive-specific and not disc-specific, which rules out drive firmware and the CSS problems tracked above
+- Runaway Jury (15:16) succeeded on attempt 2 — a marginal case straddling the deadline
+- Time from "Retrying eject (attempt 2)" to the failure log was 23–33s against a 15s timeout, the extra being `Stop-Job`/`Remove-Job` on a job whose child was still starting
+
+**Solution (`rip-disc.ps1` only):**
+
+1. **Eject issued in-process as a direct device IOCTL.** `IOCTL_STORAGE_EJECT_MEDIA` (`0x2D4808`) via a small P/Invoke class `RipDiscEject`, compiled lazily and guarded by `if (-not ('RipDiscEject' -as [type]))`. No child process. It also only touches the target drive — the old `Shell.Application` verb made Explorer re-enumerate every optical drive, which stalls when a sibling drive is mid-rip in a concurrent session.
+2. **Success confirmed by observation, not by a deadline.** `System.IO.DriveInfo.IsReady` is polled (1s interval, 20s ceiling) until the drive goes not-ready. Measured at 3–24ms per check even at 100% CPU, so polling is effectively free. `Win32_CDROMDrive.MediaLoaded` was rejected as the signal — it took **13 seconds** on E: under the same load.
+3. **Failure message reworded** — a genuine failure is no longer a timeout, so the dialog now says "Could not eject the disc … Please eject it manually."
+
+**Verified — runtime-tested, unlike PR #105:**
+- BOM intact (`EF BB BF`), `PSParser::Tokenize` reports 0 errors
+- The embedded C# was extracted from the saved file and compiled — signature `Boolean Eject(String driveRoot, Int32& error)`
+- Live eject on H: **at 100% CPU load**: IOCTL returned `ok=True` in 1309ms, eject confirmed after 267ms with **zero poll iterations**. The old code would have called this a timeout.
+- Drive-root normalisation checked for `H:`, `H` and `H:\` — all produce `\\.\H:`
+
+**Scope — checked, deliberately not changed:**
+- `continue-rip.ps1` — has no eject logic at all
+- `rip-audio.ps1` (separate `ripaudio` repo) — ejects via `Shell.Application` with no timeout and no confirmation, so it cannot produce this false negative
+- A sweep for `Start-Job|Wait-Job|Start-Sleep|-Timeout|WaitForExit` across all three scripts found **this was the only `Start-Job`/`Wait-Job` in the codebase**. Everything else that waits either polls real state or counts discrete events (the stuck-sector watchdog counts consecutive identical-offset errors; file-lock retries are attempt-count-based) rather than trusting a wall clock against unpredictable process-spawn cost. This was a one-site bug, not a systemic pattern.
+
+**Files changed:**
+- `rip-disc.ps1` — Eject rewrite
+- `CHANGELOG.md`, `CLAUDE.md`
+
+**Work In Progress:**
+- None
+
+**Outstanding Work for Future Sessions:**
+- Unchanged from the list above — none of those items interact with this fix
+- Consider whether the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since, should be formally abandoned rather than re-listed every session
