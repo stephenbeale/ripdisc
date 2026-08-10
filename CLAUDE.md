@@ -1013,7 +1013,7 @@ Verification step for the next session: remove the disc from H:, re-run the G: r
 
 ---
 
-### 2026-08-10 (continued) - Eject False Timeout
+### 2026-08-10 (continued) - Eject False Timeout (PR #106)
 
 **Problem:**
 Rips were reporting `Disc eject timed out after 2 attempts - please eject manually` while the disc had, in fact, already been ejected — the tray was open. It happened on many discs across all three drives.

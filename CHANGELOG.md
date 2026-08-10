@@ -9,7 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-10
 
 ### Fixed
-- Disc eject no longer falsely reported as timed out while the disc is sitting in an open tray
+- Disc eject no longer falsely reported as timed out while the disc is sitting in an open tray (#106)
   - The eject ran via `Start-Job` + `Wait-Job -Timeout 15`, which measured PowerShell child-process startup, not the eject
   - Under the CPU saturation this script creates itself (12 concurrent `HandBrakeCLI` encodes pinning the CPU at 100%), a `Start-Job` with a trivial `{ 1 }` body was measured at 18.0s, 25.7s and 33.2s — every one of them over the 15s deadline before the eject could report back
   - Explains why the failure rate climbed through the day and hit all drives equally: 2026-06 logs show zero eject timeouts, and on 2026-08-10 every rip up to 15:14 succeeded while 8 of the 10 after it failed, as concurrent encodes accumulated
