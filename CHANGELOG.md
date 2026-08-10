@@ -6,6 +6,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-10
+
+### Fixed
+- Stuck sector detection no longer aborts rips because of read errors from a different drive (#105)
+  - `makemkvcon` enumerates every optical drive at startup, so CSS errors from an unrelated drive arrived before the rip began, tripped the watchdog after 5 lines and killed the rip roughly 2 seconds in
+  - Offset errors now only count toward the stuck counter once the rip has actually started (`Saving N titles`, `Current progress`, `Current operation`, or `Title #`)
+  - Errors are attributed to a drive by parsing `occurred while reading '<drive>' at offset '<n>'` and comparing against the target drive; errors naming another drive are still printed but never counted
+  - Added a pre-rip escape hatch: 50 consecutive read errors before the rip starts also kills MakeMKV, so a disc that can never be authenticated cannot hang indefinitely
+  - The `-DriveIndex` path has no drive list to compare against, so it still counts every error as before
+- Stuck-sector kill no longer masked as success (#105)
+  - `$makemkvExitCode = if ($wasKilledForStuck) { 0 }` forced exit code 0, skipping the entire error-analysis block so the user only ever saw the generic "No MKV files were created"
+  - The exit code is now judged by what was salvaged: 0 only when a stuck kill left at least one MKV file, otherwise non-zero so error analysis runs
+- CSS authentication failure detected without requiring "Failed to open disc" (#105)
+  - The CSS branch was nested inside a `Failed to open disc` check, which the real-world failure never printed — only SCSI errors — so it never fired
+  - `SCRAMBLED SECTOR WITHOUT AUTHENTICATION` is now matched anywhere in the captured output, names the offending drive when parseable, and notes it may be a different drive from the one being ripped
+- Drive list cache no longer stores a failed enumeration (#105)
+  - `makemkv-drive-cache.txt` stored raw `info disc:9999` output including `MSG:2003` error lines; a drive that errors may be missing or wrong in the `DRV:` list, and the bad mapping was then reused for the full 5-minute TTL
+  - The cache is only written when the enumeration is error-free; otherwise the drive list is re-queried on the next run
+
+### Added
+- Target drive name (`$script:TargetDriveName`) recorded from the MakeMKV drive list so read errors can be attributed to a specific drive (#105)
+
 ## 2026-03-23
 
 ### Fixed

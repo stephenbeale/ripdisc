@@ -951,3 +951,62 @@ MakeMKV completed successfully in a previous session but the script was interrup
 - Investigate CSS authentication issue: "Muriel's Wedding" on G: (USB DVD) fails with CSS SCSI errors via makemkvcon CLI but rips fine in MakeMKV GUI
 - Port missing features to C# implementation (see Feature Parity table in README)
 - Consider whether option [3] should also be added to `continue-rip.ps1` for symmetry
+
+---
+
+### 2026-08-10 - Stuck Sector Watchdog False Positive on CSS Auth Errors (PR #105)
+
+**Problem:**
+Two rips failed at Step 1 with `No MKV files were created`:
+- "Who Framed Roger Rabbit" on G:
+- "The Great Gatsby 2013" on H:
+
+Both were preceded by `SCRAMBLED SECTOR WITHOUT AUTHENTICATION` SCSI errors, at offsets 1048576 and 589824 respectively.
+
+**Root cause:**
+Drive H: (`DVD+R-DL HL-DT-ST DVDRAM GP75N 1.01 K0MMB391933`) cannot CSS-authenticate its disc. `makemkvcon` enumerates every optical drive at startup, so even a rip told to use `disc:1` (drive G:) still hit H: and emitted repeated errors like:
+
+```
+Error 'Scsi error - ILLEGAL REQUEST:READ OF SCRAMBLED SECTOR WITHOUT AUTHENTICATION' occurred while reading 'DVD+R-DL HL-DT-ST DVDRAM GP75N 1.01 K0MMB391933' at offset '589824'
+```
+
+The stuck-sector watchdog counted those startup-enumeration errors — which came from a *different* drive — and killed `makemkvcon` roughly 2 seconds in, before the real rip had started. `$makemkvExitCode = if ($wasKilledForStuck) { 0 }` then masked the kill as success, so the CSS-specific error branch never fired and the user only saw the generic "No MKV files were created".
+
+**Solution:**
+
+**PR #105: `fix/stuck-detector-css-false-positive`**
+
+Five changes, all in `rip-disc.ps1`:
+
+1. **Target drive name captured** — new `$script:TargetDriveName`, set from `$matchedDrv.Name` when the drive list resolves, so read errors can be attributed to a specific drive. Empty on the `-DriveIndex` path (the drive list is never seen there).
+2. **Drive list cache skipped on enumeration errors** — `makemkv-drive-cache.txt` was storing raw `info disc:9999` output including `MSG:2003` lines. A drive that errors during enumeration may be missing or wrong in the `DRV:` list, and that bad mapping was reused for the full 5-minute TTL. The cache is now written only when the enumeration is error-free.
+3. **Watchdog gated on rip-started plus drive attribution** — offset errors count toward the stuck counter only once `$ripStarted` is true (set on `Saving N titles`, `Current progress`, `Current operation`, or `Title #`) *and* the error names our drive, parsed from `occurred while reading '<drive>' at offset '<n>'`. Errors naming another drive are still printed but never counted. A separate pre-rip escape hatch (50 consecutive errors, `$wasKilledForAuth`) stops an unauthenticatable disc hanging forever at enumeration. Threshold stays 5; non-error lines still reset the counter.
+4. **Exit code judged by salvaged files** — no longer forced to 0. The output directory is checked for `*.mkv` right after the process exits; exit 0 only when a stuck kill actually salvaged files, otherwise an explicit non-zero code (`Kill()` leaves `$proc.ExitCode` unhelpful) so error analysis runs.
+5. **CSS detection un-nested** — a new branch matching `SCRAMBLED SECTOR WITHOUT AUTHENTICATION` anywhere in the output, evaluated *before* the `Failed to open disc` check (which became `elseif`). It names the offending drive when parseable and warns that it may be a different drive from the one being ripped, suggesting the user remove discs from other optical drives and retry.
+
+**Relationship to the long-standing "Muriel's Wedding" item:**
+This is the same signature as the open item carried in these notes since 2026-03-23 — *"Muriel's Wedding on G: fails with CSS SCSI errors via makemkvcon CLI but rips fine in the MakeMKV GUI"*. That difference is now at least partly explained: the GUI has no watchdog killing it, so it survives the same enumeration errors that were aborting the CLI rip. Whether the underlying drive-level CSS authentication failure on H:/G: is itself fixed is **still unverified** — this change stops the script from killing the rip, it does not make an unauthenticatable drive authenticate.
+
+**Files changed:**
+- `rip-disc.ps1` — All five changes above
+- `CHANGELOG.md` — 2026-08-10 section
+- `CLAUDE.md` — These session notes
+
+**Files deliberately NOT changed:**
+- `continue-rip.ps1` — never runs MakeMKV, so none of this applies
+- C# implementation — not ported
+
+**Testing status — IMPORTANT:**
+Parse-checked only (`[System.Management.Automation.PSParser]::Tokenize` reports 0 errors), and the UTF-8 BOM on `rip-disc.ps1` was verified intact after editing. **This fix has NOT been runtime-tested** — no disc was mounted in any drive during the session.
+
+Verification step for the next session: remove the disc from H:, re-run the G: rip, and confirm it completes.
+
+**Work In Progress:**
+- None — PR #105 merged, working tree clean
+
+**Outstanding Work for Future Sessions:**
+- Verify the CSS fix on a real rip (remove the disc from H:, re-run the G: rip, confirm completion)
+- Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting on the drive
+- Validate stuck sector detection on a genuinely damaged disc
+- Port missing features to C# implementation (see Feature Parity table in README)
+- Auto-discovery is PowerShell only — add to C# if needed
