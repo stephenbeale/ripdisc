@@ -13,6 +13,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Step 3 ran a bare, unchecked `cd $finalOutputDir`, and the entire organize block renames and moves files relative to the *current* directory
   - If that `cd` failed, the script carried on and renamed whatever happened to be in the directory it was launched from — this actually hit the repo working directory
   - Now `Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop` inside a try/catch, plus a post-check comparing `(Get-Location).Path` against the target before any renaming takes place
+- `rip-disc.ps1` Step 3 gets the same working-directory guard as `continue-rip.ps1` above (#109)
+  - Same bare, unchecked `cd $finalOutputDir` and the same class of bug: the organize block renames, moves and deletes files relative to the *current* directory
+  - `Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop` inside a try/catch routing to `Stop-WithError`, plus a guard comparing `(Get-Location).Path` against the target before any renaming
+  - Preventative — this fix has not fired against a real failure; the actual incident (every file in the repo renamed with a leading `-`) went through `continue-rip.ps1`'s Step 3, fixed in #107 above
 
 ### Changed
 - `continue-rip.ps1` is now usable without knowing the arguments up front (#107)
@@ -21,6 +25,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Every step is always listed with its prerequisites, and the chosen step can be switched at the prompt
   - Prerequisite checks extracted into `Test-StepPrerequisites`; `Stop-Prerequisite` became `Write-PrerequisiteFailure`, which returns `$false` instead of calling `exit 1`, so a failed check re-offers the step list instead of killing the session
   - `-Yes` still exits 1 on a failed prerequisite, preserving non-interactive behaviour
+- `continue-rip.ps1` Step 2 skips MKVs that already have a matching MP4 instead of re-encoding them (#110)
+  - Resuming a rip usually means encoding stopped part way through, so redoing finished files wasted hours
+  - New `-Force` switch (alias `-ReEncode`) restores the old encode-everything behaviour
+  - Each skipped file is printed and logged with the existing MP4's size; skipping assumes those MP4s are complete — it checks existence, not integrity
+  - Reports "Nothing to encode" and continues to Step 3 when every MKV already has an MP4
+  - Recovery script is now only generated when there is something to encode, built from the filtered list; `$recoveryScriptPath` starts `$null` with its deletion guarded so `Test-Path` is never handed a null path
+  - The encode loop and its "file N of M" counters (console and log) are driven from the filtered list
+  - The pre-flight prerequisite summary now reports which files will be skipped, or overwritten under `-Force`, and a count of files to encode this run
 
 ### Verified
 - The 2026-08-10 eject fix (#106) confirmed working in production on its first real rips, under three concurrent sessions

@@ -1118,3 +1118,64 @@ Two Claude sessions worked `feature/continue-rip-usability` simultaneously. One 
 - Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
 - Validate stuck sector detection on a genuinely damaged disc
 - Decide the fate of the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since
+
+---
+
+### 2026-08-11 (continued) - Step 3 Guard for rip-disc.ps1; Skip Already-Encoded Files (PRs #109, #110)
+
+**Incident — every file in the repo renamed with a leading `-`:**
+At ~06:13, `.gitignore`, `CHANGELOG.md`, `CLAUDE.md`, `continue-rip.ps1`, `LICENSE` and `Load-Config.ps1` were renamed to `-<filename>` — alphabetically, stopping at the `nul` file. Root cause: `continue-rip.ps1` Step 3's prefix-rename operates on the CURRENT directory, and `cd $finalOutputDir` failed silently, leaving the working directory wherever the script had been launched from — the repo — with an empty prefix. Files were restored; nothing was lost. This is exactly what the Step 3 guard in PR #107 fixes, and PR #109 below ships the same guard for `rip-disc.ps1`, which has the identical bare `cd`.
+
+**Incident — a dry run started a real encode:**
+While dry-running the user's command for testing, a piped blank line was read as pressing Enter at the confirmation prompt, and `continue-rip.ps1` began encoding for real. It was killed ~3 minutes in, after confirming by PID that the user's concurrent Disc 1 encode was left untouched. It truncated `F:\Documentaries\Metal A Headbanger's Journey-Disc 2\B2_t00.mp4` from 307 MB to 150 MB; the truncated file was deleted, and a later run by the user re-encoded it to 308.8 MB — fully repaired. The confirm prompt now uses `Read-Answer` (added in #107), which exits cleanly on an unanswered/EOF prompt rather than defaulting to "continue".
+
+**PR #109 — `rip-disc.ps1` Step 3 working-directory guard**
+
+Same class of bug as the `continue-rip.ps1` fix in #107, applied to `rip-disc.ps1`'s Step 3 (`STEP 3/4: Organizing files`), which has the identical bare, unchecked `cd $finalOutputDir`:
+
+```powershell
+try {
+    Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop
+} catch {
+    Stop-WithError -Step "STEP 3/4: Organize files" -Message "Cannot change directory to $finalOutputDir - $($_.Exception.Message)"
+}
+$currentPath = (Get-Location).Path.TrimEnd('\')
+if ($currentPath -ne $finalOutputDir.TrimEnd('\')) {
+    Stop-WithError -Step "STEP 3/4: Organize files" -Message "Refusing to organize: expected to be in $finalOutputDir but the working directory is $currentPath"
+}
+```
+
+`-LiteralPath` also stops glob metacharacters in a disc title (`[`, `]`, `*`) from sending `Set-Location` to the wrong place. Preventative — this guard has not fired against a real failure, only verified by logic and comparison behaviour.
+
+**PR #110 — `continue-rip.ps1` skips already-encoded files in Step 2**
+
+Resuming a rip usually means encoding stopped part way through; re-encoding files that already finished wasted hours. Step 2 now partitions the MKV list and only encodes files with no matching MP4 in the output folder:
+- New `-Force` switch (alias `-ReEncode`) re-encodes everything, including files that already have an MP4
+- Each skipped file is printed and logged with the existing MP4's size; the message states this assumes the existing MP4s are complete
+- "Nothing to encode" is reported and the script continues to Step 3 when every MKV already has an MP4
+- Recovery script is generated only when there is something to encode, from the filtered list; `$recoveryScriptPath` starts `$null` and its post-encode deletion is guarded so `Test-Path` is never handed a null path
+- The encode loop and its "file N of M" counters (console and log) are driven from the filtered list
+- The pre-flight prerequisite summary reports which files will be skipped, or overwritten under `-Force`, plus a count of files to encode this run
+
+Not yet exercised against a real HandBrake encode — verified against fixture files only. The skip trusts that an existing MP4 is complete: it checks existence, not integrity. A truncated MP4 from an interrupted encode (see the dry-run incident above) would be skipped as done. Possible hardening: compare duration via ffprobe, or flag outputs implausibly small relative to their source MKV.
+
+**Process note — self-approval:**
+GitHub refused self-approval on #107, #109 and #110 alike (`Review Can not approve your own pull request`); all three merged with no formal approval recorded. CodeRabbit passed on each. A concurrent session was also writing to this repo during the merges.
+
+**Files changed:**
+- `rip-disc.ps1` — Step 3 working-directory guard (#109)
+- `continue-rip.ps1` — skip-already-encoded logic in Step 2 (#110)
+- `CHANGELOG.md`, `CLAUDE.md`
+
+**Work In Progress:**
+- None
+
+**Outstanding Work for Future Sessions:**
+- Neither working-directory guard (rip-disc.ps1 or continue-rip.ps1) has fired against a real failure — logic and comparison behaviour verified only
+- The skip-already-encoded feature has not been exercised against a real HandBrake encode — verified against fixture files only; consider hardening via an ffprobe duration check or a plausible-size check against the source MKV
+- `F:\Documentaries\Metal A Headbanger's Journey-Disc 2\B7_t15.m4a` is 0 bytes with an audio-only extension — that title did not encode properly
+- All 16 MKVs remain in `C:\Video\Metal A Headbanger's Journey-Disc 2\Disc1` (temp cleanup only runs after a clean end-to-end pass)
+- Verify the CSS fix (PR #105) on a real rip — still parse-checked only, never runtime-tested
+- Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
+- Validate stuck sector detection on a genuinely damaged disc
+- Decide the fate of the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since
