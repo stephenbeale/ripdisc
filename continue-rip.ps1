@@ -139,18 +139,6 @@ function Show-StepBanner {
     Write-Host ""
 }
 
-# Up-front summary of which steps will be skipped and which will run.
-function Show-StepPlan {
-    param([int]$StartNumber)
-    Write-Host "`n--- WHAT THIS RUN WILL DO ---" -ForegroundColor Cyan
-    foreach ($step in $script:AllSteps) {
-        if ($step.Number -lt $StartNumber) {
-            Write-Host ("  [-] Step {0}/4  {1,-20}  SKIPPED - assumed already done" -f $step.Number, $step.Name) -ForegroundColor DarkGray
-        } else {
-            Write-Host ("  [ ] Step {0}/4  {1,-20}  WILL RUN - {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor Yellow
-        }
-    }
-}
 
 function Get-TitleSummary {
     $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
@@ -699,22 +687,111 @@ function Get-EquivalentCommand {
     return ($parts -join " ")
 }
 
-# Bail out with an explanation of what was expected and, where possible, which
-# step the files on disk actually match.
-function Stop-Prerequisite {
-    param([string]$Message, [string[]]$Hints = @())
+# Explain what was expected and, where possible, which step the files on disk
+# actually match. Returns $false so the caller can offer another step.
+function Write-PrerequisiteFailure {
+    param([int]$StepNumber, [string]$Message, [string[]]$Hints = @())
+    $step = Get-Step -Number $StepNumber
     Write-Host "`n========================================" -ForegroundColor Red
-    Write-Host " CANNOT START AT STEP $StartFromStepNumber - $($startStep.Name)" -ForegroundColor Red
+    Write-Host " CANNOT START AT STEP $StepNumber - $($step.Name)" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
     Write-Host " $Message" -ForegroundColor Red
-    Write-Host " This step needs $($startStep.Needs)." -ForegroundColor Yellow
+    Write-Host " This step needs $($step.Needs)." -ForegroundColor Yellow
     foreach ($hint in $Hints) {
         Write-Host " $hint" -ForegroundColor Cyan
     }
-    Write-Host "`n Run .\continue-rip.ps1 with no arguments to pick again," -ForegroundColor Gray
-    Write-Host " or .\continue-rip.ps1 -Help for the full list of options." -ForegroundColor Gray
-    Write-Host "========================================`n" -ForegroundColor Red
-    exit 1
+    Write-Host "========================================" -ForegroundColor Red
+    return $false
+}
+
+# Every step, what it does, what it needs, and which one is currently selected.
+function Show-StepOptions {
+    param([int]$SelectedNumber)
+    Write-Host "`n--- STEPS AVAILABLE ---" -ForegroundColor Cyan
+    foreach ($step in $script:AllSteps) {
+        $marker = if ($step.Number -eq $SelectedNumber) { "-->" } else { "   " }
+        if (-not $step.Resumable) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "        not available here - use rip-disc.ps1 to read a disc" -ForegroundColor DarkGray
+            continue
+        }
+        if ($step.Number -eq $SelectedNumber) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor Yellow
+            Write-Host ("        STARTS HERE - needs {0}" -f $step.Needs) -ForegroundColor Yellow
+        } elseif ($step.Number -lt $SelectedNumber) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "        SKIPPED - assumed already done" -ForegroundColor DarkGray
+        } else {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor White
+            Write-Host "        runs after the step above" -ForegroundColor Gray
+        }
+    }
+}
+
+# Checks the starting step can actually run. Returns $true/$false.
+function Test-StepPrerequisites {
+    param([int]$StepNumber)
+
+    if ($StepNumber -eq 2) {
+        # Need MKV files in makemkvOutputDir
+        $hints = @()
+        if ((Test-Path $finalOutputDir) -and @(Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue).Count -gt 0) {
+            $hints += "There ARE encoded MP4 files in $finalOutputDir - did you mean step 3 (organize)?"
+        }
+        if (!(Test-Path $makemkvOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The MakeMKV folder does not exist: $makemkvOutputDir" -Hints $hints)
+        }
+        $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
+        if ($null -eq $mkvFiles -or $mkvFiles.Count -eq 0) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "No MKV files in: $makemkvOutputDir" -Hints $hints)
+        }
+        Write-Host "OK - found $($mkvFiles.Count) MKV file(s) to encode:" -ForegroundColor Green
+        foreach ($mkv in $mkvFiles) {
+            Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
+        }
+        # Encoding overwrites, so say plainly which files are about to be redone.
+        $alreadyEncoded = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
+        if ($alreadyEncoded.Count -gt 0) {
+            Write-Host "`nNote: $($alreadyEncoded.Count) of these already have an MP4 in the output folder" -ForegroundColor Yellow
+            Write-Host "and WILL BE RE-ENCODED from scratch:" -ForegroundColor Yellow
+            foreach ($done in $alreadyEncoded) {
+                Write-Host "  - $($done.BaseName).mp4" -ForegroundColor Yellow
+            }
+            Write-Host "To keep those and skip them, delete the matching .mkv files first." -ForegroundColor Gray
+        }
+        return $true
+    }
+
+    if ($StepNumber -eq 3) {
+        # Need MP4 files in finalOutputDir
+        $hints = @()
+        if ((Test-Path $makemkvOutputDir) -and @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue).Count -gt 0) {
+            $hints += "There ARE un-encoded MKV files in $makemkvOutputDir - did you mean step 2 (handbrake)?"
+        }
+        if (!(Test-Path $finalOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The output folder does not exist: $finalOutputDir" -Hints $hints)
+        }
+        $mp4Files = Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue
+        if ($null -eq $mp4Files -or $mp4Files.Count -eq 0) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "No MP4 files in: $finalOutputDir" -Hints $hints)
+        }
+        Write-Host "OK - found $($mp4Files.Count) MP4 file(s) to organize:" -ForegroundColor Green
+        foreach ($mp4 in $mp4Files) {
+            Write-Host "  - $($mp4.Name) ($([math]::Round($mp4.Length/1GB, 2)) GB)" -ForegroundColor Gray
+        }
+        return $true
+    }
+
+    if ($StepNumber -eq 4) {
+        # Just need finalOutputDir to exist
+        if (!(Test-Path $finalOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The output folder does not exist: $finalOutputDir")
+        }
+        Write-Host "OK - output folder exists: $finalOutputDir" -ForegroundColor Green
+        return $true
+    }
+
+    return $false
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -733,72 +810,62 @@ if ($Series) {
 Write-Host (" Source folder : {0}" -f $makemkvOutputDir) -ForegroundColor White
 Write-Host (" Output folder : {0}" -f $finalOutputDir) -ForegroundColor White
 Write-Host (" Log file      : {0}" -f $script:LogFile) -ForegroundColor White
-Write-Host (" Resuming from : Step {0} of 4 - {1}" -f $StartFromStepNumber, $startStep.Name) -ForegroundColor Yellow
 
-Show-StepPlan -StartNumber $StartFromStepNumber
+# Show the full list of steps, check the chosen one can actually run, and let the
+# step be changed at the prompt rather than re-running the whole command.
+while ($true) {
+    $startStep = Get-StepByKey -Key $FromStep
+    $StartFromStepNumber = $startStep.Number
 
-# Validate prerequisites for starting step
-Write-Host "`n--- CHECKING PREREQUISITES ---" -ForegroundColor Cyan
-if ($StartFromStepNumber -eq 2) {
-    # Need MKV files in makemkvOutputDir
-    $hints = @()
-    if ((Test-Path $finalOutputDir) -and @(Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue).Count -gt 0) {
-        $hints += "There ARE encoded MP4 files in $finalOutputDir - did you mean -FromStep 3 (organize)?"
+    # Steps before the starting point count as "skipped/assumed complete"
+    $script:CompletedSteps = @()
+    for ($i = 1; $i -lt $StartFromStepNumber; $i++) {
+        $script:CompletedSteps += Get-Step -Number $i
     }
-    if (!(Test-Path $makemkvOutputDir)) {
-        Stop-Prerequisite -Message "The MakeMKV folder does not exist: $makemkvOutputDir" -Hints $hints
-    }
-    $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
-    if ($null -eq $mkvFiles -or $mkvFiles.Count -eq 0) {
-        Stop-Prerequisite -Message "No MKV files in: $makemkvOutputDir" -Hints $hints
-    }
-    Write-Host "OK - found $($mkvFiles.Count) MKV file(s) to encode:" -ForegroundColor Green
-    foreach ($mkv in $mkvFiles) {
-        Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
-    }
-    # Encoding overwrites, so say plainly which files are about to be redone.
-    $alreadyEncoded = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
-    if ($alreadyEncoded.Count -gt 0) {
-        Write-Host "`nNote: $($alreadyEncoded.Count) of these already have an MP4 in the output folder" -ForegroundColor Yellow
-        Write-Host "and WILL BE RE-ENCODED from scratch:" -ForegroundColor Yellow
-        foreach ($done in $alreadyEncoded) {
-            Write-Host "  - $($done.BaseName).mp4" -ForegroundColor Yellow
-        }
-        Write-Host "To keep those and skip them, delete the matching .mkv files first." -ForegroundColor Gray
-    }
-} elseif ($StartFromStepNumber -eq 3) {
-    # Need MP4 files in finalOutputDir
-    $hints = @()
-    if ((Test-Path $makemkvOutputDir) -and @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue).Count -gt 0) {
-        $hints += "There ARE un-encoded MKV files in $makemkvOutputDir - did you mean -FromStep 2 (handbrake)?"
-    }
-    if (!(Test-Path $finalOutputDir)) {
-        Stop-Prerequisite -Message "The output folder does not exist: $finalOutputDir" -Hints $hints
-    }
-    $mp4Files = Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue
-    if ($null -eq $mp4Files -or $mp4Files.Count -eq 0) {
-        Stop-Prerequisite -Message "No MP4 files in: $finalOutputDir" -Hints $hints
-    }
-    Write-Host "OK - found $($mp4Files.Count) MP4 file(s) to organize:" -ForegroundColor Green
-    foreach ($mp4 in $mp4Files) {
-        Write-Host "  - $($mp4.Name) ($([math]::Round($mp4.Length/1GB, 2)) GB)" -ForegroundColor Gray
-    }
-} elseif ($StartFromStepNumber -eq 4) {
-    # Just need finalOutputDir to exist
-    if (!(Test-Path $finalOutputDir)) {
-        Stop-Prerequisite -Message "The output folder does not exist: $finalOutputDir"
-    }
-    Write-Host "OK - output folder exists: $finalOutputDir" -ForegroundColor Green
-}
 
-Write-Host "`nCommand for this run:" -ForegroundColor DarkGray
-Write-Host "  $(Get-EquivalentCommand)" -ForegroundColor DarkGray
+    Show-StepOptions -SelectedNumber $StartFromStepNumber
 
-if ($Yes) {
-    Write-Host "`nStarting (-Yes was given)..." -ForegroundColor Green
-} else {
+    Write-Host "`n--- CHECKING PREREQUISITES ---" -ForegroundColor Cyan
+    $ready = Test-StepPrerequisites -StepNumber $StartFromStepNumber
+
+    if ($ready) {
+        Write-Host "`nCommand for this run:" -ForegroundColor DarkGray
+        Write-Host "  $(Get-EquivalentCommand)" -ForegroundColor DarkGray
+    }
+
+    if ($Yes) {
+        if (-not $ready) { exit 1 }
+        Write-Host "`nStarting (-Yes was given)..." -ForegroundColor Green
+        break
+    }
+
     # Read-Answer exits rather than starting an encode on an unanswered prompt.
-    Read-Answer "`nPress Enter to start, or Ctrl+C to abort" | Out-Null
+    if ($ready) {
+        $answer = Read-Answer "`nPress Enter to start at step $StartFromStepNumber, type another step number (2/3/4), or Ctrl+C to abort"
+        if ([string]::IsNullOrWhiteSpace($answer)) { break }
+    } else {
+        $answer = Read-Answer "`nType another step number (2/3/4) to try a different step, or Ctrl+C to abort"
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            Write-Host "Step $StartFromStepNumber cannot run here - choose another step, or press Ctrl+C to abort." -ForegroundColor Red
+            continue
+        }
+    }
+
+    $newKey = Resolve-StepKey $answer
+    if ($newKey -eq "makemkv") {
+        Write-Host "Step 1 reads the disc - use rip-disc.ps1 for that." -ForegroundColor Red
+        continue
+    }
+    if (-not $newKey) {
+        Write-Host "Please enter 2, 3 or 4 (or handbrake / organize / open)." -ForegroundColor Red
+        continue
+    }
+    if ($newKey -eq $FromStep) {
+        if ($ready) { break }
+        continue
+    }
+    $FromStep = $newKey
+    Write-Log "Starting step changed at the prompt to: $FromStep"
 }
 Disable-ConsoleClose
 
@@ -1002,7 +1069,20 @@ if ($StartFromStepNumber -le 3) {
     Show-StepBanner -StepNumber 3
     $script:LastWorkingDirectory = $finalOutputDir
     Write-Log "STEP 3/4: Organizing files..."
-    cd $finalOutputDir
+
+    # Everything below renames/moves files in the CURRENT directory. If this cd
+    # silently fails, that current directory is wherever the script was launched
+    # from - which is how a run once renamed the files in the repo it was run
+    # from. Fail loudly instead, and confirm we actually landed in the target.
+    try {
+        Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop
+    } catch {
+        Stop-WithError -Step "STEP 3/4: Organize files" -Message "Cannot change directory to $finalOutputDir - $($_.Exception.Message)"
+    }
+    $currentPath = (Get-Location).Path.TrimEnd('\')
+    if ($currentPath -ne $finalOutputDir.TrimEnd('\')) {
+        Stop-WithError -Step "STEP 3/4: Organize files" -Message "Refusing to organize: expected to be in $finalOutputDir but the working directory is $currentPath"
+    }
 
     Write-Host "Current directory: $finalOutputDir" -ForegroundColor Yellow
 
