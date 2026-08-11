@@ -6,6 +6,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-11
+
+### Fixed
+- `continue-rip.ps1` Step 3 no longer renames files in the wrong directory when the output folder cannot be entered (#107)
+  - Step 3 ran a bare, unchecked `cd $finalOutputDir`, and the entire organize block renames and moves files relative to the *current* directory
+  - If that `cd` failed, the script carried on and renamed whatever happened to be in the directory it was launched from — this actually hit the repo working directory
+  - Now `Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop` inside a try/catch, plus a post-check comparing `(Get-Location).Path` against the target before any renaming takes place
+
+### Changed
+- `continue-rip.ps1` is now usable without knowing the arguments up front (#107)
+  - `title` and `FromStep` are optional; omitting them shows a step menu rather than failing on a mandatory-parameter prompt
+  - `-Drive` and `-DriveIndex` are accepted and ignored, so a failed `rip-disc.ps1` command line can be pasted straight into `continue-rip.ps1` without editing
+  - Every step is always listed with its prerequisites, and the chosen step can be switched at the prompt
+  - Prerequisite checks extracted into `Test-StepPrerequisites`; `Stop-Prerequisite` became `Write-PrerequisiteFailure`, which returns `$false` instead of calling `exit 1`, so a failed check re-offers the step list instead of killing the session
+  - `-Yes` still exits 1 on a failed prerequisite, preserving non-interactive behaviour
+
+### Verified
+- The 2026-08-10 eject fix (#106) confirmed working in production on its first real rips, under three concurrent sessions
+  - Drive G: MakeMKV complete 06:18:54, ejected 06:19:00; drive H: complete 06:24:23, ejected 06:24:29 — 6 seconds each
+  - No retry attempts and no timeouts, against 8 failures out of 10 rips under the same concurrency the previous afternoon
+
 ## 2026-08-10
 
 ### Fixed
