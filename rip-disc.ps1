@@ -1729,7 +1729,21 @@ $script:LastWorkingDirectory = $finalOutputDir
 Write-Log "STEP 3/4: Organizing files..."
 Write-Timestamp "Step 3/4: Organising files"
 Write-Host "`n[STEP 3/4] Organizing files..." -ForegroundColor Green
-cd $finalOutputDir
+
+# Everything below renames, moves and deletes files in the CURRENT directory. If
+# this cd silently fails, that current directory is wherever the script was
+# launched from - which is how a run once renamed every file in the repo folder
+# it was started from, using an empty prefix. Fail loudly, and confirm we really
+# landed in the target before touching anything.
+try {
+    Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop
+} catch {
+    Stop-WithError -Step "STEP 3/4: Organize files" -Message "Cannot change directory to $finalOutputDir - $($_.Exception.Message)"
+}
+$currentPath = (Get-Location).Path.TrimEnd('\')
+if ($currentPath -ne $finalOutputDir.TrimEnd('\')) {
+    Stop-WithError -Step "STEP 3/4: Organize files" -Message "Refusing to organize: expected to be in $finalOutputDir but the working directory is $currentPath"
+}
 
 Write-Host "Current directory: $finalOutputDir" -ForegroundColor Yellow
 
