@@ -57,6 +57,11 @@
     [Parameter()]
     [switch]$Yes,
 
+    # Re-encode MKV files even when a matching MP4 already exists.
+    [Parameter()]
+    [Alias("ReEncode")]
+    [switch]$Force,
+
     [Parameter()]
     [switch]$Help
 )
@@ -238,6 +243,8 @@ function Show-Usage {
     Write-Host "  -Series -Season <n> TV series mode" -ForegroundColor White
     Write-Host "  -Bluray             Blu-ray (subtitle handling + Bluray folder)" -ForegroundColor White
     Write-Host "  -Documentary -Tutorial -Fitness -Music -Surf   Genre folders" -ForegroundColor White
+    Write-Host "  -Force              Re-encode files that already have an MP4" -ForegroundColor White
+    Write-Host "                      (by default those are skipped)" -ForegroundColor Gray
     Write-Host "  -Yes                Do not ask for confirmation before starting" -ForegroundColor White
     Write-Host "  -Help               Show this text" -ForegroundColor White
     Write-Host "  -Drive / -DriveIndex   Accepted but ignored (no disc is read)" -ForegroundColor Gray
@@ -683,6 +690,7 @@ function Get-EquivalentCommand {
     if ($Fitness)     { $parts += "-Fitness" }
     if ($Music)       { $parts += "-Music" }
     if ($Surf)        { $parts += "-Surf" }
+    if ($Force)       { $parts += "-Force" }
     $parts += "-OutputDrive $($outputDriveLetter.TrimEnd(':'))"
     return ($parts -join " ")
 }
@@ -745,19 +753,25 @@ function Test-StepPrerequisites {
         if ($null -eq $mkvFiles -or $mkvFiles.Count -eq 0) {
             return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "No MKV files in: $makemkvOutputDir" -Hints $hints)
         }
-        Write-Host "OK - found $($mkvFiles.Count) MKV file(s) to encode:" -ForegroundColor Green
+        Write-Host "OK - found $($mkvFiles.Count) MKV file(s):" -ForegroundColor Green
         foreach ($mkv in $mkvFiles) {
             Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
         }
-        # Encoding overwrites, so say plainly which files are about to be redone.
+        # Say up front which files will be encoded and which are already done.
         $alreadyEncoded = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
         if ($alreadyEncoded.Count -gt 0) {
-            Write-Host "`nNote: $($alreadyEncoded.Count) of these already have an MP4 in the output folder" -ForegroundColor Yellow
-            Write-Host "and WILL BE RE-ENCODED from scratch:" -ForegroundColor Yellow
+            if ($Force) {
+                Write-Host "`n-Force given: all $($mkvFiles.Count) file(s) will be encoded, including" -ForegroundColor Yellow
+                Write-Host "$($alreadyEncoded.Count) that already have an MP4 and will be overwritten:" -ForegroundColor Yellow
+            } else {
+                Write-Host "`n$($alreadyEncoded.Count) of these already have an MP4 and will be SKIPPED" -ForegroundColor Yellow
+                Write-Host "(run with -Force to re-encode them anyway):" -ForegroundColor Yellow
+            }
             foreach ($done in $alreadyEncoded) {
                 Write-Host "  - $($done.BaseName).mp4" -ForegroundColor Yellow
             }
-            Write-Host "To keep those and skip them, delete the matching .mkv files first." -ForegroundColor Gray
+            $toEncodeCount = if ($Force) { $mkvFiles.Count } else { $mkvFiles.Count - $alreadyEncoded.Count }
+            Write-Host "Files to encode this run: $toEncodeCount" -ForegroundColor Green
         }
         return $true
     }
@@ -912,55 +926,86 @@ if ($StartFromStepNumber -le 2) {
         }
     }
 
-    # ========== GENERATE RECOVERY SCRIPT ==========
-    $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
-    $dateStamp = Get-Date -Format "yyyy-MM-dd"
-    $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
-    $recoveryLines = @(
-        "# HandBrake recovery script for: $title"
-        "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        "# Run this script to encode any remaining MKV files that were not successfully encoded."
-        "# Already-encoded files (existing .mp4) will be skipped automatically."
-        ""
-        "`$handbrakePath = `"$handbrakePath`""
-        "`$finalOutputDir = `"$finalOutputDir`""
-        ""
-        "if (!(Test-Path `$finalOutputDir)) { New-Item -ItemType Directory -Path `$finalOutputDir -Force | Out-Null }"
-        ""
-    )
-    foreach ($mkv in $mkvFiles) {
-        $inputFile = $mkv.FullName
-        $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
-        $recoveryLines += "# --- $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB) ---"
-        $recoveryLines += "if (!(Test-Path `"$outputFile`")) {"
-        $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
-        if ($Bluray) {
-            # Blu-ray: scan for forced/foreign-language subs only, burn them in
-            $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --subtitle scan --subtitle-burned --verbose=1"
-        } else {
-            $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
+    # ========== SKIP ALREADY-ENCODED FILES ==========
+    # Resuming usually means encoding stopped part way through, so files that
+    # already have an MP4 are left alone. -Force re-encodes everything.
+    $filesToEncode = @($mkvFiles)
+    if ($Force) {
+        Write-Host "`n-Force given - re-encoding every file, including any that already have an MP4." -ForegroundColor Yellow
+        Write-Log "-Force given - re-encoding all $($filesToEncode.Count) file(s)"
+    } else {
+        $alreadyDone = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
+        if ($alreadyDone.Count -gt 0) {
+            $filesToEncode = @($mkvFiles | Where-Object { -not (Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4"))) })
+            Write-Host "`nSkipping $($alreadyDone.Count) file(s) that already have an MP4:" -ForegroundColor Yellow
+            foreach ($done in $alreadyDone) {
+                $existingMp4 = Get-Item -LiteralPath (Join-Path $finalOutputDir ($done.BaseName + ".mp4"))
+                Write-Host ("  - {0}.mp4 ({1} GB)" -f $done.BaseName, [math]::Round($existingMp4.Length/1GB, 2)) -ForegroundColor Gray
+                Write-Log "Skipping (already encoded): $($done.Name) -> $($done.BaseName).mp4 ($([math]::Round($existingMp4.Length/1GB, 2)) GB)"
+            }
+            Write-Host "This assumes those MP4s are complete - run with -Force to re-encode them anyway." -ForegroundColor Gray
         }
-        $recoveryLines += "} else {"
-        $recoveryLines += "    Write-Host `"Skipping (already encoded): $($mkv.Name)`" -ForegroundColor Gray"
-        $recoveryLines += "}"
-        $recoveryLines += ""
     }
-    $recoveryLines += "Write-Host `"`nRecovery encoding complete.`" -ForegroundColor Green"
-    $recoveryLines | Set-Content -Path $recoveryScriptPath -Encoding UTF8
-    Write-Host "Recovery script: $recoveryScriptPath" -ForegroundColor Yellow
-    Write-Log "Recovery script created: $recoveryScriptPath"
+
+    if ($filesToEncode.Count -eq 0) {
+        Write-Host "`nNothing to encode - every MKV already has an MP4." -ForegroundColor Green
+        Write-Log "STEP 2/4: Nothing to encode - all files already have an MP4"
+    } else {
+        Write-Host "`n$($filesToEncode.Count) file(s) to encode" -ForegroundColor Green
+    }
+
+    # ========== GENERATE RECOVERY SCRIPT ==========
+    $recoveryScriptPath = $null
+    if ($filesToEncode.Count -gt 0) {
+        $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
+        $dateStamp = Get-Date -Format "yyyy-MM-dd"
+        $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
+        $recoveryLines = @(
+            "# HandBrake recovery script for: $title"
+            "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            "# Run this script to encode any remaining MKV files that were not successfully encoded."
+            "# Already-encoded files (existing .mp4) will be skipped automatically."
+            ""
+            "`$handbrakePath = `"$handbrakePath`""
+            "`$finalOutputDir = `"$finalOutputDir`""
+            ""
+            "if (!(Test-Path `$finalOutputDir)) { New-Item -ItemType Directory -Path `$finalOutputDir -Force | Out-Null }"
+            ""
+        )
+        foreach ($mkv in $filesToEncode) {
+            $inputFile = $mkv.FullName
+            $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
+            $recoveryLines += "# --- $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB) ---"
+            $recoveryLines += "if (!(Test-Path `"$outputFile`")) {"
+            $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
+            if ($Bluray) {
+                # Blu-ray: scan for forced/foreign-language subs only, burn them in
+                $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --subtitle scan --subtitle-burned --verbose=1"
+            } else {
+                $recoveryLines += "    & `$handbrakePath -i `"$inputFile`" -o `"$outputFile`" --preset `"Fast 1080p30`" --all-audio --all-subtitles --subtitle-burned=none --verbose=1"
+            }
+            $recoveryLines += "} else {"
+            $recoveryLines += "    Write-Host `"Skipping (already encoded): $($mkv.Name)`" -ForegroundColor Gray"
+            $recoveryLines += "}"
+            $recoveryLines += ""
+        }
+        $recoveryLines += "Write-Host `"`nRecovery encoding complete.`" -ForegroundColor Green"
+        $recoveryLines | Set-Content -Path $recoveryScriptPath -Encoding UTF8
+        Write-Host "Recovery script: $recoveryScriptPath" -ForegroundColor Yellow
+        Write-Log "Recovery script created: $recoveryScriptPath"
+    }
 
     $fileCount = 0
-    foreach ($mkv in $mkvFiles) {
+    foreach ($mkv in $filesToEncode) {
         $fileCount++
         $inputFile = $mkv.FullName
         $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
 
-        Write-Host "`n--- Encoding file $fileCount of $($mkvFiles.Count) ---" -ForegroundColor Cyan
+        Write-Host "`n--- Encoding file $fileCount of $($filesToEncode.Count) ---" -ForegroundColor Cyan
         Write-Host "Input:  $($mkv.Name)" -ForegroundColor White
         Write-Host "Output: $($mkv.BaseName).mp4" -ForegroundColor White
         Write-Host "Size:   $([math]::Round($mkv.Length/1GB, 2)) GB" -ForegroundColor White
-        Write-Log "Encoding file $fileCount of $($mkvFiles.Count): $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)"
+        Write-Log "Encoding file $fileCount of $($filesToEncode.Count): $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)"
 
         Write-Host "`nExecuting HandBrake..." -ForegroundColor Yellow
 
@@ -1007,8 +1052,9 @@ if ($StartFromStepNumber -le 2) {
     Complete-CurrentStep
     Write-Log "STEP 2/4: HandBrake encoding complete - $fileCount file(s) encoded"
 
-    # Delete recovery script after successful encoding
-    if (Test-Path $recoveryScriptPath) {
+    # Delete recovery script after successful encoding (none is written when
+    # there was nothing to encode)
+    if ($recoveryScriptPath -and (Test-Path $recoveryScriptPath)) {
         Remove-Item $recoveryScriptPath -Force
         Write-Host "Recovery script deleted (encoding successful)" -ForegroundColor Gray
         Write-Log "Recovery script deleted: $recoveryScriptPath"
