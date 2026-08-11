@@ -1064,3 +1064,57 @@ The saturation is self-inflicted: this is the same tool running several rips at 
 **Outstanding Work for Future Sessions:**
 - Unchanged from the list above — none of those items interact with this fix
 - Consider whether the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since, should be formally abandoned rather than re-listed every session
+
+---
+
+### 2026-08-11 - Eject Fix Confirmed in Production; continue-rip.ps1 Usability (PR #107)
+
+**Eject fix (PR #106) — verified on real rips, condition closed:**
+
+Three concurrent rips were started at 06:13–06:14 (`disc:0`, `disc:1`, `disc:2`), which is the CPU-saturation condition that caused the original false timeouts. Both ejects that ran succeeded:
+
+| Drive | MakeMKV complete | Ejected | Elapsed |
+|-------|------------------|---------|---------|
+| G: | 06:18:54 | 06:19:00 | 6s |
+| H: | 06:24:23 | 06:24:29 | 6s |
+
+No `Retrying disc eject` lines and no timeout warnings, against 8 failures out of 10 rips under the same concurrency the previous afternoon. The 6 seconds matches the measured breakdown: one-time `Add-Type` compile (~6s under load) plus a 1.3s IOCTL plus immediate confirmation. **This item is now closed** — it no longer needs carrying forward.
+
+Worth noting for future work: the ~6s is almost entirely the lazy `Add-Type` compile, not the eject. If that ever matters, compiling `RipDiscEject` at script start would move the cost off the eject path — but there is no deadline any more, so it does not currently matter.
+
+**PR #107 — `continue-rip.ps1` usability and a Step 3 directory bug**
+
+Authored across two sessions; 525 insertions / 85 deletions.
+
+*The real bug — Step 3 renaming files in the wrong directory:*
+Step 3 ran a bare, unchecked `cd $finalOutputDir`. The entire organize block renames and moves files relative to the *current* directory, so when that `cd` failed the script carried on regardless and renamed whatever was in the directory it had been launched from. This actually hit the repo working directory in practice. Now:
+
+```powershell
+Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop   # in a try/catch
+# then a post-check comparing (Get-Location).Path to the target before renaming
+```
+
+*Usability changes:*
+- `title` and `FromStep` optional — omitting them shows a step menu instead of failing on a mandatory-parameter prompt
+- `-Drive` / `-DriveIndex` accepted and ignored, so a failed `rip-disc.ps1` command line pastes straight into `continue-rip.ps1` without editing
+- Every step always listed with its prerequisites; the chosen step can be switched at the prompt
+- Prerequisite checks extracted to `Test-StepPrerequisites`; `Stop-Prerequisite` became `Write-PrerequisiteFailure`, returning `$false` rather than `exit 1`, so a failed check re-offers the step list instead of killing the session
+- `-Yes` still exits 1 on a failed prerequisite, so non-interactive behaviour is unchanged
+
+**Process note — two sessions on one branch:**
+Two Claude sessions worked `feature/continue-rip-usability` simultaneously. One session's `git add` was swept up by the other's commit (`bb09335`), and a scratch file `continue-rip-head.ps1` appeared and vanished mid-workflow. Nothing was lost, but the near-miss is worth remembering: **one branch, one session.** A merge with `--delete-branch` during that window would have truncated the other session's work.
+
+**Also worth knowing:** `gh pr review --approve` can never succeed on these PRs — GitHub rejects self-approval on your own PR ("Can not approve your own pull request"). The `CLAUDE.md` git workflow above lists approval as step 5; in practice it is always skipped, and merges land with zero approving reviews. Recording an approval would need a second account or a bot reviewer.
+
+**Files changed:**
+- `continue-rip.ps1` — Step 3 guard and usability rework
+- `CHANGELOG.md`, `CLAUDE.md`
+
+**Work In Progress:**
+- None
+
+**Outstanding Work for Future Sessions:**
+- Verify the CSS fix (PR #105) on a real rip — still parse-checked only, never runtime-tested
+- Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
+- Validate stuck sector detection on a genuinely damaged disc
+- Decide the fate of the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since
