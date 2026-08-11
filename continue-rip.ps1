@@ -1,10 +1,12 @@
 ﻿param(
-    [Parameter(Mandatory=$true)]
-    [string]$title,
+    [Parameter()]
+    [string]$title = "",
 
-    [Parameter(Mandatory=$true)]
-    [ValidateSet("handbrake", "organize", "open")]
-    [string]$FromStep,
+    # Which step to resume from. Accepts a number (2, 3, 4) or a name
+    # (handbrake, organize, open). Omit it to pick from a menu.
+    [Parameter()]
+    [Alias("Step", "From")]
+    [string]$FromStep = "",
 
     [Parameter()]
     [switch]$Series,
@@ -40,7 +42,23 @@
     [switch]$Surf,
 
     [Parameter()]
-    [int]$StartEpisode = 1
+    [int]$StartEpisode = 1,
+
+    # Accepted for command-line compatibility with rip-disc.ps1 so a failed rip
+    # command can be pasted here unchanged. This script never reads the disc,
+    # so both values are ignored.
+    [Parameter()]
+    [string]$Drive = "",
+
+    [Parameter()]
+    [int]$DriveIndex = -1,
+
+    # Skip the "press Enter to start" confirmation.
+    [Parameter()]
+    [switch]$Yes,
+
+    [Parameter()]
+    [switch]$Help
 )
 
 # ========== LOAD CONFIG ==========
@@ -49,38 +67,44 @@
 # Apply config defaults to parameters that weren't explicitly passed
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
 
-# ========== STEP MAPPING ==========
-$StepMapping = @{
-    "handbrake" = 2
-    "organize" = 3
-    "open" = 4
-}
-$StartFromStepNumber = $StepMapping[$FromStep]
-
-# ========== STEP TRACKING ==========
+# ========== STEP DEFINITIONS ==========
 $script:AllSteps = @(
-    @{ Number = 1; Name = "MakeMKV rip"; Description = "Rip disc to MKV files" }
-    @{ Number = 2; Name = "HandBrake encoding"; Description = "Encode MKV to MP4" }
-    @{ Number = 3; Name = "Organize files"; Description = "Rename and move files" }
-    @{ Number = 4; Name = "Open directory"; Description = "Open output folder" }
+    @{ Number = 1; Key = "makemkv";   Name = "MakeMKV rip";        Description = "Rip the disc to MKV files";             Needs = "a disc in the drive"; Resumable = $false }
+    @{ Number = 2; Key = "handbrake"; Name = "HandBrake encoding"; Description = "Encode the MKV files to MP4";           Needs = "MKV files in the MakeMKV temp folder"; Resumable = $true }
+    @{ Number = 3; Key = "organize";  Name = "Organize files";     Description = "Rename, prefix and move the MP4 files"; Needs = "MP4 files in the output folder"; Resumable = $true }
+    @{ Number = 4; Key = "open";      Name = "Open directory";     Description = "Open the finished folder in Explorer";  Needs = "the output folder to exist"; Resumable = $true }
 )
 $script:CompletedSteps = @()
 $script:CurrentStep = $null
 $script:LastWorkingDirectory = $null
 
-# Mark steps before starting point as "skipped/assumed complete"
-for ($i = 1; $i -lt $StartFromStepNumber; $i++) {
-    $script:CompletedSteps += $script:AllSteps | Where-Object { $_.Number -eq $i }
+function Get-Step {
+    param([int]$Number)
+    return $script:AllSteps | Where-Object { $_.Number -eq $Number }
 }
 
-function Set-CurrentStep {
-    param([int]$StepNumber)
-    $script:CurrentStep = $script:AllSteps | Where-Object { $_.Number -eq $StepNumber }
+function Get-StepByKey {
+    param([string]$Key)
+    return $script:AllSteps | Where-Object { $_.Key -eq $Key }
+}
+
+# Accepts "2", "handbrake", "encode", etc. Returns the canonical key or $null.
+function Resolve-StepKey {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    switch -Regex ($Value.Trim()) {
+        '^(1|makemkv|rip|makemkvrip)$'          { return "makemkv" }
+        '^(2|handbrake|encode|encoding|hb)$'    { return "handbrake" }
+        '^(3|organize|organise|rename|files)$'  { return "organize" }
+        '^(4|open|openfolder|folder|explorer)$' { return "open" }
+        default                                 { return $null }
+    }
 }
 
 function Complete-CurrentStep {
     if ($script:CurrentStep) {
         $script:CompletedSteps += $script:CurrentStep
+        Write-Host ("`n[DONE] Step {0}/4 - {1}" -f $script:CurrentStep.Number, $script:CurrentStep.Name) -ForegroundColor Green
     }
 }
 
@@ -88,6 +112,33 @@ function Get-RemainingSteps {
     $completedNumbers = $script:CompletedSteps | ForEach-Object { $_.Number }
     return $script:AllSteps | Where-Object { $_.Number -notin $completedNumbers }
 }
+
+# "[x] 1  [>] 2  [ ] 3  [ ] 4" - completed / current / pending
+function Get-StepProgressBar {
+    param([int]$CurrentNumber)
+    $completedNumbers = @($script:CompletedSteps | ForEach-Object { $_.Number })
+    $parts = foreach ($step in $script:AllSteps) {
+        if ($step.Number -eq $CurrentNumber) { "[>] $($step.Number)" }
+        elseif ($completedNumbers -contains $step.Number) { "[x] $($step.Number)" }
+        else { "[ ] $($step.Number)" }
+    }
+    return ($parts -join "  ")
+}
+
+# Printed at the top of every step so it is always obvious what is running.
+function Show-StepBanner {
+    param([int]$StepNumber)
+    $step = Get-Step -Number $StepNumber
+    $script:CurrentStep = $step
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host (" STEP {0} OF 4 - {1}" -f $step.Number, $step.Name.ToUpper()) -ForegroundColor Green
+    Write-Host (" {0}" -f $step.Description) -ForegroundColor Gray
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host (" Progress: {0}" -f (Get-StepProgressBar -CurrentNumber $StepNumber)) -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 
 function Get-TitleSummary {
     $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
@@ -114,7 +165,7 @@ function Show-StepsSummary {
         Write-Host "  (none)" -ForegroundColor Gray
     } else {
         foreach ($step in $script:CompletedSteps) {
-            Write-Host "  [X] Step $($step.Number)/4: $($step.Name)" -ForegroundColor Green
+            Write-Host ("  [x] Step {0}/4  {1,-20}  {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor Green
         }
     }
 
@@ -123,7 +174,12 @@ function Show-StepsSummary {
         if ($remaining.Count -gt 0) {
             Write-Host "`n--- STEPS REMAINING ---" -ForegroundColor Yellow
             foreach ($step in $remaining) {
-                Write-Host "  [ ] Step $($step.Number)/4: $($step.Name) - $($step.Description)" -ForegroundColor Yellow
+                Write-Host ("  [ ] Step {0}/4  {1,-20}  {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor Yellow
+            }
+            $resumable = @($remaining | Where-Object { $_.Resumable } | Sort-Object Number)
+            if ($resumable.Count -gt 0) {
+                $next = $resumable[0]
+                Write-Host ("`n  To pick up from here: .\continue-rip.ps1 -title `"{0}`" -FromStep {1}" -f $title, $next.Number) -ForegroundColor Cyan
             }
         }
     }
@@ -152,6 +208,248 @@ function Show-CoffeeBadge {
     $c = "  /______\ "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("Click to check it out and support my projects!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
     Write-Host "  $bl$hz$br" -ForegroundColor DarkGray
     Write-Host ""
+}
+
+# ========== USAGE / HELP ==========
+function Show-Usage {
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host " continue-rip.ps1 - resume a failed rip" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "`nPicks up an interrupted rip after the disc has already been read." -ForegroundColor White
+    Write-Host "Run it with no arguments to be walked through the options." -ForegroundColor White
+
+    Write-Host "`n--- STEPS ---" -ForegroundColor Cyan
+    foreach ($step in $script:AllSteps) {
+        if ($step.Resumable) {
+            Write-Host ("  {0} / {1,-10} {2,-20}  {3}" -f $step.Number, $step.Key, $step.Name, $step.Description) -ForegroundColor White
+            Write-Host ("      needs {0}" -f $step.Needs) -ForegroundColor Gray
+        } else {
+            Write-Host ("  {0} / {1,-10} {2,-20}  {3}" -f $step.Number, $step.Key, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "      not available here - use rip-disc.ps1 to read a disc" -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host "`n--- PARAMETERS ---" -ForegroundColor Cyan
+    Write-Host "  -title <name>       Title as used for the original rip" -ForegroundColor White
+    Write-Host "  -FromStep <2|3|4>   Step to resume from (number or name)" -ForegroundColor White
+    Write-Host "  -OutputDrive <X>    Output drive letter (default $($script:Config_DefaultOutputDrive))" -ForegroundColor White
+    Write-Host "  -Disc <n>           Disc number (default 1)" -ForegroundColor White
+    Write-Host "  -Extras             Extras / special-features disc" -ForegroundColor White
+    Write-Host "  -Series -Season <n> TV series mode" -ForegroundColor White
+    Write-Host "  -Bluray             Blu-ray (subtitle handling + Bluray folder)" -ForegroundColor White
+    Write-Host "  -Documentary -Tutorial -Fitness -Music -Surf   Genre folders" -ForegroundColor White
+    Write-Host "  -Yes                Do not ask for confirmation before starting" -ForegroundColor White
+    Write-Host "  -Help               Show this text" -ForegroundColor White
+    Write-Host "  -Drive / -DriveIndex   Accepted but ignored (no disc is read)" -ForegroundColor Gray
+
+    Write-Host "`n--- EXAMPLES ---" -ForegroundColor Cyan
+    Write-Host "  .\continue-rip.ps1" -ForegroundColor Yellow
+    Write-Host "      Interactive - asks for everything it needs" -ForegroundColor Gray
+    Write-Host "  .\continue-rip.ps1 -title `"Inception`" -FromStep 2" -ForegroundColor Yellow
+    Write-Host "      Encode MKV files that were already ripped" -ForegroundColor Gray
+    Write-Host "  .\continue-rip.ps1 -title `"Metal A Headbangers Journey-Disc 2`" -FromStep 3 -Documentary -OutputDrive F" -ForegroundColor Yellow
+    Write-Host "      Organize already-encoded MP4 files" -ForegroundColor Gray
+    Write-Host "  .\continue-rip.ps1 -title `"Fargo`" -Series -Season 1 -FromStep organize" -ForegroundColor Yellow
+    Write-Host "      Series mode, names work as well as numbers" -ForegroundColor Gray
+    Write-Host ""
+}
+
+if ($Help) {
+    Show-Usage
+    exit 0
+}
+
+# ========== INTERACTIVE PROMPTS ==========
+# Only used to fill in what was not supplied on the command line. A fully
+# specified command line never prompts.
+# Read-Host returns $null when stdin is exhausted (redirected/non-interactive
+# input), which would otherwise spin the prompt loops forever.
+function Read-Answer {
+    param([string]$Prompt)
+    $value = Read-Host $Prompt
+    if ($null -eq $value) {
+        Write-Host "`nNo input available - this script cannot prompt here." -ForegroundColor Red
+        Write-Host "Supply the details on the command line instead, e.g." -ForegroundColor Yellow
+        Write-Host "  .\continue-rip.ps1 -title `"My Film`" -FromStep 2" -ForegroundColor Yellow
+        exit 1
+    }
+    return $value.Trim()
+}
+
+function Read-TitleInteractive {
+    Write-Host "`n--- TITLE ---" -ForegroundColor Cyan
+    $tempRootPath = $script:Config_TempRoot
+    $candidates = @()
+    if ($tempRootPath -and (Test-Path $tempRootPath)) {
+        $candidates = @(Get-ChildItem -Path $tempRootPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne "logs" } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 10)
+    }
+    if ($candidates.Count -gt 0) {
+        Write-Host "Titles with files still in $tempRootPath (most recent first):" -ForegroundColor Gray
+        for ($i = 0; $i -lt $candidates.Count; $i++) {
+            Write-Host ("  [{0}] {1}" -f ($i + 1), $candidates[$i].Name) -ForegroundColor White
+        }
+        Write-Host "  [0] Type a title myself" -ForegroundColor Gray
+    }
+    while ($true) {
+        $answer = Read-Answer "`nTitle (or a number from the list)"
+        if ([string]::IsNullOrWhiteSpace($answer)) { continue }
+        if ($candidates.Count -gt 0 -and $answer -match '^\d+$') {
+            $index = [int]$answer
+            if ($index -ge 1 -and $index -le $candidates.Count) { return $candidates[$index - 1].Name }
+            if ($index -eq 0) {
+                $typed = Read-Answer "Title"
+                if ($typed) { return $typed }
+                continue
+            }
+            Write-Host "There is no [$index] in the list." -ForegroundColor Red
+            continue
+        }
+        return $answer
+    }
+}
+
+function Read-ContentTypeInteractive {
+    $types = @(
+        @{ Label = "Movie (DVD)";      Switch = $null },
+        @{ Label = "Movie (Blu-ray)";  Switch = "Bluray" },
+        @{ Label = "TV Series";        Switch = "Series" },
+        @{ Label = "Documentary";      Switch = "Documentary" },
+        @{ Label = "Tutorial";         Switch = "Tutorial" },
+        @{ Label = "Fitness";          Switch = "Fitness" },
+        @{ Label = "Music";            Switch = "Music" },
+        @{ Label = "Surf";             Switch = "Surf" }
+    )
+    Write-Host "`n--- CONTENT TYPE ---" -ForegroundColor Cyan
+    Write-Host "This decides which folder the files end up in." -ForegroundColor Gray
+    for ($i = 0; $i -lt $types.Count; $i++) {
+        Write-Host ("  [{0}] {1}" -f ($i + 1), $types[$i].Label) -ForegroundColor White
+    }
+    while ($true) {
+        $answer = Read-Answer "`nType [1]"
+        if ([string]::IsNullOrWhiteSpace($answer)) { $answer = "1" }
+        if ($answer -match '^\d+$') {
+            $index = [int]$answer
+            if ($index -ge 1 -and $index -le $types.Count) { return $types[$index - 1].Switch }
+        }
+        Write-Host "Please enter a number between 1 and $($types.Count)." -ForegroundColor Red
+    }
+}
+
+function Read-StepInteractive {
+    Write-Host "`n--- WHICH STEP ---" -ForegroundColor Cyan
+    Write-Host "Step 1 has already happened (the disc has been read)." -ForegroundColor Gray
+    Write-Host ""
+    foreach ($step in $script:AllSteps) {
+        if ($step.Resumable) {
+            Write-Host ("  [{0}] {1,-20} {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor White
+            Write-Host ("      needs {0}" -f $step.Needs) -ForegroundColor Gray
+        } else {
+            Write-Host ("  [{0}] {1,-20} {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "      not available here - use rip-disc.ps1 instead" -ForegroundColor DarkGray
+        }
+    }
+    Write-Host "`nEverything from the chosen step onwards will run." -ForegroundColor Gray
+    while ($true) {
+        $answer = Read-Answer "`nContinue from step [2]"
+        if ([string]::IsNullOrWhiteSpace($answer)) { $answer = "2" }
+        $key = Resolve-StepKey $answer
+        if ($key -eq "makemkv") {
+            Write-Host "Step 1 reads the disc - this script cannot do that. Use rip-disc.ps1." -ForegroundColor Red
+            continue
+        }
+        if ($key) { return $key }
+        Write-Host "Please enter 2, 3 or 4 (or handbrake / organize / open)." -ForegroundColor Red
+    }
+}
+
+function Read-YesNo {
+    param([string]$Question, [bool]$Default = $false)
+    $suffix = if ($Default) { "[Y/n]" } else { "[y/N]" }
+    while ($true) {
+        $answer = Read-Answer "$Question $suffix"
+        if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
+        if ($answer -match '^(y|yes)$') { return $true }
+        if ($answer -match '^(n|no)$') { return $false }
+        Write-Host "Please answer y or n." -ForegroundColor Red
+    }
+}
+
+# ========== RESOLVE PARAMETERS ==========
+$stepKey = Resolve-StepKey $FromStep
+
+if ($PSBoundParameters.ContainsKey('Drive') -or $PSBoundParameters.ContainsKey('DriveIndex')) {
+    Write-Host "`nNote: -Drive/-DriveIndex are ignored here - continue-rip.ps1 never reads the disc." -ForegroundColor DarkGray
+}
+
+$needsPrompting = [string]::IsNullOrWhiteSpace($title) -or ($null -eq $stepKey) -or ($stepKey -eq "makemkv")
+
+if ($needsPrompting) {
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host " CONTINUE RIP - resume an interrupted rip" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Run with -Help to see all parameters and examples." -ForegroundColor Gray
+
+    if (-not [string]::IsNullOrWhiteSpace($FromStep) -and $null -eq $stepKey) {
+        Write-Host "`n'$FromStep' is not a step this script recognises." -ForegroundColor Yellow
+    } elseif ($stepKey -eq "makemkv") {
+        Write-Host "`nStep 1 (MakeMKV rip) reads the disc - use rip-disc.ps1 for that." -ForegroundColor Yellow
+        $stepKey = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($title)) {
+        $title = Read-TitleInteractive
+    } else {
+        Write-Host "`nTitle: $title" -ForegroundColor White
+    }
+
+    # Content type: only ask if no type switch was supplied.
+    $anyTypeSwitch = $Series -or $Bluray -or $Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf
+    if (-not $anyTypeSwitch) {
+        $chosenType = Read-ContentTypeInteractive
+        switch ($chosenType) {
+            "Bluray"      { $Bluray = $true }
+            "Series"      { $Series = $true }
+            "Documentary" { $Documentary = $true }
+            "Tutorial"    { $Tutorial = $true }
+            "Fitness"     { $Fitness = $true }
+            "Music"       { $Music = $true }
+            "Surf"        { $Surf = $true }
+        }
+    }
+
+    if ($Series) {
+        if (-not $PSBoundParameters.ContainsKey('Season')) {
+            $answer = Read-Answer "`nSeason number (Enter for none) [$Season]"
+            if ($answer -match '^\d+$') { $Season = [int]$answer }
+        }
+        if (-not $PSBoundParameters.ContainsKey('Disc')) {
+            $answer = Read-Answer "Disc number [$Disc]"
+            if ($answer -match '^\d+$') { $Disc = [int]$answer }
+        }
+    } else {
+        if (-not $PSBoundParameters.ContainsKey('Extras') -and -not $Extras) {
+            $Extras = Read-YesNo -Question "`nIs this an extras / special-features disc?" -Default $false
+        }
+        if (-not $Extras -and -not $PSBoundParameters.ContainsKey('Disc')) {
+            $answer = Read-Answer "Disc number [$Disc]"
+            if ($answer -match '^\d+$') { $Disc = [int]$answer }
+        }
+    }
+
+    if ($null -eq $stepKey) {
+        $stepKey = Read-StepInteractive
+    }
+}
+
+$FromStep = $stepKey
+$startStep = Get-StepByKey -Key $stepKey
+$StartFromStepNumber = $startStep.Number
+
+# Mark steps before the starting point as "skipped/assumed complete"
+for ($i = 1; $i -lt $StartFromStepNumber; $i++) {
+    $script:CompletedSteps += Get-Step -Number $i
 }
 
 # ========== CLOSE BUTTON PROTECTION ==========
@@ -372,79 +670,210 @@ $windowTitle += " - CONTINUE"
 $host.UI.RawUI.WindowTitle = $windowTitle
 
 # ========== VALIDATION ==========
+# Prints the exact command that reproduces this run, so it can be re-used or tweaked.
+function Get-EquivalentCommand {
+    $parts = @(".\continue-rip.ps1", "-title `"$title`"", "-FromStep $StartFromStepNumber")
+    if ($Series)      { $parts += "-Series" }
+    if ($Season -gt 0){ $parts += "-Season $Season" }
+    if ($Disc -ne 1)  { $parts += "-Disc $Disc" }
+    if ($Extras)      { $parts += "-Extras" }
+    if ($Bluray)      { $parts += "-Bluray" }
+    if ($Documentary) { $parts += "-Documentary" }
+    if ($Tutorial)    { $parts += "-Tutorial" }
+    if ($Fitness)     { $parts += "-Fitness" }
+    if ($Music)       { $parts += "-Music" }
+    if ($Surf)        { $parts += "-Surf" }
+    $parts += "-OutputDrive $($outputDriveLetter.TrimEnd(':'))"
+    return ($parts -join " ")
+}
+
+# Explain what was expected and, where possible, which step the files on disk
+# actually match. Returns $false so the caller can offer another step.
+function Write-PrerequisiteFailure {
+    param([int]$StepNumber, [string]$Message, [string[]]$Hints = @())
+    $step = Get-Step -Number $StepNumber
+    Write-Host "`n========================================" -ForegroundColor Red
+    Write-Host " CANNOT START AT STEP $StepNumber - $($step.Name)" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host " $Message" -ForegroundColor Red
+    Write-Host " This step needs $($step.Needs)." -ForegroundColor Yellow
+    foreach ($hint in $Hints) {
+        Write-Host " $hint" -ForegroundColor Cyan
+    }
+    Write-Host "========================================" -ForegroundColor Red
+    return $false
+}
+
+# Every step, what it does, what it needs, and which one is currently selected.
+function Show-StepOptions {
+    param([int]$SelectedNumber)
+    Write-Host "`n--- STEPS AVAILABLE ---" -ForegroundColor Cyan
+    foreach ($step in $script:AllSteps) {
+        $marker = if ($step.Number -eq $SelectedNumber) { "-->" } else { "   " }
+        if (-not $step.Resumable) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "        not available here - use rip-disc.ps1 to read a disc" -ForegroundColor DarkGray
+            continue
+        }
+        if ($step.Number -eq $SelectedNumber) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor Yellow
+            Write-Host ("        STARTS HERE - needs {0}" -f $step.Needs) -ForegroundColor Yellow
+        } elseif ($step.Number -lt $SelectedNumber) {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor DarkGray
+            Write-Host "        SKIPPED - assumed already done" -ForegroundColor DarkGray
+        } else {
+            Write-Host ("{0} [{1}] {2,-20} {3}" -f $marker, $step.Number, $step.Name, $step.Description) -ForegroundColor White
+            Write-Host "        runs after the step above" -ForegroundColor Gray
+        }
+    }
+}
+
+# Checks the starting step can actually run. Returns $true/$false.
+function Test-StepPrerequisites {
+    param([int]$StepNumber)
+
+    if ($StepNumber -eq 2) {
+        # Need MKV files in makemkvOutputDir
+        $hints = @()
+        if ((Test-Path $finalOutputDir) -and @(Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue).Count -gt 0) {
+            $hints += "There ARE encoded MP4 files in $finalOutputDir - did you mean step 3 (organize)?"
+        }
+        if (!(Test-Path $makemkvOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The MakeMKV folder does not exist: $makemkvOutputDir" -Hints $hints)
+        }
+        $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
+        if ($null -eq $mkvFiles -or $mkvFiles.Count -eq 0) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "No MKV files in: $makemkvOutputDir" -Hints $hints)
+        }
+        Write-Host "OK - found $($mkvFiles.Count) MKV file(s) to encode:" -ForegroundColor Green
+        foreach ($mkv in $mkvFiles) {
+            Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
+        }
+        # Encoding overwrites, so say plainly which files are about to be redone.
+        $alreadyEncoded = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
+        if ($alreadyEncoded.Count -gt 0) {
+            Write-Host "`nNote: $($alreadyEncoded.Count) of these already have an MP4 in the output folder" -ForegroundColor Yellow
+            Write-Host "and WILL BE RE-ENCODED from scratch:" -ForegroundColor Yellow
+            foreach ($done in $alreadyEncoded) {
+                Write-Host "  - $($done.BaseName).mp4" -ForegroundColor Yellow
+            }
+            Write-Host "To keep those and skip them, delete the matching .mkv files first." -ForegroundColor Gray
+        }
+        return $true
+    }
+
+    if ($StepNumber -eq 3) {
+        # Need MP4 files in finalOutputDir
+        $hints = @()
+        if ((Test-Path $makemkvOutputDir) -and @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue).Count -gt 0) {
+            $hints += "There ARE un-encoded MKV files in $makemkvOutputDir - did you mean step 2 (handbrake)?"
+        }
+        if (!(Test-Path $finalOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The output folder does not exist: $finalOutputDir" -Hints $hints)
+        }
+        $mp4Files = Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue
+        if ($null -eq $mp4Files -or $mp4Files.Count -eq 0) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "No MP4 files in: $finalOutputDir" -Hints $hints)
+        }
+        Write-Host "OK - found $($mp4Files.Count) MP4 file(s) to organize:" -ForegroundColor Green
+        foreach ($mp4 in $mp4Files) {
+            Write-Host "  - $($mp4.Name) ($([math]::Round($mp4.Length/1GB, 2)) GB)" -ForegroundColor Gray
+        }
+        return $true
+    }
+
+    if ($StepNumber -eq 4) {
+        # Just need finalOutputDir to exist
+        if (!(Test-Path $finalOutputDir)) {
+            return (Write-PrerequisiteFailure -StepNumber $StepNumber -Message "The output folder does not exist: $finalOutputDir")
+        }
+        Write-Host "OK - output folder exists: $finalOutputDir" -ForegroundColor Green
+        return $true
+    }
+
+    return $false
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Continue Rip - Starting from $FromStep" -ForegroundColor Cyan
+Write-Host " CONTINUE RIP" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Title: $title" -ForegroundColor White
-Write-Host "Type: $contentType" -ForegroundColor White
-Write-Host "Output Drive: $outputDriveLetter" -ForegroundColor White
+Write-Host (" Title         : {0}" -f $title) -ForegroundColor White
+Write-Host (" Type          : {0}" -f $contentType) -ForegroundColor White
 if ($Series) {
     if ($Season -gt 0) {
-        Write-Host "Season: $Season ($seasonTag)" -ForegroundColor White
+        Write-Host (" Season        : {0} ({1})" -f $Season, $seasonTag) -ForegroundColor White
     }
-    Write-Host "Disc: $Disc" -ForegroundColor White
+    Write-Host (" Disc          : {0}" -f $Disc) -ForegroundColor White
 } else {
-    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
+    Write-Host (" Disc          : {0}{1}" -f $Disc, $(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1) { ' (Special Features)' } else { '' })) -ForegroundColor White
 }
-Write-Host "MakeMKV Output: $makemkvOutputDir" -ForegroundColor White
-Write-Host "Final Output: $finalOutputDir" -ForegroundColor White
-Write-Host "Starting from: Step $StartFromStepNumber ($FromStep)" -ForegroundColor Yellow
-Write-Host "Log file: $($script:LogFile)" -ForegroundColor White
-Write-Host "========================================`n" -ForegroundColor Cyan
+Write-Host (" Source folder : {0}" -f $makemkvOutputDir) -ForegroundColor White
+Write-Host (" Output folder : {0}" -f $finalOutputDir) -ForegroundColor White
+Write-Host (" Log file      : {0}" -f $script:LogFile) -ForegroundColor White
 
-# Validate prerequisites for starting step
-if ($StartFromStepNumber -eq 2) {
-    # Need MKV files in makemkvOutputDir
-    if (!(Test-Path $makemkvOutputDir)) {
-        Write-Host "ERROR: MakeMKV output directory not found: $makemkvOutputDir" -ForegroundColor Red
-        Write-Host "Cannot continue from HandBrake step without MKV files." -ForegroundColor Red
-        exit 1
+# Show the full list of steps, check the chosen one can actually run, and let the
+# step be changed at the prompt rather than re-running the whole command.
+while ($true) {
+    $startStep = Get-StepByKey -Key $FromStep
+    $StartFromStepNumber = $startStep.Number
+
+    # Steps before the starting point count as "skipped/assumed complete"
+    $script:CompletedSteps = @()
+    for ($i = 1; $i -lt $StartFromStepNumber; $i++) {
+        $script:CompletedSteps += Get-Step -Number $i
     }
-    $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue
-    if ($null -eq $mkvFiles -or $mkvFiles.Count -eq 0) {
-        Write-Host "ERROR: No MKV files found in: $makemkvOutputDir" -ForegroundColor Red
-        Write-Host "Cannot continue from HandBrake step without MKV files." -ForegroundColor Red
-        exit 1
+
+    Show-StepOptions -SelectedNumber $StartFromStepNumber
+
+    Write-Host "`n--- CHECKING PREREQUISITES ---" -ForegroundColor Cyan
+    $ready = Test-StepPrerequisites -StepNumber $StartFromStepNumber
+
+    if ($ready) {
+        Write-Host "`nCommand for this run:" -ForegroundColor DarkGray
+        Write-Host "  $(Get-EquivalentCommand)" -ForegroundColor DarkGray
     }
-    Write-Host "Found $($mkvFiles.Count) MKV file(s) to encode:" -ForegroundColor Green
-    foreach ($mkv in $mkvFiles) {
-        Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
+
+    if ($Yes) {
+        if (-not $ready) { exit 1 }
+        Write-Host "`nStarting (-Yes was given)..." -ForegroundColor Green
+        break
     }
-} elseif ($StartFromStepNumber -eq 3) {
-    # Need MP4 files in finalOutputDir
-    if (!(Test-Path $finalOutputDir)) {
-        Write-Host "ERROR: Final output directory not found: $finalOutputDir" -ForegroundColor Red
-        Write-Host "Cannot continue from organize step without encoded files." -ForegroundColor Red
-        exit 1
+
+    # Read-Answer exits rather than starting an encode on an unanswered prompt.
+    if ($ready) {
+        $answer = Read-Answer "`nPress Enter to start at step $StartFromStepNumber, type another step number (2/3/4), or Ctrl+C to abort"
+        if ([string]::IsNullOrWhiteSpace($answer)) { break }
+    } else {
+        $answer = Read-Answer "`nType another step number (2/3/4) to try a different step, or Ctrl+C to abort"
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            Write-Host "Step $StartFromStepNumber cannot run here - choose another step, or press Ctrl+C to abort." -ForegroundColor Red
+            continue
+        }
     }
-    $mp4Files = Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue
-    if ($null -eq $mp4Files -or $mp4Files.Count -eq 0) {
-        Write-Host "ERROR: No MP4 files found in: $finalOutputDir" -ForegroundColor Red
-        Write-Host "Cannot continue from organize step without encoded files." -ForegroundColor Red
-        exit 1
+
+    $newKey = Resolve-StepKey $answer
+    if ($newKey -eq "makemkv") {
+        Write-Host "Step 1 reads the disc - use rip-disc.ps1 for that." -ForegroundColor Red
+        continue
     }
-    Write-Host "Found $($mp4Files.Count) MP4 file(s) to organize:" -ForegroundColor Green
-    foreach ($mp4 in $mp4Files) {
-        Write-Host "  - $($mp4.Name) ($([math]::Round($mp4.Length/1GB, 2)) GB)" -ForegroundColor Gray
+    if (-not $newKey) {
+        Write-Host "Please enter 2, 3 or 4 (or handbrake / organize / open)." -ForegroundColor Red
+        continue
     }
-} elseif ($StartFromStepNumber -eq 4) {
-    # Just need finalOutputDir to exist
-    if (!(Test-Path $finalOutputDir)) {
-        Write-Host "ERROR: Final output directory not found: $finalOutputDir" -ForegroundColor Red
-        exit 1
+    if ($newKey -eq $FromStep) {
+        if ($ready) { break }
+        continue
     }
-    Write-Host "Output directory exists: $finalOutputDir" -ForegroundColor Green
+    $FromStep = $newKey
+    Write-Log "Starting step changed at the prompt to: $FromStep"
 }
-
-$response = Read-Host "`nPress Enter to continue, or Ctrl+C to abort"
 Disable-ConsoleClose
 
 # ========== STEP 2: ENCODE WITH HANDBRAKE ==========
 if ($StartFromStepNumber -le 2) {
-    Set-CurrentStep -StepNumber 2
+    Show-StepBanner -StepNumber 2
     $script:LastWorkingDirectory = $finalOutputDir
     Write-Log "STEP 2/4: Starting HandBrake encoding..."
-    Write-Host "`n[STEP 2/4] Starting HandBrake encoding..." -ForegroundColor Green
 
     # Check if destination drive is ready
     Write-Host "Checking destination drive..." -ForegroundColor Yellow
@@ -637,11 +1066,23 @@ if ($StartFromStepNumber -le 2) {
 
 # ========== STEP 3: RENAME AND ORGANIZE ==========
 if ($StartFromStepNumber -le 3) {
-    Set-CurrentStep -StepNumber 3
+    Show-StepBanner -StepNumber 3
     $script:LastWorkingDirectory = $finalOutputDir
     Write-Log "STEP 3/4: Organizing files..."
-    Write-Host "`n[STEP 3/4] Organizing files..." -ForegroundColor Green
-    cd $finalOutputDir
+
+    # Everything below renames/moves files in the CURRENT directory. If this cd
+    # silently fails, that current directory is wherever the script was launched
+    # from - which is how a run once renamed the files in the repo it was run
+    # from. Fail loudly instead, and confirm we actually landed in the target.
+    try {
+        Set-Location -LiteralPath $finalOutputDir -ErrorAction Stop
+    } catch {
+        Stop-WithError -Step "STEP 3/4: Organize files" -Message "Cannot change directory to $finalOutputDir - $($_.Exception.Message)"
+    }
+    $currentPath = (Get-Location).Path.TrimEnd('\')
+    if ($currentPath -ne $finalOutputDir.TrimEnd('\')) {
+        Stop-WithError -Step "STEP 3/4: Organize files" -Message "Refusing to organize: expected to be in $finalOutputDir but the working directory is $currentPath"
+    }
 
     Write-Host "Current directory: $finalOutputDir" -ForegroundColor Yellow
 
@@ -917,9 +1358,8 @@ if ($StartFromStepNumber -le 3) {
 
 # ========== STEP 4: OPEN DIRECTORY ==========
 if ($StartFromStepNumber -le 4) {
-    Set-CurrentStep -StepNumber 4
+    Show-StepBanner -StepNumber 4
     Write-Log "STEP 4/4: Opening directory..."
-    Write-Host "`n[STEP 4/4] Opening film directory..." -ForegroundColor Green
     Write-Host "Opening: $finalOutputDir" -ForegroundColor Yellow
     start $finalOutputDir
     Complete-CurrentStep
