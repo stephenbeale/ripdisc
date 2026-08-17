@@ -928,7 +928,9 @@ function Stop-WithError {
         Write-Host "`n--- OPENING DIRECTORY ---" -ForegroundColor Cyan
         Write-Host "Opening: $directoryToOpen" -ForegroundColor Yellow
         Write-Host "(This is where leftover/partial files may be located)" -ForegroundColor Gray
-        Start-Process explorer.exe -ArgumentList $directoryToOpen
+        # Quote the path: Start-Process joins -ArgumentList on spaces, so an unquoted
+        # title containing spaces is split into separate explorer.exe arguments.
+        Start-Process explorer.exe -ArgumentList "`"$($directoryToOpen.TrimEnd('\'))`""
     }
 
     # Show recovery script path if it exists (encoding failed mid-way)
