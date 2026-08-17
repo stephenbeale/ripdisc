@@ -643,7 +643,9 @@ function Stop-WithError {
     if ($directoryToOpen) {
         Write-Host "`n--- OPENING DIRECTORY ---" -ForegroundColor Cyan
         Write-Host "Opening: $directoryToOpen" -ForegroundColor Yellow
-        Start-Process explorer.exe -ArgumentList $directoryToOpen
+        # Quote the path: Start-Process joins -ArgumentList on spaces, so an unquoted
+        # title containing spaces is split into separate explorer.exe arguments.
+        Start-Process explorer.exe -ArgumentList "`"$($directoryToOpen.TrimEnd('\'))`""
     }
 
     # Show recovery script path if it exists (encoding failed mid-way)

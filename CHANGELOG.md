@@ -6,6 +6,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-17
+
+### Fixed
+- Open-directory step no longer fails on titles containing spaces, in both `rip-disc.ps1` and `continue-rip.ps1`
+  - Both scripts called `Start-Process explorer.exe -ArgumentList $directoryToOpen` with the path unquoted
+  - `Start-Process` joins `-ArgumentList` on spaces without quoting the elements, so `C:\Video\Who Framed Roger Rabbit\Disc1` reached explorer.exe as three separate arguments and only the first token was treated as a path
+  - Titles with spaces are the norm here, so this fired on most rips — impact was limited to the final "open the folder" convenience step, not the rip itself
+  - The path is now wrapped in embedded quotes, with `TrimEnd('\')` so a trailing backslash cannot escape the closing quote
+  - Same defect class as the ripaudio fix of the same date, where it was more severe: there it broke the automatic handoff to `search-metadata.ps1`
+
 ## 2026-08-11
 
 ### Fixed
