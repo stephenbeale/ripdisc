@@ -913,6 +913,69 @@ if ($StartFromStepNumber -le 2) {
 
     $mkvFiles = Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv"
 
+    # ========== BLU-RAY MODE GUARD ==========
+    # A single title cannot be bigger than the disc it came from, and DVD-9 (dual
+    # layer) tops out at ~8.5 GB. Any MKV above that is therefore proof of a Blu-ray
+    # source, regardless of what was passed on the command line.
+    #
+    # Without -Bluray the DVD subtitle branch runs (--all-subtitles
+    # --subtitle-burned=none), and Blu-ray PGS tracks get burned into the picture
+    # anyway despite that flag - see PR #67. Burned-in subtitles cannot be removed
+    # afterwards, so this check runs before any encoding starts.
+    #
+    # Checked per-file rather than on the total: MakeMKV often emits the same feature
+    # as more than one title, so a DVD's files can legitimately sum past 8.5 GB.
+    if (-not $Bluray) {
+        $dvd9CapacityBytes = 8.5GB
+        $oversizedMkvs = @($mkvFiles | Where-Object { $_.Length -gt $dvd9CapacityBytes } | Sort-Object Length -Descending)
+
+        if ($oversizedMkvs.Count -gt 0) {
+            $biggestMkv = $oversizedMkvs[0]
+            $biggestGB = [math]::Round($biggestMkv.Length / 1GB, 2)
+
+            Write-Host "`n========================================" -ForegroundColor Yellow
+            Write-Host "BLU-RAY DETECTED, BUT -Bluray WAS NOT PASSED" -ForegroundColor Yellow
+            Write-Host "========================================" -ForegroundColor Yellow
+            Write-Host "Largest MKV: $($biggestMkv.Name) ($biggestGB GB)" -ForegroundColor White
+            Write-Host "A DVD cannot hold a single title that large (DVD-9 limit is 8.5 GB)." -ForegroundColor White
+            Write-Host "`nIn DVD mode HandBrake burns the PGS subtitle tracks into the picture." -ForegroundColor Red
+            Write-Host "That cannot be undone once encoding has finished." -ForegroundColor Red
+            Write-Log "Blu-ray guard: $($biggestMkv.Name) is $biggestGB GB (over 8.5 GB) but -Bluray was not passed"
+
+            if ($Yes) {
+                # Non-interactive: take the corrective, non-destructive option.
+                $Bluray = $true
+                Write-Host "`n-Yes given - enabling Blu-ray subtitle handling automatically." -ForegroundColor Green
+                Write-Log "Blu-ray guard: -Yes given, -Bluray enabled automatically"
+            } else {
+                Write-Host "`n  [Enter] Switch to Blu-ray subtitle handling (recommended)" -ForegroundColor Green
+                Write-Host "  [d]     Continue in DVD mode anyway - subtitles will be burned in" -ForegroundColor Gray
+                Write-Host "  [a]     Abort and leave the MKV files alone" -ForegroundColor Gray
+                $blurayChoice = (Read-Answer "`nChoice").ToLowerInvariant()
+
+                if ($blurayChoice -eq 'a') {
+                    Write-Host "`nAborted before encoding. The MKV files are untouched at:" -ForegroundColor Yellow
+                    Write-Host "  $makemkvOutputDir" -ForegroundColor White
+                    Write-Host "`nRe-run with -Bluray when you are ready:" -ForegroundColor Yellow
+                    Write-Host "  .\continue-rip.ps1 -title `"$title`" -FromStep 2 -Bluray" -ForegroundColor Cyan
+                    Write-Log "Blu-ray guard: aborted before encoding - MKVs left at $makemkvOutputDir"
+                    exit 1
+                } elseif ($blurayChoice -eq 'd') {
+                    Write-Host "`nContinuing in DVD mode - subtitles will be burned in." -ForegroundColor Yellow
+                    Write-Log "Blu-ray guard: continuing in DVD mode despite Blu-ray-sized titles"
+                } else {
+                    $Bluray = $true
+                    Write-Host "`nBlu-ray subtitle handling enabled for the rest of this run." -ForegroundColor Green
+                    Write-Log "Blu-ray guard: -Bluray enabled automatically for the remainder of this run"
+                    # $finalOutputDir was resolved before this step, so it is deliberately
+                    # not re-routed here - it already exists and may already hold MP4s.
+                    Write-Host "Output directory is unchanged: $finalOutputDir" -ForegroundColor Gray
+                    Write-Log "Blu-ray guard: output directory left as $finalOutputDir"
+                }
+            }
+        }
+    }
+
     # Series mode: detect and skip composite mega-file (all episodes in one)
     if ($Series -and $mkvFiles.Count -ge 3) {
         $sortedBySize = $mkvFiles | Sort-Object Length -Descending

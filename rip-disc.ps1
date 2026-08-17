@@ -1436,6 +1436,69 @@ if ($ejectSuccess) {
 } # end of MakeMKV rip + eject block
 
 
+# ========== BLU-RAY MODE GUARD ==========
+# A single title cannot be bigger than the disc it came from, and DVD-9 (dual
+# layer) tops out at ~8.5 GB. Any MKV above that is therefore proof of a Blu-ray
+# source, regardless of what was passed on the command line.
+#
+# This matters because without -Bluray the DVD subtitle branch runs
+# (--all-subtitles --subtitle-burned=none), and Blu-ray PGS tracks get burned
+# into the picture anyway despite that flag - see PR #67. Burned-in subtitles
+# cannot be removed afterwards, and the source MKVs are deleted as soon as Step 2
+# finishes, so this is the last point where the mistake is still cheap to fix.
+#
+# Checked per-file rather than on the total: MakeMKV often emits the same feature
+# as more than one title, so a DVD's files can legitimately sum past 8.5 GB.
+# Sits before the queue block so a queued job carries the corrected flag too.
+if (-not $Bluray) {
+    $dvd9CapacityBytes = 8.5GB
+    $rippedMkvs = @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue)
+    $oversizedMkvs = @($rippedMkvs | Where-Object { $_.Length -gt $dvd9CapacityBytes } | Sort-Object Length -Descending)
+
+    if ($oversizedMkvs.Count -gt 0) {
+        $biggestMkv = $oversizedMkvs[0]
+        $biggestGB = [math]::Round($biggestMkv.Length / 1GB, 2)
+
+        Write-Host "`n========================================" -ForegroundColor Yellow
+        Write-Host "BLU-RAY DETECTED, BUT -Bluray WAS NOT PASSED" -ForegroundColor Yellow
+        Write-Host "========================================" -ForegroundColor Yellow
+        Write-Host "Largest ripped title: $($biggestMkv.Name) ($biggestGB GB)" -ForegroundColor White
+        Write-Host "A DVD cannot hold a single title that large (DVD-9 limit is 8.5 GB)." -ForegroundColor White
+        Write-Host "`nIn DVD mode HandBrake burns the PGS subtitle tracks into the picture." -ForegroundColor Red
+        Write-Host "That cannot be undone once encoding has finished." -ForegroundColor Red
+        Write-Log "Blu-ray guard: $($biggestMkv.Name) is $biggestGB GB (over 8.5 GB) but -Bluray was not passed"
+
+        Write-Host "`n  [Enter] Switch to Blu-ray subtitle handling (recommended)" -ForegroundColor Green
+        Write-Host "  [d]     Continue in DVD mode anyway - subtitles will be burned in" -ForegroundColor Gray
+        Write-Host "  [a]     Abort and keep the ripped MKV files" -ForegroundColor Gray
+        $blurayChoice = Read-Host "`nChoice"
+        if ($null -ne $blurayChoice) { $blurayChoice = $blurayChoice.Trim().ToLowerInvariant() }
+
+        if ($blurayChoice -eq 'a') {
+            Write-Host "`nAborted before encoding. The ripped MKV files are kept at:" -ForegroundColor Yellow
+            Write-Host "  $makemkvOutputDir" -ForegroundColor White
+            Write-Host "`nResume without re-ripping the disc:" -ForegroundColor Yellow
+            Write-Host "  .\continue-rip.ps1 -title `"$title`" -FromStep 2 -Bluray" -ForegroundColor Cyan
+            Write-Log "Blu-ray guard: aborted before encoding - MKVs kept at $makemkvOutputDir"
+            $host.UI.RawUI.WindowTitle = "$windowTitle - ABORTED"
+            exit 1
+        } elseif ($blurayChoice -eq 'd') {
+            Write-Host "`nContinuing in DVD mode - subtitles will be burned in." -ForegroundColor Yellow
+            Write-Log "Blu-ray guard: continuing in DVD mode despite Blu-ray-sized titles"
+        } else {
+            # Default (including an unanswered prompt) is the corrective, non-destructive choice.
+            $Bluray = $true
+            Write-Host "`nBlu-ray subtitle handling enabled for the rest of this run." -ForegroundColor Green
+            Write-Log "Blu-ray guard: -Bluray enabled automatically for the remainder of this run"
+            # $finalOutputDir was resolved before Step 1, so it is deliberately not re-routed
+            # here - the folder already exists and may already hold encoded files.
+            Write-Host "Output directory is unchanged: $finalOutputDir" -ForegroundColor Gray
+            Write-Log "Blu-ray guard: output directory left as $finalOutputDir (resolved before the rip)"
+        }
+    }
+}
+
+
 # ========== QUEUE MODE: ADD TO QUEUE AND EXIT ==========
 if ($Queue) {
     Write-Log "QUEUE MODE: Writing encoding job to queue file..."
