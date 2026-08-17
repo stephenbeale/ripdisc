@@ -8,6 +8,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-17
 
+### Added
+- Blu-ray mode guard in `rip-disc.ps1` and `continue-rip.ps1` — catches a missing `-Bluray` flag before encoding starts
+  - Ripping a Blu-ray without `-Bluray` takes the DVD subtitle branch (`--all-subtitles --subtitle-burned=none`), and Blu-ray PGS tracks get burned into the picture anyway despite that flag (the reason the `-Bluray` branch exists — see #67)
+  - Burned-in subtitles cannot be removed afterwards, and `rip-disc.ps1` deletes the source MKVs as soon as Step 2 finishes, so the mistake was unrecoverable without re-ripping the disc
+  - Detection: any single ripped MKV larger than 8.5 GB. A title cannot be bigger than the disc it came from, and DVD-9 tops out at 8.5 GB, so anything above that is proof of a Blu-ray source
+  - Deliberately checks each file rather than their total — MakeMKV often emits the same feature as more than one title, so a DVD's files can legitimately sum well past 8.5 GB (a 3×4 GB DVD rip must not trigger this)
+  - Costs nothing: the files are already on disk and their sizes are already read for the existing log lines
+  - On a hit, offers: enable Blu-ray subtitle handling (default), continue in DVD mode anyway, or abort. Abort leaves the MKVs in place and prints the `continue-rip.ps1 -FromStep 2 -Bluray` command to resume without re-ripping
+  - The default — including an unanswered or piped-EOF prompt — is the corrective, non-destructive option, so it cannot repeat the pattern where a blank line was read as consent to start a destructive encode
+  - In `rip-disc.ps1` the check sits before the queue block, so a queued job carries the corrected flag through to encoding
+  - `continue-rip.ps1` honours `-Yes` by enabling Blu-ray handling automatically rather than prompting
+  - Output directory routing is deliberately left alone: `$finalOutputDir` is resolved before the rip and the folder already exists, so only subtitle handling changes. This is logged and shown
+
 ### Fixed
 - Open-directory step no longer fails on titles containing spaces, in both `rip-disc.ps1` and `continue-rip.ps1`
   - Both scripts called `Start-Process explorer.exe -ArgumentList $directoryToOpen` with the path unquoted
