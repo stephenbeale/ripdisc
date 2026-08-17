@@ -1179,3 +1179,60 @@ GitHub refused self-approval on #107, #109 and #110 alike (`Review Can not appro
 - Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
 - Validate stuck sector detection on a genuinely damaged disc
 - Decide the fate of the C# port items, carried since 2026-02-16 with no commit touching `RipDisc/*.cs` since
+
+---
+
+### 2026-08-17 - Blu-ray Burned-In Subtitle Incident; Guard Shipped (PRs #112, #113)
+
+**Incident — Ocean Wonderland 3D ripped with burned-in PGS subtitles, unrecoverable:**
+
+The user ran `rip-disc.ps1` for "Jean-Michel Cousteau Presents Ocean Wonderland 3D" with `-Documentary` but without `-Bluray`. Result: 3 MP4s (5.28 GB total) landed in `F:\Documentaries\Jean-Michel Cousteau Presents Ocean Wonderland 3D` with PGS subtitles burned into the picture.
+
+Root cause: without `-Bluray` the DVD subtitle branch runs (`--all-subtitles --subtitle-burned=none`), and Blu-ray PGS tracks get burned in anyway despite that flag — which is the entire reason the `-Bluray` branch exists (PR #67; `--subtitle scan --subtitle-burned`).
+
+Confirmed unrecoverable: burned-in subtitles are baked into the pixels, and `rip-disc.ps1` deletes the source MKVs via `Remove-Item -Recurse -Force`, which bypasses the Recycle Bin. Verified no MKVs survive under `C:\Video` for this title and nothing relevant is in the Recycle Bin. The only fix is a re-rip (~80 min: 26 min MakeMKV + 54 min HandBrake, per the original log timings). Log for reference: `C:\Video\logs\Jean-Michel Cousteau Presents Ocean Wonderland 3D_disc1_20260817_122444.log`.
+
+Incidental finding worth checking on the re-rip: `_t00` and `_t02` were both 9.18 GB — near-certainly the 2D and 3D versions of the same feature. The script picked `_t02` as Feature and pushed `_t00` to `extras\`.
+
+**PR #112 — quote the explorer.exe path**
+
+`rip-disc.ps1` and `continue-rip.ps1` both called `Start-Process explorer.exe -ArgumentList $directoryToOpen` with the path unquoted. `Start-Process` joins `-ArgumentList` on spaces without quoting the elements, so a path like `C:\Video\Who Framed Roger Rabbit\Disc1` reached explorer.exe as three separate arguments and only the first token was treated as a path. Titles with spaces are the norm here, so this fired on most rips — impact was limited to the final "open the folder" convenience step, not the rip itself. Fixed by wrapping the path in embedded quotes, with `TrimEnd('\')` so a trailing backslash cannot escape the closing quote. Same defect class as a same-day fix in the `ripaudio` repo, where it was more severe (it broke the automatic handoff to `search-metadata.ps1`).
+
+**PR #113 — Blu-ray mode guard**
+
+New "BLU-RAY MODE GUARD" in both `rip-disc.ps1` and `continue-rip.ps1`. 139 insertions, 0 deletions (purely additive).
+
+Design points:
+- Triggers when any SINGLE ripped MKV exceeds 8.5 GB (DVD-9 capacity) and `-Bluray` was not passed. A title cannot exceed the disc it came from, so this is unambiguous.
+- Deliberately per-file, NOT the sum. The project-manager agent originally proposed summing the MKVs; that would false-positive on ordinary DVDs because MakeMKV routinely emits the same feature as several titles — this very rip proves it (two 9.18 GB copies of the same feature). Unit test confirms 3×4 GB (12 GB total) does not trigger.
+- In `rip-disc.ps1` it sits before the queue block, so `-queue` jobs carry the corrected flag through to the C# encoder.
+- Offers: enable Blu-ray handling (default), continue in DVD mode, or abort. Abort keeps the MKVs and prints the `continue-rip.ps1 -FromStep 2 -Bluray` resume command.
+- The default — including an unanswered/piped-EOF prompt — is the corrective, non-destructive option, deliberately chosen given the PR #109/#110 incident where a piped blank line was read as consent and started a real encode.
+- `continue-rip.ps1` honours `-Yes` by auto-enabling rather than prompting.
+- Output directory routing deliberately NOT changed: `$finalOutputDir` is resolved before Step 1 and already exists by the time the guard runs, so only subtitle handling flips. This is logged and shown on screen.
+
+**Testing status:** `PSParser::Tokenize` reports 0 errors on both scripts; UTF-8 BOM confirmed intact on both (PS 5.1 requirement); 8/8 logic unit tests pass, including the per-file-vs-total false-positive case and the 8.5/8.6 GB boundary. **Not exercised against a real end-to-end rip.**
+
+**Process note:** No CI is configured on this repo. CodeRabbit posted "review available on request" rather than reviewing (manual-trigger for repos under 10 stars) — it opted out, was never in-flight. Nothing force-merged. Per the standing self-approval limitation (GitHub blocks approving your own PR), `gh pr review --approve` was not attempted; an explanatory comment was left instead and the PR was merged directly.
+
+**Files changed:**
+- `rip-disc.ps1` — explorer.exe path quoting (#112), Blu-ray mode guard (#113)
+- `continue-rip.ps1` — explorer.exe path quoting (#112), Blu-ray mode guard (#113)
+- `CHANGELOG.md` — 2026-08-17 section (both PRs)
+
+**Work In Progress:**
+- None — both PRs merged, working tree clean, main synchronised with origin/main
+
+**Action item for the user — Ocean Wonderland 3D re-rip not yet started:**
+```
+.\rip-disc.ps1 -title "Jean-Michel Cousteau Presents Ocean Wonderland 3D" -Bluray -Documentary -Drive E: -OutputDrive F
+```
+`F:\Documentaries\Jean-Michel Cousteau Presents Ocean Wonderland 3D` must be cleared first, or the prefix-rename and Feature-selection logic will collide with the existing burned-in files still sitting there. Caveat: `-Bluray` mode still burns in FORCED subtitles by design (`--subtitle scan --subtitle-burned`) — if this disc flags its subtitles as forced, the burn-in could recur. If that happens, the fix is a HandBrake-only re-encode with subtitles off (no re-rip needed), provided the MKVs are kept this time rather than deleted.
+
+**Outstanding Work for Future Sessions:**
+- **Five preventative fixes now shipped but never fired against a real failure** — both working-directory guards (#107/#109), the CSS stuck-sector false-positive fix (#105), stuck-sector detection itself (#99–#101), and now the Blu-ray guard (#113). Two of these (the Blu-ray guard and the skip-already-encoded feature, #110) will self-verify through ordinary use — no special test needed, just watch the next few rips. The CSS fix (#105) needs a deliberate test: remove the disc from H:, re-run a G: rip. The working-directory guards and stuck-sector detection will only prove themselves if the failure conditions recur naturally.
+- Ocean Wonderland 3D re-rip — see action item above
+- Verify the CSS fix (PR #105) on a real rip — still parse-checked only, never runtime-tested
+- Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
+- Validate stuck sector detection on a genuinely damaged disc
+- The C# port items have now been carried since 2026-02-16 (over six months, 20+ sessions) with no commit touching `RipDisc/*.cs` in that entire span. The 2026-08-10 notes already suggested formally abandoning this rather than re-listing it every session; that suggestion is repeated here and should probably be acted on — either close it out explicitly as "PowerShell is the maintained implementation" or open a single tracking issue and stop carrying the bullet list in session notes
