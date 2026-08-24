@@ -257,6 +257,41 @@ function Write-Log {
     }
 }
 
+# Wraps text in an OSC 8 terminal hyperlink when the host understands one. Windows
+# Terminal and the VS Code terminal both do; the legacy conhost window renders the
+# escape sequence as visible garbage instead, so this is opt-in rather than assumed.
+function Format-TerminalLink {
+    param([string]$Uri, [string]$Text)
+
+    $supportsLinks = $env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode'
+    if (-not $supportsLinks) { return $Text }
+
+    # PS 5.1 has no "`e" escape, so build ESC by code point.
+    $esc = [char]27
+    return "$esc]8;;$Uri$esc\$Text$esc]8;;$esc\"
+}
+
+# Closing reminder of where this session's log ended up. The literal path is always
+# printed so it can be copied or pasted regardless of terminal; the clickable link is
+# an extra on hosts that support it.
+function Show-LogFileReminder {
+    if (-not $script:LogFile) { return }
+
+    $logPath = $script:LogFile
+    Write-Host "`n--- SESSION LOG ---" -ForegroundColor Cyan
+
+    if (Test-Path $logPath) {
+        Write-Host "  $(Format-TerminalLink -Uri ([uri]$logPath).AbsoluteUri -Text $logPath)" -ForegroundColor White
+        $folder = Split-Path $logPath -Parent
+        Write-Host "  Folder: $(Format-TerminalLink -Uri ([uri]$folder).AbsoluteUri -Text $folder)" -ForegroundColor Gray
+        Write-Host "  Open it with: notepad `"$logPath`"" -ForegroundColor DarkGray
+    } else {
+        # The path is chosen up front, before anything is written to it. Pointing at a
+        # file that was never created is worse than saying plainly that none exists.
+        Write-Host "  No log file was written this session (expected at $logPath)" -ForegroundColor DarkYellow
+    }
+}
+
 # ========== DISC DISCOVERY FUNCTIONS ==========
 function Get-DiscInfo {
     param([string]$DiscSource)
@@ -1065,10 +1100,12 @@ function Stop-WithError {
         Write-Log "Recovery script available: $recoveryScriptPath"
     }
 
-    Write-Host "`nLog file: $($script:LogFile)" -ForegroundColor Yellow
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "Please complete the remaining steps manually" -ForegroundColor Red
     Write-Host "========================================`n" -ForegroundColor Red
+    # The log matters most when something has failed, so show it last rather than
+    # above the error banner where it scrolls away.
+    Show-LogFileReminder
     Enable-ConsoleClose
     exit 1
 }
@@ -2383,3 +2420,7 @@ try {
 
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
+
+# Last thing on screen, after every other Write-Log has flushed, so the path is still
+# visible once the rip summary has scrolled by.
+Show-LogFileReminder

@@ -9,6 +9,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-24
 
 ### Added
+- Closing session-log reminder in `rip-disc.ps1` and `continue-rip.ps1` — both scripts now end with a `--- SESSION LOG ---` section pointing at the log they just wrote
+  - Two new functions per script, `Format-TerminalLink` and `Show-LogFileReminder`, called as the last output on the success path and from `Stop-WithError` on the failure path
+  - The literal path is always printed so it can be copied or pasted regardless of terminal; the containing folder and a `notepad "<path>"` hint are printed alongside it
+  - `Format-TerminalLink` wraps the path in an OSC 8 hyperlink so it is clickable, but only when the host is known to support one (`$env:WT_SESSION` for Windows Terminal, `$env:TERM_PROGRAM -eq 'vscode'`). Detection is opt-in rather than assumed because legacy conhost renders the escape sequence as visible garbage; unrecognised hosts get plain text
+  - ESC is built as `[char]27` — PS 5.1 has no `` "`e" `` escape
+  - The log path is chosen up front, before anything is written to it, so when the file does not exist the reminder says so plainly rather than pointing at a missing file
+  - Both functions are duplicated verbatim across the two scripts, matching the existing pattern in this repo
+- `tests/Test-LogFileReminder.ps1` — 16 tests covering terminal capability detection, `file://` URI construction (including percent-encoded spaces), and the reminder's output
+  - Extracts the real function bodies from both scripts via the PowerShell AST parser, so it exercises shipped code rather than a copy, and asserts the two scripts' copies stay identical
 - Documentary / genre series mode in `rip-disc.ps1` and `continue-rip.ps1` — for multi-disc box sets that belong in a genre folder rather than `Series\`
   - Combine `-Series` with any genre flag (`-Documentary`, `-Tutorial`, `-Fitness`, `-Music`, `-Surf`) to activate it; plain `-Series` and plain genre flags are unaffected
   - Reuses `-Series`' existing per-disc isolation and composite mega-file detection rather than adding a parallel system
@@ -27,6 +36,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `(... | Measure-Object -Maximum).Maximum` returns a `Double` in Windows PowerShell 5.1 even for all-integer input, which throws `FormatException` against the `"D2"` format specifier used to build episode numbers — caught by the new logic unit tests before it could hit a real rip; fixed with an explicit `[int]` cast in both scripts
 - `Resolve-EpisodeNames` returned a one-element array for a single-episode disc, which PowerShell unrolls to a bare string on return — the caller's `[0]` then indexed the *string* and yielded its first character as the episode name, misnaming every single-episode disc. Fixed with the unary comma (`return ,$names`) and `@()` at the call site
 - The episode-detection regex `-E(\d+)\.` required a dot immediately after the digits, so named episodes (`Title - E04 - Name.mp4`) never matched and cross-session numbering silently restarted at 1, overwriting earlier discs. Widened to `(?:^|[-\s])E(\d+)(?=\s|\.|$)` in both scripts
+
+### Changed
+- The mid-run `Log file:` line in `Stop-WithError` moved from above the error banner to after it, in both scripts — on a failure the log is what the user needs, and printing it first meant it scrolled away behind the recovery guidance
+- README "Session logging" feature bullet extended to mention the clickable log path shown at the end of every run
 
 ## 2026-08-17
 

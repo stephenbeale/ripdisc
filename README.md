@@ -29,7 +29,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **HandBrake recovery scripts** generated automatically before encoding
 - **Corrupt file detection guidance** — diagnose and recover from interrupted rips
 - **Comprehensive error handling** with recovery guidance
-- **Session logging** for debugging and recovery
+- **Session logging** for debugging and recovery, with the log path shown as a clickable link at the end of every run
 - **Drive readiness checks** before operations
 - **Interactive prompts** for confirmation and conflict resolution
 - **Window title management** for tracking concurrent operations
