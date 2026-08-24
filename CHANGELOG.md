@@ -6,6 +6,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-24
+
+### Added
+- Closing session-log reminder in `rip-disc.ps1` and `continue-rip.ps1` — both scripts now end with a `--- SESSION LOG ---` section pointing at the log they just wrote
+  - Two new functions per script, `Format-TerminalLink` and `Show-LogFileReminder`, called as the last output on the success path and from `Stop-WithError` on the failure path
+  - The literal path is always printed so it can be copied or pasted regardless of terminal; the containing folder and a `notepad "<path>"` hint are printed alongside it
+  - `Format-TerminalLink` wraps the path in an OSC 8 hyperlink so it is clickable, but only when the host is known to support one (`$env:WT_SESSION` for Windows Terminal, `$env:TERM_PROGRAM -eq 'vscode'`). Detection is opt-in rather than assumed because legacy conhost renders the escape sequence as visible garbage; unrecognised hosts get plain text
+  - ESC is built as `[char]27` — PS 5.1 has no `` "`e" `` escape
+  - The log path is chosen up front, before anything is written to it, so when the file does not exist the reminder says so plainly rather than pointing at a missing file
+  - Both functions are duplicated verbatim across the two scripts, matching the existing pattern in this repo
+- `tests/Test-LogFileReminder.ps1` — 16 tests covering terminal capability detection, `file://` URI construction (including percent-encoded spaces), and the reminder's output
+  - Extracts the real function bodies from both scripts via the PowerShell AST parser, so it exercises shipped code rather than a copy, and asserts the two scripts' copies stay identical
+
+### Changed
+- The mid-run `Log file:` line in `Stop-WithError` moved from above the error banner to after it, in both scripts — on a failure the log is what the user needs, and printing it first meant it scrolled away behind the recovery guidance
+- README "Session logging" feature bullet extended to mention the clickable log path shown at the end of every run
+
 ## 2026-08-17
 
 ### Added
