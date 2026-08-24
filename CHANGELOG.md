@@ -18,6 +18,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Both functions are duplicated verbatim across the two scripts, matching the existing pattern in this repo
 - `tests/Test-LogFileReminder.ps1` — 16 tests covering terminal capability detection, `file://` URI construction (including percent-encoded spaces), and the reminder's output
   - Extracts the real function bodies from both scripts via the PowerShell AST parser, so it exercises shipped code rather than a copy, and asserts the two scripts' copies stay identical
+- Documentary / genre series mode in `rip-disc.ps1` and `continue-rip.ps1` — for multi-disc box sets that belong in a genre folder rather than `Series\`
+  - Combine `-Series` with any genre flag (`-Documentary`, `-Tutorial`, `-Fitness`, `-Music`, `-Surf`) to activate it; plain `-Series` and plain genre flags are unaffected
+  - Reuses `-Series`' existing per-disc isolation and composite mega-file detection rather than adding a parallel system
+  - Every MKV on the disc is treated as an episode of equal standing (no Feature/extras split) and renamed `<title>-E##.mp4` (or `<title>-S##E##.mp4` with `-Season`)
+  - Episodes are moved out of the per-disc `Disc$Disc` subfolder into a single shared title folder, and the emptied `Disc$Disc` folder is removed — unlike plain `-Series` mode, which leaves episodes nested in `Disc$Disc` permanently
+  - Episode numbering carries across sessions automatically: `-StartEpisode` is now optional and, when omitted, is auto-detected from the highest existing episode file already in the destination folder
+  - `-StartEpisode` still works as an explicit override
+- Episode names for genre series, so a box set lands as `<title> - S01E04 - <Episode Name>.mp4` (Jellyfin's documented pattern) rather than bare numbering
+  - Titles are taken from the disc's own volume label, normalised through the existing `Clean-DiscName` (underscores to spaces, whitespace collapsed, title case) — `WARMING_BY_THE_DEVILS_FIRE` becomes `Warming By The Devils Fire`
+  - Only applied when a disc holds exactly one episode; one label cannot name several files. Generic labels (`DVD_VIDEO`, `UNTITLED`, and similar) are rejected
+  - New `-EpisodeNames` parameter in both scripts always overrides the label, and is the only option for a disc yielding multiple episodes. Episodes with no name keep the existing `<title>-E##.ext` shape
+  - `Get-DiscVolumeLabel` falls back to Windows for the drive letter when MakeMKV reports no label (reproducible on the USB DVD units here). No label is available under `-DriveIndex` (the drive list is skipped) or in `continue-rip.ps1` (it never reads the disc), so `-EpisodeNames` is required there
+- `tests/Test-EpisodeNaming.ps1` — the first committed, re-runnable test suite in this repo (25 tests). It lifts the real function bodies and the real regex out of both scripts with the PowerShell AST parser, so the tests cannot drift from the shipped code without failing, and asserts the shared logic is identical across `rip-disc.ps1` and `continue-rip.ps1`
+
+### Fixed
+- `(... | Measure-Object -Maximum).Maximum` returns a `Double` in Windows PowerShell 5.1 even for all-integer input, which throws `FormatException` against the `"D2"` format specifier used to build episode numbers — caught by the new logic unit tests before it could hit a real rip; fixed with an explicit `[int]` cast in both scripts
+- `Resolve-EpisodeNames` returned a one-element array for a single-episode disc, which PowerShell unrolls to a bare string on return — the caller's `[0]` then indexed the *string* and yielded its first character as the episode name, misnaming every single-episode disc. Fixed with the unary comma (`return ,$names`) and `@()` at the call site
+- The episode-detection regex `-E(\d+)\.` required a dot immediately after the digits, so named episodes (`Title - E04 - Name.mp4`) never matched and cross-session numbering silently restarted at 1, overwriting earlier discs. Widened to `(?:^|[-\s])E(\d+)(?=\s|\.|$)` in both scripts
 
 ### Changed
 - The mid-run `Log file:` line in `Stop-WithError` moved from above the error banner to after it, in both scripts — on a failure the log is what the user needs, and printing it first meant it scrolled away behind the recovery guidance

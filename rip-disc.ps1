@@ -45,7 +45,13 @@
     [switch]$Surf,
 
     [Parameter()]
-    [int]$StartEpisode = 1
+    [int]$StartEpisode = 1,
+
+    # Episode titles for a genre-series disc, in the order MakeMKV emits the files.
+    # Always wins over the disc-label auto-detection below. Supply one name per episode
+    # on the disc; any episodes beyond the supplied names fall back to plain numbering.
+    [Parameter()]
+    [string[]]$EpisodeNames = @()
 )
 
 # ========== LOAD CONFIG ==========
@@ -55,6 +61,18 @@ $makemkvconPath = $script:Config_MakeMkvPath
 # Apply config defaults to parameters that weren't explicitly passed
 if (-not $PSBoundParameters.ContainsKey('Drive')) { $Drive = $script:Config_DefaultInputDrive }
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
+
+# ========== GENRE SERIES (e.g. multi-disc documentary box sets) ==========
+# -Series combined with a genre flag (-Documentary etc.) means a multi-part,
+# multi-disc title that still belongs under the genre folder rather than
+# Series\ - e.g. a 5-disc, 7-episode documentary boxset. This reuses the
+# existing per-disc isolation and composite-file detection that -Series
+# already has (see $makemkvOutputDir and the Step 2 composite check below),
+# it only changes where files land and how they're named in Step 3.
+# Plain -Series (fiction TV, no genre flag) is completely unaffected.
+$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
 
 # ========== STEP TRACKING ==========
 # Define the 4 processing steps
@@ -85,7 +103,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+    $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -395,6 +413,84 @@ function Clean-DiscName {
     }
 }
 
+# Windows-side fallback for the disc's volume label. MakeMKV's DRV: line leaves the disc
+# name empty for some drives (reproducibly so on the USB DVD units here), but Windows still
+# reports the label fine. Returns "" when the drive has no letter (i.e. under -DriveIndex),
+# no media, or the query fails - callers treat "" as "no name available".
+function Get-DiscVolumeLabel {
+    param([string]$DriveLetter)
+
+    if (-not $DriveLetter) { return "" }
+    $letter = $DriveLetter.TrimEnd(':', '\')
+    if ($letter.Length -ne 1) { return "" }
+
+    try {
+        $vol = Get-CimInstance Win32_CDROMDrive -ErrorAction Stop |
+            Where-Object { $_.Drive -eq "${letter}:" } |
+            Select-Object -First 1
+        if ($vol -and $vol.MediaLoaded -and $vol.VolumeName) { return $vol.VolumeName }
+    } catch {
+        # Non-fatal: episode naming is a convenience, never a reason to fail a rip.
+        Write-Log "Volume label lookup failed for ${letter}: $($_.Exception.Message)"
+    }
+    return ""
+}
+
+# Works out the episode title for each file on a genre-series disc.
+# Precedence: explicit -EpisodeNames, then the cleaned disc label (only when the disc
+# yielded exactly one episode - one label cannot name several files), then nothing.
+# Returns an array the same length as $FileCount; "" means "number this one only".
+function Resolve-EpisodeNames {
+    param(
+        [int]$FileCount,
+        [string[]]$Supplied = @(),
+        [string]$DiscLabel = ""
+    )
+
+    # Every return uses the unary comma. Without it PowerShell unrolls a one-element
+    # array into a bare string on return, and the caller's [0] would then index the
+    # string and hand back its first character as the episode name.
+    $names = @(for ($i = 0; $i -lt $FileCount; $i++) { "" })
+    if ($FileCount -le 0) { return ,$names }
+
+    if ($Supplied -and $Supplied.Count -gt 0) {
+        for ($i = 0; $i -lt $FileCount -and $i -lt $Supplied.Count; $i++) {
+            $names[$i] = "$($Supplied[$i])".Trim()
+        }
+        return ,$names
+    }
+
+    if ($FileCount -eq 1 -and $DiscLabel) {
+        # Reuse Clean-DiscName so labels normalise the same way everywhere:
+        # underscores to spaces, whitespace collapsed, title case.
+        $cleaned = (Clean-DiscName -RawName $DiscLabel).CleanedTitle
+        # Generic labels are worse than no name at all.
+        if ($cleaned -and $cleaned -notmatch '(?i)^(dvd.?video|disc|blank|untitled)$') {
+            $names[0] = $cleaned
+        }
+    }
+    return ,$names
+}
+
+# Builds the final episode filename. Jellyfin's documented pattern is
+# "Series - S01E04 - Episode Name", so the separator is " - " when a name is present.
+# With no name the existing "<title>-E04.ext" shape is kept unchanged.
+function Get-EpisodeFileName {
+    param(
+        [string]$Title,
+        [string]$EpisodeTag,
+        [string]$EpisodeName,
+        [string]$Extension
+    )
+
+    if ($EpisodeName) {
+        # Strip characters Windows will not accept in a filename.
+        $safeName = ($EpisodeName -replace '[\\/:*?"<>|]', '').Trim()
+        if ($safeName) { return "$Title - $EpisodeTag - $safeName$Extension" }
+    }
+    return "$Title-$EpisodeTag$Extension"
+}
+
 function Search-TMDb {
     param([string]$SearchTitle)
 
@@ -576,6 +672,10 @@ if ($DriveIndex -ge 0) {
         $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
         # Remember MakeMKV's name for this drive so Step 1 can ignore read errors from other drives
         $script:TargetDriveName = $matchedDrv.Name
+        # Remember the disc's volume label too - genre-series mode uses it to name episodes.
+        # MakeMKV leaves DiscName empty for some drives (seen on USB opticals), so this may
+        # be blank; Get-DiscVolumeLabel falls back to Windows for the same drive letter.
+        $script:TargetDiscLabel = $matchedDrv.DiscName
         Write-Host "Using disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Green
     } else {
         # Clear stale cache on failure
@@ -763,7 +863,14 @@ if ($titleWarnings.Count -gt 0) {
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
-if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
+if ($script:IsGenreSeries) {
+    if ($Season -gt 0) {
+        $seasonTagPreview = "S{0:D2}" -f $Season
+        Write-Host "Type: $($script:GenreLabel) Series - Season $Season ($seasonTagPreview), Disc $Disc" -ForegroundColor White
+    } else {
+        Write-Host "Type: $($script:GenreLabel) Series - Disc $Disc" -ForegroundColor White
+    }
+} elseif ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
     $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } else { "Surf" }
     $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
     Write-Host "Type: $genreLabel - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
@@ -822,9 +929,26 @@ if ($Extras) {
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
 
 # Genre types: organize into named folders (Documentaries, Tutorials, Fitness, Music)
+# Genre Series: same named folder as the genre, but with per-disc isolation like Series
+#               (multi-disc box sets, e.g. a documentary series spread across several discs)
 # Series: organize into Season subfolders (only if Season explicitly specified)
 # Movies: organize into title folder with optional extras
-if ($Documentary) {
+if ($script:IsGenreSeries) {
+    $genreSeriesBaseDir = "$outputDriveLetter\$($script:GenreFolder)\$title"
+    if ($Season -gt 0) {
+        # Season explicitly specified - use Season subfolder
+        $seasonTag = "S{0:D2}" -f $Season
+        $seasonFolder = "Season $Season"
+        $genreSeriesSeasonDir = Join-Path $genreSeriesBaseDir $seasonFolder
+    } else {
+        # No season - most documentary box sets aren't organized into seasons
+        $seasonTag = $null
+        $genreSeriesSeasonDir = $genreSeriesBaseDir
+    }
+    # Per-disc subdirectory isolates this disc's encode from other discs (same reason
+    # -Series uses one). Step 3 moves the numbered episodes up and removes it afterwards.
+    $finalOutputDir = Join-Path $genreSeriesSeasonDir "Disc$Disc"
+} elseif ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
 } elseif ($Tutorial) {
     $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
@@ -870,7 +994,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_${logTimestamp}.lo
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
+Write-Log "Type: $(if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -986,8 +1110,9 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+$contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
 # Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
+# unless combined with -Series (genre series / box sets), which are organized like Series: every file is an episode, none is "the Feature"
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
@@ -1861,7 +1986,115 @@ if ($imageFiles) {
     Write-Host "No image files found" -ForegroundColor Gray
 }
 
-if ($Series) {
+if ($script:IsGenreSeries) {
+    # ========== GENRE SERIES MODE: multi-disc box set (e.g. documentary series) ==========
+    # Every MKV on the disc is a distinct episode of equal standing - there is no
+    # Feature/extras split. Episodes are numbered sequentially and moved up out of
+    # the per-disc subdirectory into the shared title (or Season) folder, so the
+    # final layout is flat and Jellyfin-friendly rather than nested per disc.
+    Write-Host "`nNumbering $($script:GenreLabel.ToLower()) series episodes..." -ForegroundColor Yellow
+    $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
+
+    # $finalOutputDir is this disc's Disc$Disc subfolder; the target is its parent
+    # (the title or Season folder shared by every disc in the box set).
+    $genreSeriesTargetDir = Split-Path $finalOutputDir -Parent
+
+    # Starting episode number: an explicit -StartEpisode always wins. Otherwise, scan the
+    # shared target folder for the highest existing episode number and continue after it -
+    # this is what lets a box set be ripped one disc per session without the user having
+    # to remember or compute where numbering left off.
+    if ($PSBoundParameters.ContainsKey('StartEpisode')) {
+        $nextEpisode = $StartEpisode
+        Write-Host "Starting at episode $nextEpisode (explicit -StartEpisode)" -ForegroundColor Gray
+        Write-Log "Genre series: starting at episode $nextEpisode (explicit -StartEpisode)"
+    } else {
+        # Episode names put " - " around the tag ("Title - E04 - Name.mp4"), so the
+        # unseasoned pattern has to accept a dash OR a space before the E and a space,
+        # a dot or end-of-name after the digits - anchoring on "-E##." would silently
+        # miss every named episode and restart numbering at 1.
+        $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "(?:^|[-\s])E(\d+)(?=\s|\.|$)" }
+        $existingEpisodeNumbers = @()
+        if (Test-Path $genreSeriesTargetDir) {
+            $existingEpisodeNumbers = Get-ChildItem -Path $genreSeriesTargetDir -File -Filter "*.mp4" |
+                Where-Object { $_.Name -match $episodeNumberPattern } |
+                ForEach-Object { [int]$Matches[1] }
+        }
+        # Measure-Object -Maximum returns a Double in Windows PowerShell 5.1 even for int
+        # input - cast back to int, or the "D2" format specifier below throws at runtime.
+        $nextEpisode = if ($existingEpisodeNumbers) { [int](($existingEpisodeNumbers | Measure-Object -Maximum).Maximum) + 1 } else { 1 }
+        Write-Host "Starting at episode $nextEpisode (detected from existing files in $genreSeriesTargetDir)" -ForegroundColor Gray
+        Write-Log "Genre series: starting at episode $nextEpisode (auto-detected from $genreSeriesTargetDir)"
+    }
+    $firstEpisodeThisDisc = $nextEpisode
+
+    $episodeFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|mkv)$' } | Sort-Object Name
+
+    # Episode titles: -EpisodeNames wins; otherwise fall back to the disc's own volume
+    # label, which on a box set like this is the individual film's name. MakeMKV may not
+    # report a label (and never does under -DriveIndex, where the drive list is skipped),
+    # so ask Windows as well before giving up and numbering the file only.
+    $discLabelForNames = $script:TargetDiscLabel
+    if (-not $discLabelForNames -and $DriveIndex -lt 0) {
+        $discLabelForNames = Get-DiscVolumeLabel -DriveLetter $driveLetter
+    }
+    # @() belt-and-braces: Resolve-EpisodeNames already returns an array, but a bare
+    # string here would make the [index] lookup below return single characters.
+    $resolvedEpisodeNames = @(Resolve-EpisodeNames -FileCount $episodeFiles.Count -Supplied $EpisodeNames -DiscLabel $discLabelForNames)
+    if ($episodeFiles.Count -gt 1 -and -not ($EpisodeNames -and $EpisodeNames.Count -gt 0)) {
+        Write-Host "  $($episodeFiles.Count) episodes on this disc - the disc label can only name one, so these are numbered only. Pass -EpisodeNames to title them." -ForegroundColor DarkYellow
+        Write-Log "Genre series: $($episodeFiles.Count) episode files, no -EpisodeNames supplied - numbering without titles"
+    }
+
+    if (!(Test-Path $genreSeriesTargetDir)) {
+        New-Item -ItemType Directory -Path $genreSeriesTargetDir -Force | Out-Null
+    }
+
+    $episodeNameIndex = 0
+    foreach ($file in $episodeFiles) {
+        $episodeTag = if ($seasonTag) { "$seasonTag`E{0:D2}" -f $nextEpisode } else { "E{0:D2}" -f $nextEpisode }
+        $thisEpisodeName = $resolvedEpisodeNames[$episodeNameIndex]
+        $episodeNameIndex++
+        $candidateName = Get-EpisodeFileName -Title $title -EpisodeTag $episodeTag -EpisodeName $thisEpisodeName -Extension $file.Extension
+        $uniquePath = Get-UniqueFilePath -DestDir $genreSeriesTargetDir -FileName $candidateName
+        $finalName = [System.IO.Path]::GetFileName($uniquePath)
+        Write-Host "  $($file.Name) -> $finalName" -ForegroundColor Gray
+
+        $maxRetries = 5
+        $retryDelay = 3
+        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+            try {
+                Move-Item -LiteralPath $file.FullName -Destination $uniquePath -ErrorAction Stop
+                break
+            } catch [System.IO.IOException] {
+                if ($attempt -eq $maxRetries) {
+                    Write-Host "  FAILED to move $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                    Write-Log "ERROR: Failed to move $($file.Name) after $maxRetries attempts: $_"
+                    throw
+                }
+                Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                Start-Sleep -Seconds $retryDelay
+            }
+        }
+        $nextEpisode++
+    }
+    Write-Host "Numbered episodes $firstEpisodeThisDisc-$($nextEpisode - 1), moved to $genreSeriesTargetDir" -ForegroundColor Green
+    Write-Log "Numbered $($episodeFiles.Count) episode(s) ($firstEpisodeThisDisc-$($nextEpisode - 1)), moved to $genreSeriesTargetDir"
+
+    # Clean up the now-empty per-disc subdirectory. cd to the parent first - Remove-Item
+    # on the working directory itself fails with "in use" (same fix as PR #53).
+    Set-Location -LiteralPath $genreSeriesTargetDir
+    $remainingInDiscDir = Get-ChildItem -Path $finalOutputDir -Force -ErrorAction SilentlyContinue
+    if (-not $remainingInDiscDir) {
+        Remove-Item -Path $finalOutputDir -Force
+        Write-Host "Removed empty disc directory: $finalOutputDir" -ForegroundColor Yellow
+        Write-Log "Removed empty disc directory: $finalOutputDir"
+    } else {
+        Write-Host "WARNING: Disc directory not empty after move, leaving in place: $finalOutputDir" -ForegroundColor Red
+        Write-Log "WARNING: Disc directory not empty after episode move: $finalOutputDir"
+    }
+    $finalOutputDir = $genreSeriesTargetDir
+    $script:LastWorkingDirectory = $finalOutputDir
+} elseif ($Series) {
     # ========== SERIES MODE: Prefix files with title + season-disc tag ==========
     # Keeps original MakeMKV filenames (t00, t01...) for episode ordering
     Write-Host "`nPrefixing series files..." -ForegroundColor Yellow

@@ -151,6 +151,66 @@ Both versions use the same command-line parameters:
 -startEpisode <int>     Starting episode number for series (default: 1)
 ```
 
+### Documentary / genre series (multi-disc box sets)
+
+Combine `-series` with a genre flag (`-documentary`, `-tutorial`, `-fitness`, `-music`, `-surf`) for a
+multi-disc box set that still belongs under the genre folder rather than `Series\` - for example, a
+7-episode documentary spread across 5 discs, where every disc reports the same or a near-identical
+disc label so there's no way to tell discs apart automatically. You supply `-disc N` yourself each
+time (the same as any other multi-disc rip); the script numbers episodes sequentially and moves them
+into a single flat folder, no matter how many episodes end up on each individual disc.
+
+Episode numbering carries across sessions automatically: `-startEpisode` is optional. If you omit it,
+the script scans the destination folder for the highest existing `-E##` (or `S##E##`) file and
+continues from there - rip disc 1 today, disc 4 next week, and the numbering picks up correctly
+without you having to remember or compute where it left off. Pass `-startEpisode` explicitly only if
+you need to override that (e.g. re-ripping a disc out of order).
+
+```powershell
+# Disc 1 of a 5-disc documentary box set - lands as episodes 1-2
+.\rip-disc.ps1 -title "Martin Scorsese Presents the Blues" -documentary -series -disc 1
+
+# Disc 2, ripped in a later session - continues automatically at episode 3
+.\rip-disc.ps1 -title "Martin Scorsese Presents the Blues" -documentary -series -disc 2
+```
+
+Keep `-title` **identical for every disc in the set**. Continuation works by scanning the
+shared destination folder for the highest existing episode number, so a title that varies
+per disc sends each one to its own folder and numbering restarts at 1 every time.
+
+#### Episode names
+
+Episodes are titled automatically from the disc's own volume label, normalised to title
+case with underscores replaced by spaces - so a disc labelled `WARMING_BY_THE_DEVILS_FIRE`
+produces:
+
+```
+Martin Scorsese Presents the Blues - S01E04 - Warming By The Devils Fire.mp4
+```
+
+This only applies when a disc holds exactly one episode; one label cannot name several
+files. Use `-episodeNames` to set them explicitly - it always overrides the disc label, and
+is the only option when a disc yields multiple episodes:
+
+```powershell
+# Two episodes on one disc, named explicitly
+.\rip-disc.ps1 -title "The Blues" -documentary -series -disc 3 `
+    -episodeNames "The Road to Memphis", "Warming by the Devil's Fire"
+```
+
+Names are matched to files in the order MakeMKV emits them. Any episode without a name
+falls back to plain `<title>-E##.mp4` numbering, as does a disc whose label is missing or
+generic (`DVD_VIDEO`, `UNTITLED`, and similar).
+
+Two cases where no label is available, so `-episodeNames` is required:
+
+- **`-driveIndex` was used** - the MakeMKV drive list is skipped entirely on that path, and
+  with no drive letter there is nothing to ask Windows about either.
+- **`continue-rip.ps1`** - it resumes after the disc is done and never reads it.
+
+MakeMKV also leaves the label blank for some drives (reproducibly so on USB DVD units); the
+script falls back to querying Windows for the same drive letter before giving up.
+
 ### Examples
 
 **Rip a disc with auto-discovery (no title needed):**
@@ -244,6 +304,23 @@ E:\Documentaries\DocName\
 └── extras\
     └── DocName-bonus.mp4
 ```
+
+### Documentary / genre series (multi-disc box set, `-documentary -series`)
+
+```
+E:\Documentaries\Martin Scorsese Presents the Blues\
+├── Martin Scorsese Presents the Blues-E01.mp4    (Disc 1)
+├── Martin Scorsese Presents the Blues-E02.mp4    (Disc 1)
+├── Martin Scorsese Presents the Blues-E03.mp4    (Disc 2)
+├── Martin Scorsese Presents the Blues-E04.mp4    (Disc 3)
+└── ...
+```
+
+No per-disc subfolders survive - each disc's episodes are numbered and moved into the shared title
+folder, and the empty per-disc folder is removed. This is the same layout `-tutorial -series`,
+`-fitness -series`, `-music -series` and `-surf -series` produce, just rooted at their own genre
+folder (`Tutorials\`, `Fitness\`, `Music\`, `Surf\`). Add `-season N` if the box set genuinely has
+seasons, and files use `SeriesName-S01E01.mp4` instead.
 
 ### Tutorials
 
@@ -346,6 +423,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
 | `-Tutorial` / `-Fitness` / `-Music` / `-Surf` flags | Yes | No |
+| Genre series (`-Documentary`/etc. combined with `-Series`) | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
 | Jellyfin episode naming (`S01E01`) | Yes | No |
