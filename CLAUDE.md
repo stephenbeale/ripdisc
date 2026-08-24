@@ -1269,8 +1269,21 @@ Every MKV on a genre-series disc is treated as an episode of equal standing (no 
 
 **Testing status:** `PSParser::Tokenize` reports 0 errors on both scripts; UTF-8 BOM confirmed intact on both. 12/12 logic unit tests pass against fixture files (not a real disc) covering: sequential numbering within a disc, auto-detected continuation across simulated sessions, variable episode-count-per-disc, explicit `-StartEpisode` override, filename-collision fallback, and the season-tag (`S01E0x`) variant — this is what caught the `Double`/`D2` bug above. **Not exercised against a real MakeMKV/HandBrake rip** — no disc was ripped this session.
 
+**Episode names (added after the first round of review):**
+Episodes are titled from the disc's own volume label, normalised through the existing `Clean-DiscName` (underscores → spaces, whitespace collapsed, title case) — so `WARMING_BY_THE_DEVILS_FIRE` becomes `Warming By The Devils Fire`. This is only safe when a disc holds exactly one episode; one label cannot name several files, so multi-episode discs fall back to numbering unless `-EpisodeNames` is supplied. `-EpisodeNames` always wins over the label. Filenames follow Jellyfin's documented `Series - S01E04 - Episode Name` pattern; unnamed episodes keep the original `<title>-E04.ext` shape.
+
+Note the original premise of this feature — "every disc reports the same label, so discs can't be told apart" — **does not hold for the Blues box set**. Each disc self-identifies (`SOUL_OF_A_MAN`, `ROAD_TO_MEMPHIS`, `WARMING_BY_THE_DEVILS_FIRE`, `Godfathers and Sons`), which is exactly what makes label-based naming work. Worth revisiting whether auto-detect-by-label should also drive disc ordering.
+
+**Two bugs found by the committed tests:**
+1. `Resolve-EpisodeNames` returned a one-element array for a single-episode disc, which PowerShell unrolls to a bare string on return — the caller's `[0]` then indexed the *string* and produced `"W"` as the episode name. Every single-episode disc (i.e. the entire box set) would have been misnamed. Fixed with the unary comma (`return ,$names`) plus `@()` at the call site.
+2. The episode-detection regex `-E(\d+)\.` demanded a dot immediately after the digits. Named episodes (`Title - E04 - Name.mp4`) never matched, so cross-session numbering silently restarted at 1 and overwrote earlier discs. Widened to `(?:^|[-\s])E(\d+)(?=\s|\.|$)`.
+
+**Testing status:** `PSParser::Tokenize` reports 0 errors on both scripts. **25/25 logic tests pass** via `.\tests\Test-EpisodeNaming.ps1` — a committed, re-runnable suite that lifts the real function bodies and the real regex out of the scripts with the PowerShell AST parser, so the tests cannot drift from the shipped code without failing. It also asserts `Get-EpisodeFileName` and both detection patterns are identical across `rip-disc.ps1` and `continue-rip.ps1`. **Still not exercised against a real MakeMKV/HandBrake rip.**
+
+Earlier entries in this file claim "8/8" and "12/12 logic unit tests pass" with no committed tests — those were scratch tests, run and discarded. `tests/` is the first re-runnable suite in this repo; prefer adding to it over ad-hoc verification.
+
 **Work In Progress:**
-- None — implementation complete, not yet committed/PR'd (see branch `feature/multi-disc-documentary-series`)
+- PR #116 open as a **draft** on branch `feature/multi-disc-documentary-series`. Implementation complete and unit-tested; deliberately left in draft until it has been run against a real disc
 
 **Outstanding Work for Future Sessions:**
 - Real-world validation: rip an actual disc from the Martin Scorsese Presents the Blues boxset with `-Documentary -Series -Disc 1`, confirm the output layout matches the README example, then rip a second disc in a later session and confirm auto-numbering continues correctly

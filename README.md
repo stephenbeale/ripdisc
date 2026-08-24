@@ -174,6 +174,43 @@ you need to override that (e.g. re-ripping a disc out of order).
 .\rip-disc.ps1 -title "Martin Scorsese Presents the Blues" -documentary -series -disc 2
 ```
 
+Keep `-title` **identical for every disc in the set**. Continuation works by scanning the
+shared destination folder for the highest existing episode number, so a title that varies
+per disc sends each one to its own folder and numbering restarts at 1 every time.
+
+#### Episode names
+
+Episodes are titled automatically from the disc's own volume label, normalised to title
+case with underscores replaced by spaces - so a disc labelled `WARMING_BY_THE_DEVILS_FIRE`
+produces:
+
+```
+Martin Scorsese Presents the Blues - S01E04 - Warming By The Devils Fire.mp4
+```
+
+This only applies when a disc holds exactly one episode; one label cannot name several
+files. Use `-episodeNames` to set them explicitly - it always overrides the disc label, and
+is the only option when a disc yields multiple episodes:
+
+```powershell
+# Two episodes on one disc, named explicitly
+.\rip-disc.ps1 -title "The Blues" -documentary -series -disc 3 `
+    -episodeNames "The Road to Memphis", "Warming by the Devil's Fire"
+```
+
+Names are matched to files in the order MakeMKV emits them. Any episode without a name
+falls back to plain `<title>-E##.mp4` numbering, as does a disc whose label is missing or
+generic (`DVD_VIDEO`, `UNTITLED`, and similar).
+
+Two cases where no label is available, so `-episodeNames` is required:
+
+- **`-driveIndex` was used** - the MakeMKV drive list is skipped entirely on that path, and
+  with no drive letter there is nothing to ask Windows about either.
+- **`continue-rip.ps1`** - it resumes after the disc is done and never reads it.
+
+MakeMKV also leaves the label blank for some drives (reproducibly so on USB DVD units); the
+script falls back to querying Windows for the same drive letter before giving up.
+
 ### Examples
 
 **Rip a disc with auto-discovery (no title needed):**

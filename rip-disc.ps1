@@ -45,7 +45,13 @@
     [switch]$Surf,
 
     [Parameter()]
-    [int]$StartEpisode = 1
+    [int]$StartEpisode = 1,
+
+    # Episode titles for a genre-series disc, in the order MakeMKV emits the files.
+    # Always wins over the disc-label auto-detection below. Supply one name per episode
+    # on the disc; any episodes beyond the supplied names fall back to plain numbering.
+    [Parameter()]
+    [string[]]$EpisodeNames = @()
 )
 
 # ========== LOAD CONFIG ==========
@@ -372,6 +378,84 @@ function Clean-DiscName {
     }
 }
 
+# Windows-side fallback for the disc's volume label. MakeMKV's DRV: line leaves the disc
+# name empty for some drives (reproducibly so on the USB DVD units here), but Windows still
+# reports the label fine. Returns "" when the drive has no letter (i.e. under -DriveIndex),
+# no media, or the query fails - callers treat "" as "no name available".
+function Get-DiscVolumeLabel {
+    param([string]$DriveLetter)
+
+    if (-not $DriveLetter) { return "" }
+    $letter = $DriveLetter.TrimEnd(':', '\')
+    if ($letter.Length -ne 1) { return "" }
+
+    try {
+        $vol = Get-CimInstance Win32_CDROMDrive -ErrorAction Stop |
+            Where-Object { $_.Drive -eq "${letter}:" } |
+            Select-Object -First 1
+        if ($vol -and $vol.MediaLoaded -and $vol.VolumeName) { return $vol.VolumeName }
+    } catch {
+        # Non-fatal: episode naming is a convenience, never a reason to fail a rip.
+        Write-Log "Volume label lookup failed for ${letter}: $($_.Exception.Message)"
+    }
+    return ""
+}
+
+# Works out the episode title for each file on a genre-series disc.
+# Precedence: explicit -EpisodeNames, then the cleaned disc label (only when the disc
+# yielded exactly one episode - one label cannot name several files), then nothing.
+# Returns an array the same length as $FileCount; "" means "number this one only".
+function Resolve-EpisodeNames {
+    param(
+        [int]$FileCount,
+        [string[]]$Supplied = @(),
+        [string]$DiscLabel = ""
+    )
+
+    # Every return uses the unary comma. Without it PowerShell unrolls a one-element
+    # array into a bare string on return, and the caller's [0] would then index the
+    # string and hand back its first character as the episode name.
+    $names = @(for ($i = 0; $i -lt $FileCount; $i++) { "" })
+    if ($FileCount -le 0) { return ,$names }
+
+    if ($Supplied -and $Supplied.Count -gt 0) {
+        for ($i = 0; $i -lt $FileCount -and $i -lt $Supplied.Count; $i++) {
+            $names[$i] = "$($Supplied[$i])".Trim()
+        }
+        return ,$names
+    }
+
+    if ($FileCount -eq 1 -and $DiscLabel) {
+        # Reuse Clean-DiscName so labels normalise the same way everywhere:
+        # underscores to spaces, whitespace collapsed, title case.
+        $cleaned = (Clean-DiscName -RawName $DiscLabel).CleanedTitle
+        # Generic labels are worse than no name at all.
+        if ($cleaned -and $cleaned -notmatch '(?i)^(dvd.?video|disc|blank|untitled)$') {
+            $names[0] = $cleaned
+        }
+    }
+    return ,$names
+}
+
+# Builds the final episode filename. Jellyfin's documented pattern is
+# "Series - S01E04 - Episode Name", so the separator is " - " when a name is present.
+# With no name the existing "<title>-E04.ext" shape is kept unchanged.
+function Get-EpisodeFileName {
+    param(
+        [string]$Title,
+        [string]$EpisodeTag,
+        [string]$EpisodeName,
+        [string]$Extension
+    )
+
+    if ($EpisodeName) {
+        # Strip characters Windows will not accept in a filename.
+        $safeName = ($EpisodeName -replace '[\\/:*?"<>|]', '').Trim()
+        if ($safeName) { return "$Title - $EpisodeTag - $safeName$Extension" }
+    }
+    return "$Title-$EpisodeTag$Extension"
+}
+
 function Search-TMDb {
     param([string]$SearchTitle)
 
@@ -553,6 +637,10 @@ if ($DriveIndex -ge 0) {
         $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
         # Remember MakeMKV's name for this drive so Step 1 can ignore read errors from other drives
         $script:TargetDriveName = $matchedDrv.Name
+        # Remember the disc's volume label too - genre-series mode uses it to name episodes.
+        # MakeMKV leaves DiscName empty for some drives (seen on USB opticals), so this may
+        # be blank; Get-DiscVolumeLabel falls back to Windows for the same drive letter.
+        $script:TargetDiscLabel = $matchedDrv.DiscName
         Write-Host "Using disc:$matchedIndex ($($matchedDrv.Name))" -ForegroundColor Green
     } else {
         # Clear stale cache on failure
@@ -1883,7 +1971,11 @@ if ($script:IsGenreSeries) {
         Write-Host "Starting at episode $nextEpisode (explicit -StartEpisode)" -ForegroundColor Gray
         Write-Log "Genre series: starting at episode $nextEpisode (explicit -StartEpisode)"
     } else {
-        $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "-E(\d+)\." }
+        # Episode names put " - " around the tag ("Title - E04 - Name.mp4"), so the
+        # unseasoned pattern has to accept a dash OR a space before the E and a space,
+        # a dot or end-of-name after the digits - anchoring on "-E##." would silently
+        # miss every named episode and restart numbering at 1.
+        $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "(?:^|[-\s])E(\d+)(?=\s|\.|$)" }
         $existingEpisodeNumbers = @()
         if (Test-Path $genreSeriesTargetDir) {
             $existingEpisodeNumbers = Get-ChildItem -Path $genreSeriesTargetDir -File -Filter "*.mp4" |
@@ -1900,13 +1992,32 @@ if ($script:IsGenreSeries) {
 
     $episodeFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|mkv)$' } | Sort-Object Name
 
+    # Episode titles: -EpisodeNames wins; otherwise fall back to the disc's own volume
+    # label, which on a box set like this is the individual film's name. MakeMKV may not
+    # report a label (and never does under -DriveIndex, where the drive list is skipped),
+    # so ask Windows as well before giving up and numbering the file only.
+    $discLabelForNames = $script:TargetDiscLabel
+    if (-not $discLabelForNames -and $DriveIndex -lt 0) {
+        $discLabelForNames = Get-DiscVolumeLabel -DriveLetter $driveLetter
+    }
+    # @() belt-and-braces: Resolve-EpisodeNames already returns an array, but a bare
+    # string here would make the [index] lookup below return single characters.
+    $resolvedEpisodeNames = @(Resolve-EpisodeNames -FileCount $episodeFiles.Count -Supplied $EpisodeNames -DiscLabel $discLabelForNames)
+    if ($episodeFiles.Count -gt 1 -and -not ($EpisodeNames -and $EpisodeNames.Count -gt 0)) {
+        Write-Host "  $($episodeFiles.Count) episodes on this disc - the disc label can only name one, so these are numbered only. Pass -EpisodeNames to title them." -ForegroundColor DarkYellow
+        Write-Log "Genre series: $($episodeFiles.Count) episode files, no -EpisodeNames supplied - numbering without titles"
+    }
+
     if (!(Test-Path $genreSeriesTargetDir)) {
         New-Item -ItemType Directory -Path $genreSeriesTargetDir -Force | Out-Null
     }
 
+    $episodeNameIndex = 0
     foreach ($file in $episodeFiles) {
         $episodeTag = if ($seasonTag) { "$seasonTag`E{0:D2}" -f $nextEpisode } else { "E{0:D2}" -f $nextEpisode }
-        $candidateName = "$title-$episodeTag$($file.Extension)"
+        $thisEpisodeName = $resolvedEpisodeNames[$episodeNameIndex]
+        $episodeNameIndex++
+        $candidateName = Get-EpisodeFileName -Title $title -EpisodeTag $episodeTag -EpisodeName $thisEpisodeName -Extension $file.Extension
         $uniquePath = Get-UniqueFilePath -DestDir $genreSeriesTargetDir -FileName $candidateName
         $finalName = [System.IO.Path]::GetFileName($uniquePath)
         Write-Host "  $($file.Name) -> $finalName" -ForegroundColor Gray

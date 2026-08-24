@@ -44,6 +44,12 @@
     [Parameter()]
     [int]$StartEpisode = 1,
 
+    # Episode titles for a genre-series disc, in the order the files are processed.
+    # Unlike rip-disc.ps1 there is no disc-label fallback here - this script never reads
+    # the disc, so an episode is titled only if you name it explicitly.
+    [Parameter()]
+    [string[]]$EpisodeNames = @(),
+
     # Accepted for command-line compatibility with rip-disc.ps1 so a failed rip
     # command can be pasted here unchanged. This script never reads the disc,
     # so both values are ignored.
@@ -489,6 +495,26 @@ function Enable-ConsoleClose {
 }
 
 # ========== HELPER FUNCTIONS ==========
+# Builds the final episode filename. Must stay byte-identical in behaviour to the copy in
+# rip-disc.ps1, or resuming a rip would name episodes differently from the original run.
+# Jellyfin's documented pattern is "Series - S01E04 - Episode Name"; with no name the
+# existing "<title>-E04.ext" shape is kept unchanged.
+function Get-EpisodeFileName {
+    param(
+        [string]$Title,
+        [string]$EpisodeTag,
+        [string]$EpisodeName,
+        [string]$Extension
+    )
+
+    if ($EpisodeName) {
+        # Strip characters Windows will not accept in a filename.
+        $safeName = ($EpisodeName -replace '[\\/:*?"<>|]', '').Trim()
+        if ($safeName) { return "$Title - $EpisodeTag - $safeName$Extension" }
+    }
+    return "$Title-$EpisodeTag$Extension"
+}
+
 function Get-UniqueFilePath {
     param([string]$DestDir, [string]$FileName)
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
@@ -1244,7 +1270,11 @@ if ($StartFromStepNumber -le 3) {
             Write-Host "Starting at episode $nextEpisode (explicit -StartEpisode)" -ForegroundColor Gray
             Write-Log "Genre series: starting at episode $nextEpisode (explicit -StartEpisode)"
         } else {
-            $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "-E(\d+)\." }
+            # Episode names put " - " around the tag ("Title - E04 - Name.mp4"), so the
+            # unseasoned pattern has to accept a dash OR a space before the E and a space,
+            # a dot or end-of-name after the digits - anchoring on "-E##." would silently
+            # miss every named episode and restart numbering at 1.
+            $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "(?:^|[-\s])E(\d+)(?=\s|\.|$)" }
             $existingEpisodeNumbers = @()
             if (Test-Path $genreSeriesTargetDir) {
                 $existingEpisodeNumbers = Get-ChildItem -Path $genreSeriesTargetDir -File -Filter "*.mp4" |
@@ -1265,9 +1295,17 @@ if ($StartFromStepNumber -le 3) {
             New-Item -ItemType Directory -Path $genreSeriesTargetDir -Force | Out-Null
         }
 
+        if ($EpisodeNames -and $EpisodeNames.Count -gt 0 -and $EpisodeNames.Count -lt $episodeFiles.Count) {
+            Write-Host "  $($EpisodeNames.Count) name(s) supplied for $($episodeFiles.Count) episode(s) - the rest are numbered only." -ForegroundColor DarkYellow
+            Write-Log "Genre series: $($EpisodeNames.Count) episode name(s) for $($episodeFiles.Count) file(s)"
+        }
+
+        $episodeNameIndex = 0
         foreach ($file in $episodeFiles) {
             $episodeTag = if ($seasonTag) { "$seasonTag`E{0:D2}" -f $nextEpisode } else { "E{0:D2}" -f $nextEpisode }
-            $candidateName = "$title-$episodeTag$($file.Extension)"
+            $thisEpisodeName = if ($episodeNameIndex -lt $EpisodeNames.Count) { "$($EpisodeNames[$episodeNameIndex])".Trim() } else { "" }
+            $episodeNameIndex++
+            $candidateName = Get-EpisodeFileName -Title $title -EpisodeTag $episodeTag -EpisodeName $thisEpisodeName -Extension $file.Extension
             $uniquePath = Get-UniqueFilePath -DestDir $genreSeriesTargetDir -FileName $candidateName
             $finalName = [System.IO.Path]::GetFileName($uniquePath)
             Write-Host "  $($file.Name) -> $finalName" -ForegroundColor Gray
