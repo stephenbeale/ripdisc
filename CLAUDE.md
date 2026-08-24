@@ -1283,7 +1283,8 @@ Note the original premise of this feature — "every disc reports the same label
 Earlier entries in this file claim "8/8" and "12/12 logic unit tests pass" with no committed tests — those were scratch tests, run and discarded. `tests/` is the first re-runnable suite in this repo; prefer adding to it over ad-hoc verification.
 
 **Work In Progress:**
-- PR #116 open as a **draft** on branch `feature/multi-disc-documentary-series`. Implementation complete and unit-tested; deliberately left in draft until it has been run against a real disc
+- None. PR #116 was taken out of draft and **merged** as squash commit `537b6b7`, at the user's explicit instruction, **without real-disc validation** — see the disclosure comment on the PR. PR #117 (session-log reminder) merged first as `1ef0a44`; the two collided only on `CHANGELOG.md` ordering and both sets of entries were kept.
+- The caveat that kept #116 in draft still stands, it is simply now on `main`: MakeMKV, HandBrake, real drive enumeration and `Get-DiscVolumeLabel` against actual hardware are all unexercised. The 25/25 tests cover extracted logic against fixtures, not an end-to-end rip.
 
 **Outstanding Work for Future Sessions:**
 - Real-world validation: rip an actual disc from the Martin Scorsese Presents the Blues boxset with `-Documentary -Series -Disc 1`, confirm the output layout matches the README example, then rip a second disc in a later session and confirm auto-numbering continues correctly
