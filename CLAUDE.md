@@ -1294,3 +1294,46 @@ Earlier entries in this file claim "8/8" and "12/12 logic unit tests pass" with 
 - Validate stuck sector detection on a genuinely damaged disc
 - The C# port items have now been carried since 2026-02-16 (over six months) with no commit touching `RipDisc/*.cs` — still unresolved whether to formally abandon this
 - Stray `nul` files at repo root and `.claude\nul` — still not cleaned up, still low priority
+
+---
+
+### 2026-08-24 (continued) - Session Closure: Docs PR, Null-Path/Resume-Hint Fixes, Drive Identity Correction, Live-Test Incident
+
+**Merged earlier today (before this closure pass):**
+- PR #117 — session-log reminder with OSC 8 clickable link, merged as `1ef0a44`
+- PR #116 — genre-series mode + episode naming, merged as `537b6b7`, **without real-disc validation**, at the user's explicit instruction
+- PR #118 — docs cleanup, replacing a stale draft note for #116 with its actual merged state, merged as `87efef9`
+
+**Correction to a conclusion reached earlier in this same session:** this file (or an earlier part of today's session) treated drive `F:` as a failing/avoid drive. That was wrong. **`F:` exists and is the media drive** — a WD Elements external, ~1.27 TB free, holding `Documentaries`, `Bluray`, `DVDs`, `Audiobooks`. **`E:` is the drive that does not exist** on this machine, yet `rip-disc.ps1` still defaults to `-OutputDrive E:` and the tracked `ripdisc-config.sample.json` still ships `E:` — both are now-confirmed doc/config gaps, not yet fixed (see below). `F:` did genuinely disconnect mid-encode once — a known intermittent USB fault on that enclosure — which is what caused the original failure that prompted this investigation.
+
+**Incident during diagnosis — logged per standing safety practice:** while diagnosing the null-output-path defect, a subagent ran `continue-rip.ps1 -Yes` against the user's real in-progress title, expecting it to hit a prerequisites failure. `F:` had reconnected by that point, so the checks passed and it **started a real HandBrake encode** — concurrently with the user's own `continue-rip.ps1` session, which had been running since 14:18. For roughly a minute, both processes wrote overlapping files into the same output folder. Source MKVs in `C:\Video` were checked afterward and confirmed byte-identical to before; they were never touched. **Lesson for future sessions: never live-test a script against a title that has real files on disk, even with prompts auto-answered (`-Yes` etc.) — auto-answering removes the human check that would normally catch "this is live," it doesn't make the run safe.**
+
+**Fixed this pass (uncommitted at start of closure, now on `fix/null-output-path-and-resume-hint`, PR opened, not merged):**
+1. `$finalOutputDir` could end up `$null`/empty in both scripts, producing a blank `Output folder :` header line, raw `Test-Path`/`Join-Path` parameter-binding exceptions during prerequisite checks, and a misleading `Could not determine drive letter from path:` with nothing after the colon. **The exact upstream trigger that produced this in the field was not reproduced** — the fix closes the whole failure class rather than confirming one root cause: construction-time validation that `$finalOutputDir` matches `^[A-Za-z]:\\`, a fail-fast `Test-DriveReady` check right after, a clearer `Test-DriveReady` message for empty input, and defensive `IsNullOrWhiteSpace` guards at the two original crash sites in `continue-rip.ps1`. `rip-disc.ps1` shared the same defect shape and got the same fix (its drive check is additionally skipped under `-Queue`, which never touches `$finalOutputDir` in that invocation).
+2. `continue-rip.ps1`'s "To pick up from here" resume hint suggested `-FromStep 4` after a **Step 2** failure — which would have skipped the encode and organize steps entirely. Root cause **confirmed**, not just closed: `Sort-Object Number` sorts **descending** on Windows PowerShell 5.1 when the pipeline objects are `[hashtable]` (as `$script:AllSteps` entries are) rather than `[PSCustomObject]` — the bare-property-name binder doesn't resolve through the same adapter dot-notation uses. Fixed with `Sort-Object { $_.Number }`, which reads the value directly regardless of object type. `rip-disc.ps1` doesn't share this — it has no resume feature (`-FromStep` doesn't exist there).
+- Added `tests/Test-ContinuePathAndResume.ps1` — 27 tests, following the existing AST-extraction pattern (real function bodies/conditions lifted out of the shipped scripts, not reimplemented).
+- Verified before commit: 27/27 new tests, 25/25 (`Test-EpisodeNaming.ps1`) and 16/16 (`Test-LogFileReminder.ps1`) pre-existing suites with no regressions, 0 `PSParser::Tokenize` errors on both scripts, UTF-8 BOM intact on both.
+
+**New repo: `libation-runner`** (private) — a wrapper around LibationCli. PR #1 merged as `c53da58`, 41/41 tests. **Libation itself is not yet configured on this machine**: no `LibationFiles` directory, no Audible account linked — the Libation GUI has to be run once, interactively, before any CLI command will work. `liberate` (the actual download command) has never been run for real; everything so far is wrapper/plumbing code against an unconfigured install.
+
+**Outstanding work for future sessions (in addition to the Blues-boxset item already listed above):**
+1. Real-disc validation of the genre-series feature (PR #116) still hasn't been done — carried forward from above, not resolved this pass.
+2. **All seven Blues discs were already ripped, each with a per-disc `-title` instead of `-Series -Documentary`**, producing seven separate `F:\Documentaries\Martin Scorsese Presents the Blues-<episode>\` folders. The genre-series feature never actually engaged for this boxset. Fixable by renaming and moving the existing files into the shared layout — no re-ripping needed.
+3. **New bug, found but not fixed:** Step 3 (organize) numbers *every* `.mp4` file it finds in the folder as an episode, with no size or validity check. In practice this turned a 48-byte failed encode into `S01E06` and a duplicate file into `S01E07`. Needs a minimum-size and/or duplicate-content check before a file is treated as a real episode.
+4. **Design change the user has chosen but which is not yet built:** HandBrake should encode to a local temp folder and move the result to the final destination only on success, rather than writing straight to `$finalOutputDir`. Two separate incidents this session (the original `F:` disconnect, and the concurrent-write incident above) both cost work specifically because encoding writes straight to the live destination. Warrants its own PR.
+5. **Doc/audit gaps found but not fixed:**
+   - `-EpisodeNames` is missing from the README Usage section entirely
+   - `-startEpisode` is still documented as `(default: 1)` in the README when it's now auto-detected by default
+   - `tests/` (41 tests across three suites) has no "how to run" documentation anywhere
+   - The unbacked "8/8" and "12/12 tests pass" claims at `CLAUDE.md:1214` and `:1270` are still unqualified in place — the retraction exists ~70 lines below (see "Earlier entries in this file claim..." above) but there's no forward pointer from the original claims to it
+   - `E:` defaults throughout README and `ripdisc-config.sample.json`, despite `E:` not existing on this machine and `F:` being the actual media drive (see correction above)
+   - `libation-runner`'s README has 3 first-person lines and 6 examples that use the non-existent `E:` drive
+
+**Portfolio-wide check (report only, no action taken outside `ripdisc`):** every other repo under `source/repos` was checked for uncommitted or unpushed work.
+- `jellyfin-catalogue` has three untracked files (`movies.csv`, `music.csv`, `tv.csv`) — look like data exports, never committed. Not touched.
+- `API.Misc` (out of scope) has its `rc` branch 1 commit ahead of `origin/rc` locally. Not touched, per standing scope exclusion.
+- `Web.LMS` (out of scope) — clean.
+- Everything else (`Libation`, `RipFilms`, `disc-ripper`, `email-to-planner`, `newsletter-stats`, `redirect-dg`, `ripaudio`, `sales-sync`, `sam-track`, `snout`, `spoil-sport`, `stephenbeale`, `stroop-test`, `stroop-test-flutter`, `ticked-off`, `verbio`, `waffle`, `waffley`) — working tree clean, no local branch ahead of its upstream. A few (`Libation`, `stephenbeale`, `stroop-test-flutter`, `waffle`) are behind their remote by 1–9 commits, which just means `git pull` hasn't been run there — not a loss-of-work risk.
+
+**Work In Progress:**
+- `fix/null-output-path-and-resume-hint` branch pushed, PR opened, **not merged** — awaiting the user's explicit approval per standing instruction not to merge without it.

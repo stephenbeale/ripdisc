@@ -400,6 +400,8 @@ Logs include:
 
 ## Error Handling
 
+Before anything else runs, both scripts validate the output path and check the destination drive is actually connected (via `Test-DriveReady`) — a missing or disconnected `-OutputDrive` stops the script immediately with a clear message, rather than failing later mid-encode or offering to continue with a broken path.
+
 If an error occurs:
 - Window title shows `-ERROR` suffix
 - Completed steps are displayed in green

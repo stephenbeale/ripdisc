@@ -195,7 +195,12 @@ function Show-StepsSummary {
             foreach ($step in $remaining) {
                 Write-Host ("  [ ] Step {0}/4  {1,-20}  {2}" -f $step.Number, $step.Name, $step.Description) -ForegroundColor Yellow
             }
-            $resumable = @($remaining | Where-Object { $_.Resumable } | Sort-Object Number)
+            # Sort-Object with a bare property name silently sorts DESCENDING on PS 5.1
+            # when the pipeline objects are [hashtable] (as $script:AllSteps entries
+            # are) rather than [PSCustomObject] - it doesn't resolve the "property" via
+            # the same adapter that dot-notation member access uses. A script block
+            # comparator reads the value directly and sorts correctly either way.
+            $resumable = @($remaining | Where-Object { $_.Resumable } | Sort-Object { $_.Number })
             if ($resumable.Count -gt 0) {
                 $next = $resumable[0]
                 Write-Host ("`n  To pick up from here: .\continue-rip.ps1 -title `"{0}`" -FromStep {1}" -f $title, $next.Number) -ForegroundColor Cyan
@@ -538,6 +543,10 @@ function Get-UniqueFilePath {
 function Test-DriveReady {
     param([string]$Path)
 
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return @{ Ready = $false; Drive = "Unknown"; Message = "Cannot check drive readiness: output path is empty" }
+    }
+
     $driveLetter = [System.IO.Path]::GetPathRoot($Path)
     if (-not $driveLetter) {
         return @{ Ready = $false; Drive = "Unknown"; Message = "Could not determine drive letter from path: $Path" }
@@ -663,6 +672,30 @@ if ($script:IsGenreSeries) {
 # Extras: encode directly into extras subdirectory of the title folder
 if ($Extras -and -not $Series) {
     $finalOutputDir = Join-Path $finalOutputDir "extras"
+}
+
+# Fail fast if the path didn't come out usable. A malformed or empty -OutputDrive can
+# make one of the Join-Path calls above emit a non-terminating error and silently
+# leave $finalOutputDir null/empty (e.g. a provider-qualified-looking path such as
+# "F::\..." makes Join-Path fail with "Cannot find a provider with the name 'F'" and
+# return nothing, while the script carries on regardless). Left unchecked, every
+# downstream Test-Path/Join-Path call on it throws a raw parameter-binding exception
+# instead of a clear message, and the script still offers to continue. Catch it here,
+# at construction time, instead of at each call site.
+if ([string]::IsNullOrWhiteSpace($finalOutputDir) -or $finalOutputDir -notmatch '^[A-Za-z]:\\') {
+    Write-Host "`nERROR: Could not build a valid output path from -OutputDrive '$OutputDrive'." -ForegroundColor Red
+    Write-Host "  Resolved to: '$finalOutputDir'" -ForegroundColor Red
+    Write-Host "  Expected something like 'E:\...' - check the -OutputDrive value." -ForegroundColor Yellow
+    exit 1
+}
+
+# Fail fast if the destination drive itself isn't there. HandBrake encodes straight to
+# this drive, so continuing here just means finding out the hard way, part-way through
+# (or at the very end of) an encode that can run for many minutes.
+$outputDriveCheck = Test-DriveReady -Path $finalOutputDir
+if (-not $outputDriveCheck.Ready) {
+    Write-Host "`nERROR: $($outputDriveCheck.Message)" -ForegroundColor Red
+    exit 1
 }
 
 $handbrakePath = $script:Config_HandBrakePath
@@ -828,7 +861,11 @@ function Test-StepPrerequisites {
     if ($StepNumber -eq 2) {
         # Need MKV files in makemkvOutputDir
         $hints = @()
-        if ((Test-Path $finalOutputDir) -and @(Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue).Count -gt 0) {
+        # $finalOutputDir is validated non-empty and well-formed at construction time
+        # (see the check right after it's built), but Test-Path/Join-Path throw a raw
+        # parameter-binding exception on $null/empty rather than a clear message, so
+        # guard here too as a second line of defense.
+        if ((-not [string]::IsNullOrWhiteSpace($finalOutputDir)) -and (Test-Path $finalOutputDir) -and @(Get-ChildItem -Path $finalOutputDir -Filter "*.mp4" -ErrorAction SilentlyContinue).Count -gt 0) {
             $hints += "There ARE encoded MP4 files in $finalOutputDir - did you mean step 3 (organize)?"
         }
         if (!(Test-Path $makemkvOutputDir)) {
@@ -843,7 +880,7 @@ function Test-StepPrerequisites {
             Write-Host "  - $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)" -ForegroundColor Gray
         }
         # Say up front which files will be encoded and which are already done.
-        $alreadyEncoded = @($mkvFiles | Where-Object { Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4")) })
+        $alreadyEncoded = @($mkvFiles | Where-Object { (-not [string]::IsNullOrWhiteSpace($finalOutputDir)) -and (Test-Path (Join-Path $finalOutputDir ($_.BaseName + ".mp4"))) })
         if ($alreadyEncoded.Count -gt 0) {
             if ($Force) {
                 Write-Host "`n-Force given: all $($mkvFiles.Count) file(s) will be encoded, including" -ForegroundColor Yellow
