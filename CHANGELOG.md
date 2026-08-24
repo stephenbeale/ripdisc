@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-24
+
+### Added
+- Documentary / genre series mode in `rip-disc.ps1` and `continue-rip.ps1` — for multi-disc box sets that belong in a genre folder rather than `Series\`
+  - Combine `-Series` with any genre flag (`-Documentary`, `-Tutorial`, `-Fitness`, `-Music`, `-Surf`) to activate it; plain `-Series` and plain genre flags are unaffected
+  - Reuses `-Series`' existing per-disc isolation and composite mega-file detection rather than adding a parallel system
+  - Every MKV on the disc is treated as an episode of equal standing (no Feature/extras split) and renamed `<title>-E##.mp4` (or `<title>-S##E##.mp4` with `-Season`)
+  - Episodes are moved out of the per-disc `Disc$Disc` subfolder into a single shared title folder, and the emptied `Disc$Disc` folder is removed — unlike plain `-Series` mode, which leaves episodes nested in `Disc$Disc` permanently
+  - Episode numbering carries across sessions automatically: `-StartEpisode` is now optional and, when omitted, is auto-detected from the highest existing episode file already in the destination folder
+  - `-StartEpisode` still works as an explicit override
+
+### Fixed
+- `(... | Measure-Object -Maximum).Maximum` returns a `Double` in Windows PowerShell 5.1 even for all-integer input, which throws `FormatException` against the `"D2"` format specifier used to build episode numbers — caught by the new logic unit tests before it could hit a real rip; fixed with an explicit `[int]` cast in both scripts
+
 ## 2026-08-17
 
 ### Added

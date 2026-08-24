@@ -1237,3 +1237,46 @@ Design points:
 - Validate stuck sector detection on a genuinely damaged disc
 - The C# port items have now been carried since 2026-02-16 (over six months, 20+ sessions) with no commit touching `RipDisc/*.cs` in that entire span. The 2026-08-10 notes already suggested formally abandoning this rather than re-listing it every session; that suggestion is repeated here and should probably be acted on — either close it out explicitly as "PowerShell is the maintained implementation" or open a single tracking issue and stop carrying the bullet list in session notes
 - **Cleanup candidate, not a git concern:** a stray `nul` file sits at the repo root and another at `.claude\nul` — both are the Windows reserved-device-name artifact (likely from an old `> nul` redirect that PowerShell wrote literally instead of discarding). Both are untracked and already covered by `.gitignore`, so they don't affect repo cleanliness from git's perspective, but they're real files on disk. First noted in the 2026-08-11 incident notes above (the alphabetical prefix-rename stopped at `nul`); not created this session. Low priority — reserved device names can't be addressed with an ordinary path; remove with the `\\?\` extended-path prefix, e.g. `Remove-Item '\\?\C:\Users\sjbeale\source\repos\ripdisc\nul'` and the equivalent for `.claude\nul`, whenever convenient
+
+---
+
+### 2026-08-24 - Documentary / Genre Series Mode for Multi-Disc Box Sets
+
+**Problem:**
+User has a physical boxset in hand: *Martin Scorsese Presents the Blues* — 5 discs, 7 feature-length episodes by different directors, one-or-two per disc. All 5 discs report the same or a near-identical disc label, so there's no way to distinguish them automatically — and `-Documentary` alone routes every disc to the same flat `Documentaries\<title>\` folder with Feature/extras logic that assumes a single film per disc. The largest-file-on-the-disc becomes "the Feature" and everything else gets shoved into `extras\` — wrong for a disc holding two films of near-equal length.
+
+**Design:**
+`-Series` already has everything a multi-disc box set needs — per-disc temp/output isolation (`Disc$Disc` subfolders, added in PR #24), composite mega-file detection (PR #31/#54), and a `-StartEpisode` parameter that existed but was never wired to anything. Rather than build a parallel system, combining `-Series` with a genre flag (`-Documentary`, `-Tutorial`, `-Fitness`, `-Music`, `-Surf`) now activates "genre series" mode, computed once as `$script:IsGenreSeries` right after config load and threaded through every place that already branches on `$Documentary`/`$Series` (title summary, window title, temp dir, final output dir, Ready-to-rip display, logging, Step 3 organize). Plain `-Series` (fiction TV, no genre flag) and plain `-Documentary` (single film) are both completely untouched — the new branch only fires when both are set.
+
+**Disc-number ambiguity:** unchanged — the user already supplies `-Disc N` manually for every multi-disc rip (genre flags were never auto-detected from disc label in the first place; see the Auto-Discovery matrix above), so identical disc labels were never actually a blocker. Nothing new was needed here.
+
+**Episode identity (the actual new logic) — Step 3 in both scripts:**
+Every MKV on a genre-series disc is treated as an episode of equal standing (no Feature/extras split, matching how plain `-Series` already treats episodes). Files are renamed `<title>-E##.mp4` (or `<title>-S##E##.mp4` if `-Season` is given) and **moved up** out of the per-disc `Disc$Disc` subfolder into the shared title/season folder — unlike plain `-Series` mode, which deliberately leaves episodes nested in `Disc$Disc` forever (see the 2026-02-16 notes above; that's existing, intentional, unchanged behaviour for fiction TV). The now-empty `Disc$Disc` folder is removed (`cd` to the parent first, same fix as PR #53, or `Remove-Item` fails "in use").
+
+**Resuming across sessions:** `-StartEpisode` still works as an explicit override, but is no longer required. When omitted, the script scans the shared target folder for the highest existing `-E##`/`S##E##` file and continues from `max + 1` — rip disc 1 today, disc 4 next week, no need to remember or compute where numbering left off. `Get-UniqueFilePath` (already used for extras-collision handling) is reused as a safety net in case auto-detection and reality disagree.
+
+**Bug caught by the added unit tests, fixed before it could hit a real rip:** `(existingEpisodeNumbers | Measure-Object -Maximum).Maximum` returns a `Double` in Windows PowerShell 5.1 even when every input is an `Int32`. The episode tag was built with `"E{0:D2}" -f $nextEpisode`, and `.NET`'s `"D2"` format specifier only accepts integral types — a `Double` throws `FormatException` at runtime ("Format specifier was invalid"). This would have failed on exactly the disc-2-auto-detect case the whole feature exists for. Fixed with an explicit `[int](...)` cast around the `Measure-Object` result in both scripts.
+
+**Files changed:**
+- `rip-disc.ps1` — `$script:IsGenreSeries`/`$script:GenreLabel`/`$script:GenreFolder` computed after config load; genre-series branches added to `Get-TitleSummary`, the Ready-to-rip Type display, the final-output-dir routing, the `Write-Log "Type:"` line, `$contentType`, and a new Step 3 organize branch (episode numbering + move-up + Disc$Disc cleanup)
+- `continue-rip.ps1` — identical changes, so resuming a genre-series rip at Step 3 organizes files the same way the original `rip-disc.ps1` run would have
+- `README.md` — new "Documentary / genre series" usage section with examples, new directory-structure example, Feature Parity table row (PowerShell only, same as the other genre flags)
+
+**Files deliberately NOT changed:**
+- `RipDisc/*.cs` (C# implementation) — `-Documentary` and friends were never ported (see Feature Parity table); genre series inherits the same gap
+- The `-Queue`/`-processQueue` entry hashtable in `rip-disc.ps1` (~line 1510) does not carry genre flags through at all — a **pre-existing** gap that affects every genre flag, not just this feature. Not fixed here (out of scope, and the boxset workflow described is sequential across sessions, not queued/concurrent) — worth a follow-up if genre flags + `-Queue` is ever actually used together.
+- No extras-disc concept for genre series (matches plain `-Series`, which also has none) — if a documentary disc ships genuine bonus featurettes alongside episodes, they'll currently be numbered as episodes too. Left for the user's judgement (rip bonus content as a separate movie-mode disc, or move files manually afterward) rather than guessed at.
+
+**Testing status:** `PSParser::Tokenize` reports 0 errors on both scripts; UTF-8 BOM confirmed intact on both. 12/12 logic unit tests pass against fixture files (not a real disc) covering: sequential numbering within a disc, auto-detected continuation across simulated sessions, variable episode-count-per-disc, explicit `-StartEpisode` override, filename-collision fallback, and the season-tag (`S01E0x`) variant — this is what caught the `Double`/`D2` bug above. **Not exercised against a real MakeMKV/HandBrake rip** — no disc was ripped this session.
+
+**Work In Progress:**
+- None — implementation complete, not yet committed/PR'd (see branch `feature/multi-disc-documentary-series`)
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: rip an actual disc from the Martin Scorsese Presents the Blues boxset with `-Documentary -Series -Disc 1`, confirm the output layout matches the README example, then rip a second disc in a later session and confirm auto-numbering continues correctly
+- Consider whether the `-Queue` genre-flag gap (noted above) is worth fixing generally
+- Verify the CSS fix (PR #105) on a real rip — still parse-checked only, never runtime-tested
+- Investigate why H: (`GP75N 1.01 K0MMB391933`) cannot authenticate — check region code and RPC setting
+- Validate stuck sector detection on a genuinely damaged disc
+- The C# port items have now been carried since 2026-02-16 (over six months) with no commit touching `RipDisc/*.cs` — still unresolved whether to formally abandon this
+- Stray `nul` files at repo root and `.claude\nul` — still not cleaned up, still low priority

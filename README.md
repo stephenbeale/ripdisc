@@ -151,6 +151,29 @@ Both versions use the same command-line parameters:
 -startEpisode <int>     Starting episode number for series (default: 1)
 ```
 
+### Documentary / genre series (multi-disc box sets)
+
+Combine `-series` with a genre flag (`-documentary`, `-tutorial`, `-fitness`, `-music`, `-surf`) for a
+multi-disc box set that still belongs under the genre folder rather than `Series\` - for example, a
+7-episode documentary spread across 5 discs, where every disc reports the same or a near-identical
+disc label so there's no way to tell discs apart automatically. You supply `-disc N` yourself each
+time (the same as any other multi-disc rip); the script numbers episodes sequentially and moves them
+into a single flat folder, no matter how many episodes end up on each individual disc.
+
+Episode numbering carries across sessions automatically: `-startEpisode` is optional. If you omit it,
+the script scans the destination folder for the highest existing `-E##` (or `S##E##`) file and
+continues from there - rip disc 1 today, disc 4 next week, and the numbering picks up correctly
+without you having to remember or compute where it left off. Pass `-startEpisode` explicitly only if
+you need to override that (e.g. re-ripping a disc out of order).
+
+```powershell
+# Disc 1 of a 5-disc documentary box set - lands as episodes 1-2
+.\rip-disc.ps1 -title "Martin Scorsese Presents the Blues" -documentary -series -disc 1
+
+# Disc 2, ripped in a later session - continues automatically at episode 3
+.\rip-disc.ps1 -title "Martin Scorsese Presents the Blues" -documentary -series -disc 2
+```
+
 ### Examples
 
 **Rip a disc with auto-discovery (no title needed):**
@@ -244,6 +267,23 @@ E:\Documentaries\DocName\
 └── extras\
     └── DocName-bonus.mp4
 ```
+
+### Documentary / genre series (multi-disc box set, `-documentary -series`)
+
+```
+E:\Documentaries\Martin Scorsese Presents the Blues\
+├── Martin Scorsese Presents the Blues-E01.mp4    (Disc 1)
+├── Martin Scorsese Presents the Blues-E02.mp4    (Disc 1)
+├── Martin Scorsese Presents the Blues-E03.mp4    (Disc 2)
+├── Martin Scorsese Presents the Blues-E04.mp4    (Disc 3)
+└── ...
+```
+
+No per-disc subfolders survive - each disc's episodes are numbered and moved into the shared title
+folder, and the empty per-disc folder is removed. This is the same layout `-tutorial -series`,
+`-fitness -series`, `-music -series` and `-surf -series` produce, just rooted at their own genre
+folder (`Tutorials\`, `Fitness\`, `Music\`, `Surf\`). Add `-season N` if the box set genuinely has
+seasons, and files use `SeriesName-S01E01.mp4` instead.
 
 ### Tutorials
 
@@ -346,6 +386,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
 | `-Tutorial` / `-Fitness` / `-Music` / `-Surf` flags | Yes | No |
+| Genre series (`-Documentary`/etc. combined with `-Series`) | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
 | Jellyfin episode naming (`S01E01`) | Yes | No |

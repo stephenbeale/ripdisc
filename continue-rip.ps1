@@ -72,6 +72,14 @@
 # Apply config defaults to parameters that weren't explicitly passed
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
 
+# ========== GENRE SERIES (e.g. multi-disc documentary box sets) ==========
+# See rip-disc.ps1 for the full explanation. Mirrored here so continuing a genre
+# series rip (e.g. resuming Step 3 after an interrupted encode) organizes files
+# the same way the original rip-disc.ps1 run would have.
+$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
+
 # ========== STEP DEFINITIONS ==========
 $script:AllSteps = @(
     @{ Number = 1; Key = "makemkv";   Name = "MakeMKV rip";        Description = "Rip the disc to MKV files";             Needs = "a disc in the drive"; Resumable = $false }
@@ -146,7 +154,7 @@ function Show-StepBanner {
 
 
 function Get-TitleSummary {
-    $contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+    $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -551,7 +559,18 @@ if ($Extras) {
 $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
 
 # Build final output directory path
-if ($Documentary) {
+if ($script:IsGenreSeries) {
+    $genreSeriesBaseDir = "$outputDriveLetter\$($script:GenreFolder)\$title"
+    if ($Season -gt 0) {
+        $seasonTag = "S{0:D2}" -f $Season
+        $seasonFolder = "Season $Season"
+        $genreSeriesSeasonDir = Join-Path $genreSeriesBaseDir $seasonFolder
+    } else {
+        $seasonTag = $null
+        $genreSeriesSeasonDir = $genreSeriesBaseDir
+    }
+    $finalOutputDir = Join-Path $genreSeriesSeasonDir "Disc$Disc"
+} elseif ($Documentary) {
     $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
 } elseif ($Tutorial) {
     $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
@@ -596,7 +615,7 @@ $script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_continue_${logTime
 Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Continue from: Step $StartFromStepNumber ($FromStep)"
-Write-Log "Type: $(if ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
+Write-Log "Type: $(if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -662,7 +681,7 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+$contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
 $isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
 $extrasDir = Join-Path $finalOutputDir "extras"
 
@@ -1209,7 +1228,86 @@ if ($StartFromStepNumber -le 3) {
         Write-Host "No image files found" -ForegroundColor Gray
     }
 
-    if ($Series) {
+    if ($script:IsGenreSeries) {
+        # ========== GENRE SERIES MODE: multi-disc box set (e.g. documentary series) ==========
+        # Every MKV on the disc is a distinct episode of equal standing - there is no
+        # Feature/extras split. Episodes are numbered sequentially and moved up out of
+        # the per-disc subdirectory into the shared title (or Season) folder. See
+        # rip-disc.ps1 for the full explanation - this mirrors it for resumed rips.
+        Write-Host "`nNumbering $($script:GenreLabel.ToLower()) series episodes..." -ForegroundColor Yellow
+        $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
+
+        $genreSeriesTargetDir = Split-Path $finalOutputDir -Parent
+
+        if ($PSBoundParameters.ContainsKey('StartEpisode')) {
+            $nextEpisode = $StartEpisode
+            Write-Host "Starting at episode $nextEpisode (explicit -StartEpisode)" -ForegroundColor Gray
+            Write-Log "Genre series: starting at episode $nextEpisode (explicit -StartEpisode)"
+        } else {
+            $episodeNumberPattern = if ($seasonTag) { "$seasonTag`E(\d+)" } else { "-E(\d+)\." }
+            $existingEpisodeNumbers = @()
+            if (Test-Path $genreSeriesTargetDir) {
+                $existingEpisodeNumbers = Get-ChildItem -Path $genreSeriesTargetDir -File -Filter "*.mp4" |
+                    Where-Object { $_.Name -match $episodeNumberPattern } |
+                    ForEach-Object { [int]$Matches[1] }
+            }
+            # Measure-Object -Maximum returns a Double in Windows PowerShell 5.1 even for int
+            # input - cast back to int, or the "D2" format specifier below throws at runtime.
+            $nextEpisode = if ($existingEpisodeNumbers) { [int](($existingEpisodeNumbers | Measure-Object -Maximum).Maximum) + 1 } else { 1 }
+            Write-Host "Starting at episode $nextEpisode (detected from existing files in $genreSeriesTargetDir)" -ForegroundColor Gray
+            Write-Log "Genre series: starting at episode $nextEpisode (auto-detected from $genreSeriesTargetDir)"
+        }
+        $firstEpisodeThisDisc = $nextEpisode
+
+        $episodeFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|mkv)$' } | Sort-Object Name
+
+        if (!(Test-Path $genreSeriesTargetDir)) {
+            New-Item -ItemType Directory -Path $genreSeriesTargetDir -Force | Out-Null
+        }
+
+        foreach ($file in $episodeFiles) {
+            $episodeTag = if ($seasonTag) { "$seasonTag`E{0:D2}" -f $nextEpisode } else { "E{0:D2}" -f $nextEpisode }
+            $candidateName = "$title-$episodeTag$($file.Extension)"
+            $uniquePath = Get-UniqueFilePath -DestDir $genreSeriesTargetDir -FileName $candidateName
+            $finalName = [System.IO.Path]::GetFileName($uniquePath)
+            Write-Host "  $($file.Name) -> $finalName" -ForegroundColor Gray
+
+            $maxRetries = 5
+            $retryDelay = 3
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    Move-Item -LiteralPath $file.FullName -Destination $uniquePath -ErrorAction Stop
+                    break
+                } catch [System.IO.IOException] {
+                    if ($attempt -eq $maxRetries) {
+                        Write-Host "  FAILED to move $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
+                        Write-Log "ERROR: Failed to move $($file.Name) after $maxRetries attempts: $_"
+                        throw
+                    }
+                    Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $retryDelay
+                }
+            }
+            $nextEpisode++
+        }
+        Write-Host "Numbered episodes $firstEpisodeThisDisc-$($nextEpisode - 1), moved to $genreSeriesTargetDir" -ForegroundColor Green
+        Write-Log "Numbered $($episodeFiles.Count) episode(s) ($firstEpisodeThisDisc-$($nextEpisode - 1)), moved to $genreSeriesTargetDir"
+
+        # Clean up the now-empty per-disc subdirectory. cd to the parent first - Remove-Item
+        # on the working directory itself fails with "in use" (same fix as PR #53).
+        Set-Location -LiteralPath $genreSeriesTargetDir
+        $remainingInDiscDir = Get-ChildItem -Path $finalOutputDir -Force -ErrorAction SilentlyContinue
+        if (-not $remainingInDiscDir) {
+            Remove-Item -Path $finalOutputDir -Force
+            Write-Host "Removed empty disc directory: $finalOutputDir" -ForegroundColor Yellow
+            Write-Log "Removed empty disc directory: $finalOutputDir"
+        } else {
+            Write-Host "WARNING: Disc directory not empty after move, leaving in place: $finalOutputDir" -ForegroundColor Red
+            Write-Log "WARNING: Disc directory not empty after episode move: $finalOutputDir"
+        }
+        $finalOutputDir = $genreSeriesTargetDir
+        $script:LastWorkingDirectory = $finalOutputDir
+    } elseif ($Series) {
         # ========== SERIES MODE: Prefix files with title + season-disc tag ==========
         # Keeps original MakeMKV filenames (t00, t01...) for episode ordering
         Write-Host "`nPrefixing series files..." -ForegroundColor Yellow
