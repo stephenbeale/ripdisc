@@ -34,7 +34,8 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Interactive prompts** for confirmation and conflict resolution
 - **Window title management** for tracking concurrent operations
 - **Console close button protection** prevents accidental window closure
-- **Automatic disc ejection** after successful rip
+- **Automatic disc ejection** after successful rip, optional via `-NoEject`
+- **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
 
 ## Auto-Discovery
 
@@ -149,6 +150,10 @@ Both versions use the same command-line parameters:
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
 -startEpisode <int>     Starting episode number for series (default: 1)
+-noSound                Skip the completion fanfare (Console.Beep melody)
+-noEject                Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only —
+                        continue-rip.ps1 accepts it for command-line compatibility but
+                        ignores it, since it never runs the rip/eject step)
 ```
 
 ### Documentary / genre series (multi-disc box sets)
@@ -263,6 +268,11 @@ RipDisc -processQueue                                             # After all ri
 **Use specific drive index:**
 ```powershell
 .\rip-disc.ps1 -title "The Matrix" -driveIndex 1 -outputDrive F:
+```
+
+**Rip quietly overnight, leave the disc in the drive:**
+```powershell
+.\rip-disc.ps1 -title "The Matrix" -noSound -noEject
 ```
 
 ## Directory Structure
@@ -433,6 +443,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Empty parent directory cleanup | Yes | No |
 | Eject retry with timeout popup | Yes | No |
 | Completion fanfare | Yes | No |
+| `-NoSound` / `-NoEject` flags | Yes | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 

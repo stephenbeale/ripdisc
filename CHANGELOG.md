@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-25
+
+### Added
+- `-NoSound` parameter in `rip-disc.ps1` and `continue-rip.ps1` — skips the completion fanfare (`[Console]::Beep` melody) played at the end of a run (both the normal completion path and, in `rip-disc.ps1`, the `-Queue` completion path)
+- `-NoEject` parameter in `rip-disc.ps1` — skips ejecting the disc after the MakeMKV rip completes, leaving it in the drive
+  - `continue-rip.ps1` also accepts `-NoEject` for command-line compatibility (so a failed `rip-disc.ps1` command can be pasted there unchanged), but ignores it — it resumes after the rip step and never ejects, the same treatment already given to `-Drive`/`-DriveIndex`
+
+**Testing status:** Parse-checked only (`[System.Management.Automation.Language.Parser]::ParseFile` reports 0 errors on both scripts) and the UTF-8 BOM was verified intact after editing. Not runtime-tested against a real disc.
+
 ## 2026-08-24
 
 ### Added
