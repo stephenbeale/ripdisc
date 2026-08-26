@@ -442,7 +442,13 @@ function Get-DiscVolumeLabel {
     if ($letter.Length -ne 1) { return "" }
 
     try {
-        $vol = Get-CimInstance Win32_CDROMDrive -ErrorAction Stop |
+        # -OperationTimeoutSec bounds the WMI call itself. Without it, a drive in a bad or
+        # half-disconnected state (seen live: a USB DVD drive that had started dropping out
+        # mid-rip) can make WMI's device enumeration hang for minutes waiting on THAT drive,
+        # even when querying for a completely different, healthy one - this call touches every
+        # CD-ROM drive on the system, not just $DriveLetter. A few seconds is generous for a
+        # healthy system and turns a multi-minute hang into a quick, logged non-event.
+        $vol = Get-CimInstance Win32_CDROMDrive -ErrorAction Stop -OperationTimeoutSec 5 |
             Where-Object { $_.Drive -eq "${letter}:" } |
             Select-Object -First 1
         if ($vol -and $vol.MediaLoaded -and $vol.VolumeName) { return $vol.VolumeName }
@@ -691,7 +697,11 @@ if ($DriveIndex -ge 0) {
     if ($drvLines.Count -gt 0) {
         Write-Host "MakeMKV drives:" -ForegroundColor Gray
         foreach ($d in $drvLines) {
-            $marker = if ($d.Index -eq $matchedIndex) { " <--" } else { "" }
+            # Index alone isn't guaranteed unique: a drive that reconnects mid-session (seen
+            # live, on a flaky USB DVD drive) can show up under two DRV: lines with the SAME
+            # index - one keyed by drive letter, one by raw device path (e.g. \Device\CdRom3).
+            # Require the letter match too, or every same-index entry gets tagged "<--".
+            $marker = if ($d.Index -eq $matchedIndex -and $d.Letter -eq $driveLetter) { " <--" } else { "" }
             $busyTag = if ($d.Busy) { " (busy)" } else { "" }
             $discLabel = if ($d.DiscName) { " [$($d.DiscName)]" } else { "" }
             $color = if ($d.Busy) { "DarkYellow" } else { "Gray" }
@@ -700,7 +710,18 @@ if ($DriveIndex -ge 0) {
     }
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
-        $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex }
+        # Same non-unique-index reasoning as the marker above: match on Letter too, and take
+        # exactly one entry. Without this, $matchedDrv.Name below silently becomes a 2-element
+        # array when there's an index collision - PowerShell string interpolation then joins
+        # both values with a space, e.g. "Drive Name Drive Name" in the confirmation line, and
+        # the same corruption reaches $script:TargetDriveName / $script:TargetDiscLabel.
+        $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex -and $_.Letter -eq $driveLetter } | Select-Object -First 1
+        if (-not $matchedDrv) {
+            # Shouldn't normally happen (matchedIndex was set from a Letter match in the loop
+            # above), but fall back to the first same-index entry rather than leave $matchedDrv
+            # unset if it ever does.
+            $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex } | Select-Object -First 1
+        }
         # Remember MakeMKV's name for this drive so Step 1 can ignore read errors from other drives
         $script:TargetDriveName = $matchedDrv.Name
         # Remember the disc's volume label too - genre-series mode uses it to name episodes.
