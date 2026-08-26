@@ -1572,3 +1572,45 @@ New `tests/Test-DriveQueryTimeout.ps1`, 16/16 passing. Re-ran the full pre-exist
 3. Real-world validation still pending for several 2026-08-25/26 features that predate the hang incident and haven't been exercised by a real rip yet: `-NoSound`, `-NoEject`, the `continue-rip.ps1` retry-hint suggestion, the live disc-label fix, PR #119's output-path validation.
 4. Decide on the branch-naming convention question above (`feat/` vs `feature/`) and, if changing the doc, make the edit in `claude-conventions`.
 5. No action needed to "wrap up" further - this is the natural end of the session. Nothing is uncommitted, unpushed, or unmerged in either `ripdisc` or `claude-conventions`.
+
+---
+
+### 2026-08-26 (later) - Two Live Incidents: Rename Retry Window and Slash-in-Title Path Sanitization (PRs #130, #131)
+
+**Trigger:** two separate, unrelated live incidents hit during real rips tonight, each fixed same-day as a dedicated PR.
+
+**Incident 1 - "Coast Video Magazine No. 2" rename failure**
+
+Step 3 organize failed renaming the last of 4 encoded files, with `The process cannot access the file because it is being used by another process.` Only the most recently written file (`D3_t03.mp4`) was affected - the other 3 renamed fine. MakeMKV and HandBrake had both already completed successfully; nothing was lost, the file just never got renamed.
+
+**PR #130 (`ddd693a`) - `fix/rename-lock-retry-window`:**
+- Root cause: the existing safety margin (3s post-encode pause, then 5 rename attempts 3s apart = 15s total) wasn't enough. The signature - only the last-written file affected - points at real-time AV scanning (likely Windows Defender) grabbing the file the instant HandBrake releases it, holding it past 15s under load.
+- Fix: widened `$maxRetries`/`$retryDelay` from 5/3 to 10/5 (50s worst case) at all 12 rename/move call sites - 6 each in `rip-disc.ps1` and `continue-rip.ps1`. All 12 are copy-paste descendants of the same original pattern (PR #24) and were updated uniformly rather than special-casing the one site that failed tonight.
+- Explicitly **not** a structural fix - the 12-way duplication itself is untouched. Extracting a shared retry helper is a larger, separate change, left for later.
+- **Manual disk cleanup (not via the scripts):** `D3_t03.mp4` renamed directly to match its siblings' naming pattern.
+
+**Incident 2 - "The Arena Hawaii 05/06 Highlight Reel - ASL" slash-in-title**
+
+A disc title containing `/` (`The Arena Hawaii 05/06 Highlight Reel - ASL`) was used raw everywhere a path or filename gets built. Windows treats `/` exactly like `\`, so it silently split one intended output folder into two nested ones (`...\The Arena Hawaii 05\06 Highlight Reel - ASL\`), and broke the log-file path outright (`Add-Content : Could not find a part of the path`) since only the outer directory had actually been created - no session log was written for that run at all. Series/extras file-prefixing would also have silently dropped everything before the `/`. The rip itself still completed (MakeMKV and HandBrake both finished, and `New-Item -ItemType Directory` creates nested paths automatically) - only the output layout and logging broke.
+
+**PR #131 (`77acba9`) - `fix/sanitize-title-in-paths`:**
+- Root cause: a `$safeTitle` sanitizer (`-replace '[\\/:*?"<>|]', '_'`) already existed in both scripts, but was defined far too late - only covering the recovery-script filename, long after `$makemkvOutputDir`, `$finalOutputDir`, and the log path had already been built from the raw `$title`.
+- Fix: moved the `$safeTitle` sanitizer to the top of the `CONFIGURATION` section in both scripts, immediately after `$title` is finalized. Switched every path/filename-building use of `$title` to `$safeTitle`: `$makemkvOutputDir` (all 3 branches), every `$finalOutputDir` branch (genre, genre-series, series, Blu-ray, DVD), `$script:LogFile`, the series-mode `$prefix`, and the extras-mode prefix-matching block.
+- Display-only uses of `$title` (console output, log message text, window title, TMDb lookups) were deliberately left untouched, so the user still sees their real title everywhere it's shown.
+- Movie-mode's main-feature-disc prefixing needed no change - it already reads the prefix back from the real directory via `(Get-Item $finalOutputDir).Name` rather than reconstructing it from `$title`, so it self-corrects now that `$finalOutputDir` is built from `$safeTitle`.
+- **Manual disk cleanup (not via the scripts):** the 10 files that had landed in the wrongly-nested two-level folder structure were moved into one correctly-named flat folder (`The Arena Hawaii 05_06 Highlight Reel - ASL`, matching what the fixed script would now produce) and renamed with the proper prefix.
+
+**Testing status - neither fix is hardware-validated:**
+Both PRs were verified by `[System.Management.Automation.Language.Parser]::ParseFile` (0 errors), UTF-8 BOM integrity checks on raw bytes (both working tree and committed blobs - PR #130's PR description specifically flags catching a second, accidentally-introduced BOM during drafting), and the full existing test suite (95/95 passing, no regressions). Neither was re-exercised against a live disc: PR #130's trigger condition (AV scanning under load) can't be reproduced on demand, and PR #131's fix was written while the rip that would exercise it was already in progress and deliberately left undisturbed. Both fixes will first prove themselves on the next real occurrence.
+
+**Files changed:** `rip-disc.ps1`, `continue-rip.ps1`, `CHANGELOG.md` (both PRs; CHANGELOG.md already had dated entries for both before this note was added)
+
+**Session Verified Clean (at session close):**
+- `main` up to date with `origin/main` (HEAD `77acba9`, PR #131), working tree clean
+- No unpushed commits, no stashes, no open PRs
+- No stale local or remote branches beyond `main`
+
+**Priority for Next Session:**
+1. Watch the next AV-scanner-contended rename and the next slash-containing (or otherwise filesystem-illegal-character) disc title - both fixes are reasoned widenings/fixes, not measured/reproduced worst cases, and neither has been hardware-validated yet.
+2. Consider extracting the 12-way duplicated rename/move retry logic into a shared helper (explicitly deferred by PR #130) - the duplication makes future retry-tuning error-prone.
+3. Everything carried from the prior entry (watch `H:` drive-query timeout/hang behaviour over more rips, investigate `H:`'s underlying hardware flakiness, `feat/` vs `feature/` branch-naming convention decision) still stands - none of it touched by tonight's two incidents.
