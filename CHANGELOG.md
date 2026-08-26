@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-26 (continued yet again) - Widen the File-Lock Retry Window on Rename/Move
+
+### Fixed
+- Live incident: `rip-disc.ps1`'s Step 3 organize failed on "Coast Video Magazine No. 2" — 3 of 4 encoded files renamed fine, but the 4th (`D3_t03.mp4`, the most recently written) stayed locked through the full retry window and the step aborted with `The process cannot access the file because it is being used by another process.` MakeMKV and HandBrake had both already completed successfully; nothing was lost, the file just never got renamed.
+- Root cause: the existing safety margin (a 3s post-encode pause, then 5 rename attempts 3s apart) totals 15s, which wasn't enough here — the pattern (only the last-written file affected) points at something like Windows Defender's real-time scan grabbing the file the moment HandBrake releases it, which can hold it well past 15s under load.
+- Widened `$maxRetries`/`$retryDelay` from `5`/`3` to `10`/`5` (50s worst case instead of 15s) at all 12 call sites across both scripts — 6 rename/move sites each in `rip-disc.ps1` and `continue-rip.ps1`, all copy-pasted from the same original pattern (PR #24) and updated uniformly rather than special-casing the one that failed tonight.
+- Not a structural fix — the 12-way duplication itself is untouched (extracting a shared retry helper would be a larger, separate change); this is a targeted widening of the existing pattern.
+
+**Testing status:** `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM confirmed intact (verified by inspecting raw file bytes, not just re-decoding — an early draft of this fix accidentally wrote a second BOM into both files by decoding without stripping the first one, caught before commit). Full existing test suite re-run: 95/95 passing across all 5 files, no regressions. Not yet re-exercised against a real disc under AV load — the underlying trigger (Defender scanning a freshly-closed large file) can't be reliably reproduced on demand.
+
 ## 2026-08-26 (continued again) - Test Coverage and C# Port for the Drive-Query Hang Fixes
 
 ### Added
