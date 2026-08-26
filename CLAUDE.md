@@ -1336,4 +1336,107 @@ Earlier entries in this file claim "8/8" and "12/12 logic unit tests pass" with 
 - Everything else (`Libation`, `RipFilms`, `disc-ripper`, `email-to-planner`, `newsletter-stats`, `redirect-dg`, `ripaudio`, `sales-sync`, `sam-track`, `snout`, `spoil-sport`, `stephenbeale`, `stroop-test`, `stroop-test-flutter`, `ticked-off`, `verbio`, `waffle`, `waffley`) — working tree clean, no local branch ahead of its upstream. A few (`Libation`, `stephenbeale`, `stroop-test-flutter`, `waffle`) are behind their remote by 1–9 commits, which just means `git pull` hasn't been run there — not a loss-of-work risk.
 
 **Work In Progress:**
-- `fix/null-output-path-and-resume-hint` branch pushed, PR opened, **not merged** — awaiting the user's explicit approval per standing instruction not to merge without it.
+- `fix/null-output-path-and-resume-hint` branch pushed, PR opened, **not merged** — awaiting the user's explicit approval per standing instruction not to merge without it. (Update, 2026-08-26: approved and merged forward — see the "PR #119 Rescue" entry further below.)
+
+---
+
+### 2026-08-25 - -NoSound and -NoEject Flags
+
+**Problem:**
+The completion fanfare (`[Console]::Beep` melody) and automatic disc eject were always-on. Users running overnight batches, or ripping in a room where others are asleep, had no way to silence the fanfare; users who wanted to leave a disc in the drive (e.g. queuing another rip on it, or manually inspecting it) had no way to skip the eject.
+
+**Solution:**
+
+New parameters:
+- `-NoSound` (both scripts) — wraps each `[Console]::Beep` fanfare block in `if (-not $NoSound) { ... }`. `rip-disc.ps1` has two fanfare sites (normal completion, `-Queue` completion); `continue-rip.ps1` has one.
+- `-NoEject` (`rip-disc.ps1` only) — wraps the entire eject block (helper functions, retry loop, success/failure messaging, and the `MessageBox` popup on failure) in `if ($NoEject) { <skip message> } else { <existing eject logic> }`. The eject block only runs during the initial MakeMKV rip (Step 1), so `continue-rip.ps1` — which always resumes after that step — has no eject logic to guard. It still accepts `-NoEject` as a parameter (ignored) purely for command-line compatibility, matching the existing treatment of `-Drive`/`-DriveIndex`: a failed `rip-disc.ps1` command line can be pasted into `continue-rip.ps1` unchanged.
+
+**Usage:**
+```powershell
+# Rip quietly overnight, leave the disc in the drive afterwards
+.\rip-disc.ps1 -title "The Matrix" -NoSound -NoEject
+```
+
+**Files changed:**
+- `rip-disc.ps1` — `-NoSound`/`-NoEject` parameters, eject block guard, both fanfare block guards
+- `continue-rip.ps1` — `-NoSound` parameter and fanfare block guard; `-NoEject` accepted and ignored
+- `README.md` — Features list, parameter table, new usage example, feature parity table
+- `CHANGELOG.md` — 2026-08-25 entry
+
+**Testing status:** Parse-checked only (`[System.Management.Automation.Language.Parser]::ParseFile` reports 0 errors on both scripts) and the UTF-8 BOM was verified intact after editing. Not runtime-tested against a real disc — no committed test exercises the eject/fanfare code paths themselves (they need real hardware or would require extracting them behind a testable seam, which this change did not do).
+
+**Work In Progress:**
+- None — implementation complete, PR opened for review before merge.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: confirm `-NoEject` actually leaves the disc in the drive and `-NoSound` actually silences the fanfare on a real rip
+- Port to the C# implementation if/when C# parity work resumes (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 - continue-rip.ps1 Retry Suggestion & Stale Disc-Label Cache Fix
+
+**PR #120 merged** (previous session's `-NoSound`/`-NoEject` work): approval blocked by GitHub's no-self-approval rule, as it has been on this user's other repos; `git-manager` fell back to a comment recording chat approval, then squash-merged as `b85f04d`. Local `main` confirmed up to date. Loose end noted but not acted on: branch `fix/null-output-path-and-resume-hint` still sits unmerged (local + remote) — unrelated to this work.
+
+**Feature: continue-rip.ps1 retry suggestion on failure**
+
+**Problem:**
+When `rip-disc.ps1` failed partway (HandBrake, organize, or open step), the user had to manually work out the equivalent `continue-rip.ps1` command — right `-FromStep`, and every genre/series/episode flag from the original run repeated by hand.
+
+**Solution:**
+New `Get-ContinueRipCommand` function (defined just above `Stop-WithError`) builds that command line from the run's own parameter values and prints it under a new `--- RETRY WITH continue-rip.ps1 ---` section in `Stop-WithError`'s failure output, right after the existing "MANUAL STEPS NEEDED" list.
+
+- Maps the earliest incomplete step (`Get-RemainingSteps`) to `-FromStep`: step 2 → `handbrake`, step 3 → `organize`, step 4 → `open`
+- Returns `$null` (prints nothing) when step 1 itself is still incomplete — `continue-rip.ps1` resumes after the MakeMKV rip, so there's nothing to hand it if the rip never produced files
+- Carries over `-title`, `-Series`/`-Season`/`-Disc`, every genre flag, `-StartEpisode`, `-EpisodeNames`, `-NoSound` — omitting each when it equals `continue-rip.ps1`'s own default, to keep the printed command short
+- `-OutputDrive` is included only when the user explicitly passed `-OutputDrive` on this run (both scripts share the same config-driven default otherwise, so omitting it still reproduces the same output path)
+- Titles/episode names with an embedded double quote are escaped with a backtick so the command still parses correctly when pasted back into PowerShell
+
+**Bug caught during implementation, before it shipped:** the first draft checked `$PSBoundParameters.ContainsKey('OutputDrive')` *inside* `Stop-WithError` to decide whether to include `-OutputDrive` — but `$PSBoundParameters` is per-function-scope in PowerShell, so inside `Stop-WithError` (which only takes `-Step`/`-Message`) that check silently always returns `$false`. Fixed by capturing `$script:OutputDriveExplicit = $PSBoundParameters.ContainsKey('OutputDrive')` once at the top of the script, right before the existing config-default logic overwrites `$OutputDrive`, and reading that script-scoped flag from `Stop-WithError` instead.
+
+**Fix: stale disc-label cache**
+
+**Problem (found live, mid-session):** user reported the drive listing showing `[FREDDY_GOT_FINGERED]` for a drive while holding that physical disc in hand — i.e., a different disc was actually in the drive (or none), but the display still showed the old one. Root cause: the drive-index lookup at the top of the script caches the full `makemkvcon -r info disc:9999` output for 5 minutes to avoid a slow re-enumeration on every run (see 2026-02-23 session notes). That cache includes each drive's `DRV:` disc-name field. Swap a disc within that 5-minute window and the cached name — shown in the "MakeMKV drives:" listing AND used via `$script:TargetDiscLabel` to auto-name genre-series episodes from the disc label — still reflects the *previous* disc.
+
+Actual ripped content was never wrong (the rip itself always reads live from the drive via a fresh `makemkvcon mkv disc:N ...` call, cache or no cache) — this only affected the cosmetic listing and genre-series auto-naming.
+
+**Solution:** For the one drive that matches `-Drive`/`$driveLetter` specifically (not every drive in the cached list — that would reintroduce the slow re-enumeration the cache exists to avoid), prefer a live `Get-DiscVolumeLabel` query (already used elsewhere in the file as a fallback) over the cached MakeMKV name, both when building the `drvLines` display list and — since `$script:TargetDiscLabel` is populated from that same list — for genre-series episode naming. One extra fast, per-drive-letter WMI call; every other drive's cached data is untouched. Only applies when `-DriveIndex` is not used (that path has no drive letter to query Windows with, and already had no label available — pre-existing, documented).
+
+**Deliberately not done:** shortening the cache TTL, or re-querying `makemkvcon -r info` live for the matched drive every run — the user explicitly asked to skip a fix "if it really slows things down," and a single-drive MakeMKV info query is the same 30-60+ second operation PR #64 already chose to avoid for exactly this reason. The Windows-side fix avoids that cost entirely.
+
+**Files changed:**
+- `rip-disc.ps1` — `Get-ContinueRipCommand` function, `Stop-WithError` retry-suggestion block, `$script:OutputDriveExplicit` capture, live disc-label preference in the drive-matching loop
+- `README.md` — Error Handling section, continue-rip.ps1 section cross-reference, Feature Parity table (two new rows)
+- `CHANGELOG.md` — 2026-08-26 entry
+
+**Testing status:** Parse-checked clean (`[System.Management.Automation.Language.Parser]::ParseFile`, 0 errors). `Get-ContinueRipCommand` was extracted via the AST (same technique as `tests/Test-EpisodeNaming.ps1`) and exercised ad hoc against 5 cases (plain genre disc, series with season/disc/output-drive/start-episode, step-1-only-remaining → `$null`, quoted title + episode names + `-NoSound`, no-remaining-steps → `$null`) — all produced correct output, but this was scratch verification, not a committed test file. The disc-label fix has **not** been runtime-tested against a real drive/disc swap this session.
+
+**Work In Progress:**
+- None — both changes complete on a feature branch, not yet committed/PR'd.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: trigger an actual Step 2/3/4 failure and confirm the printed `continue-rip.ps1` command works verbatim; swap discs in a drive within the 5-minute cache window and confirm the listing/episode naming now reflects the new disc immediately
+- Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 (same day, continued) - Follow-Up Cleanup, Test Suite, and PR #119 Rescue
+
+**PR #121 merged** (the retry-hint + disc-label work above): approval blocked by the same self-approval rule as #120; `git-manager` used the comment-fallback again, then squash-merged as `2c79f5d`. `git-manager` flagged one cosmetic nit from its own review of that PR: the new disc-label guard carried a redundant `-and $DriveIndex -lt 0` — the enclosing branch only ever runs with `$DriveIndex` unset, so the clause was always true. Fixed in this session (see Changed, below).
+
+Three outstanding items from the review were picked up together:
+
+**1. Dropped the redundant clause** (see above) — one-line change, no behaviour change.
+
+**2. Committed `tests/Test-ContinueRipCommand.ps1`** — promotes the ad hoc verification used while building `Get-ContinueRipCommand` into a real, re-runnable suite, following the same AST-extraction pattern as `Test-EpisodeNaming.ps1` / `Test-LogFileReminder.ps1`. 11/11 passing. One test-authoring mistake caught by the suite itself before commit: the first draft of the genre-flags test omitted `-Disc 1`, so PowerShell's own `[int]` parameter default (`0`, not `1`) leaked into the expected command as an unwanted `-Disc 0` — fixed by passing `-Disc 1` explicitly, matching how the real call site in `Stop-WithError` always passes it.
+
+**3. Rescued PR #119 (`fix/null-output-path-and-resume-hint`)** — this branch had been open and unmerged since before the `-NoSound`/`-NoEject` work even started (its single commit, `bb2afd2`, predates everything from 2026-08-25 onward), so a raw `main`-vs-branch diff misleadingly looked like the branch was *removing* `-NoSound`/`-NoEject`/the retry hint/etc. — it wasn't; it simply forked before they existed. Confirmed via `gh pr list` that PR #119 was still open and its actual fix (Sort-Object descending-sort bug on PS 5.1 hashtables in `continue-rip.ps1`, `Test-DriveReady` null-path guard, the `$finalOutputDir` fail-fast validation in `rip-disc.ps1`, `Test-StepPrerequisites` null guards) was **not** present on `main` and **not** superseded by anything merged since — genuinely still needed, just stale. Handled by merging `main` into the branch, resolving conflicts (the two diverged in disjoint regions of `rip-disc.ps1`/`continue-rip.ps1`, so this was low-risk), and re-verifying before push. See the PR itself for the final merge commit.
+
+**Testing status:** All three items parse-checked clean and the full local test suite (`Test-EpisodeNaming.ps1`, `Test-LogFileReminder.ps1`, `Test-ContinueRipCommand.ps1`) passes after the PR #119 merge-forward. Still no real-disc runtime testing this session.
+
+**Work In Progress:**
+- None — all three items complete.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation still pending for everything added 2026-08-25/26 (`-NoSound`, `-NoEject`, the retry-hint suggestion, the live disc-label fix, and now the rescued `$finalOutputDir` validation from PR #119) — none of it has touched an actual drive yet
+- Port missing features to C# implementation (see Feature Parity table in README)

@@ -6,6 +6,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-26
+
+### Added
+- On failure, `rip-disc.ps1` now prints a ready-to-paste `continue-rip.ps1` command under `--- RETRY WITH continue-rip.ps1 ---`, reformatted from this run's own inputs
+  - New `Get-ContinueRipCommand` function maps the earliest incomplete step to `continue-rip.ps1`'s `-FromStep` (`handbrake`/`organize`/`open`) and carries over `-title`, `-Series`/`-Season`/`-Disc`, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`, and (only when explicitly passed) `-OutputDrive`; values matching `continue-rip.ps1`'s own defaults are omitted to keep the command short
+  - Returns `$null`, and prints nothing, when Step 1 (the MakeMKV rip) itself never completed — `continue-rip.ps1` resumes AFTER that step, so there is nothing for it to work with
+  - Titles/episode names containing a literal double quote are escaped (`` ` " ``) so the printed command still parses as a single argument when pasted back into PowerShell
+
+### Fixed
+- Genre-series episode naming (and the "MakeMKV drives:" listing) could use a stale disc label after swapping discs in the same drive within the drive-lookup cache's 5-minute TTL — the cached MakeMKV `DRV:` line, not the disc actually in the drive, was shown and used to name episodes
+  - The target drive's entry now prefers a live, per-drive-letter Windows volume-label query (`Get-DiscVolumeLabel`, already used elsewhere as a fallback) over the cached MakeMKV name, so a disc swap is reflected immediately without re-enumerating every drive
+  - Scoped to the one matched drive only, so the existing cache (and the slow full `disc:9999` re-query it exists to avoid) is untouched for every other drive
+  - Only applies when `-DriveIndex` is not used — that path has no drive letter to query and already had no label available (documented pre-existing limitation)
+
+### Changed
+- Dropped a redundant `-and $DriveIndex -lt 0` condition from the disc-label live-query guard added above — the surrounding branch only ever runs when `$DriveIndex` is unset, so the check was always true and added nothing (cosmetic follow-up, same run's PR review)
+
+### Added
+- `tests/Test-ContinueRipCommand.ps1` — 11 tests for `Get-ContinueRipCommand`, promoting the ad hoc verification from the retry-suggestion work above into a committed, re-runnable suite (AST-extracted from `rip-disc.ps1`, same technique as the other `tests/*.ps1` files). Covers step-to-`-FromStep` mapping, the step-1-unresolved `$null` case, default-value omission, non-default value carry-through and ordering, and quote escaping in `-title`/`-EpisodeNames`
+
+## 2026-08-25
+
+### Added
+- `-NoSound` parameter in `rip-disc.ps1` and `continue-rip.ps1` — skips the completion fanfare (`[Console]::Beep` melody) played at the end of a run (both the normal completion path and, in `rip-disc.ps1`, the `-Queue` completion path)
+- `-NoEject` parameter in `rip-disc.ps1` — skips ejecting the disc after the MakeMKV rip completes, leaving it in the drive
+  - `continue-rip.ps1` also accepts `-NoEject` for command-line compatibility (so a failed `rip-disc.ps1` command can be pasted there unchanged), but ignores it — it resumes after the rip step and never ejects, the same treatment already given to `-Drive`/`-DriveIndex`
+
+**Testing status:** Parse-checked only (`[System.Management.Automation.Language.Parser]::ParseFile` reports 0 errors on both scripts) and the UTF-8 BOM was verified intact after editing. Not runtime-tested against a real disc.
+
 ## 2026-08-24
 
 ### Added

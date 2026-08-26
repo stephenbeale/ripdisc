@@ -68,6 +68,17 @@
     [Alias("ReEncode")]
     [switch]$Force,
 
+    # Skip the completion fanfare ([Console]::Beep melody) played at the end of a run.
+    [Parameter()]
+    [switch]$NoSound,
+
+    # Accepted for command-line compatibility with rip-disc.ps1 so a failed rip
+    # command can be pasted here unchanged. This script never ejects the disc
+    # (that only happens during the MakeMKV rip step, which this script skips),
+    # so the value is ignored.
+    [Parameter()]
+    [switch]$NoEject,
+
     [Parameter()]
     [switch]$Help
 )
@@ -1721,16 +1732,18 @@ if (-not $script:EncodedFilesTooSmall) {
     }
 }
 
-# Play triumphant fanfare to signal completion
-try {
-    [Console]::Beep(523, 150)  # C5
-    [Console]::Beep(659, 150)  # E5
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 300) # C6 (held)
-    Start-Sleep -Milliseconds 100
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 450) # C6 (triumphant hold)
-} catch { }
+# Play triumphant fanfare to signal completion (skipped with -NoSound)
+if (-not $NoSound) {
+    try {
+        [Console]::Beep(523, 150)  # C5
+        [Console]::Beep(659, 150)  # E5
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 300) # C6 (held)
+        Start-Sleep -Milliseconds 100
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 450) # C6 (triumphant hold)
+    } catch { }
+}
 
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"

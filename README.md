@@ -34,7 +34,8 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Interactive prompts** for confirmation and conflict resolution
 - **Window title management** for tracking concurrent operations
 - **Console close button protection** prevents accidental window closure
-- **Automatic disc ejection** after successful rip
+- **Automatic disc ejection** after successful rip, optional via `-NoEject`
+- **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
 
 ## Auto-Discovery
 
@@ -149,6 +150,10 @@ Both versions use the same command-line parameters:
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
 -startEpisode <int>     Starting episode number for series (default: 1)
+-noSound                Skip the completion fanfare (Console.Beep melody)
+-noEject                Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only —
+                        continue-rip.ps1 accepts it for command-line compatibility but
+                        ignores it, since it never runs the rip/eject step)
 ```
 
 ### Documentary / genre series (multi-disc box sets)
@@ -263,6 +268,11 @@ RipDisc -processQueue                                             # After all ri
 **Use specific drive index:**
 ```powershell
 .\rip-disc.ps1 -title "The Matrix" -driveIndex 1 -outputDrive F:
+```
+
+**Rip quietly overnight, leave the disc in the drive:**
+```powershell
+.\rip-disc.ps1 -title "The Matrix" -noSound -noEject
 ```
 
 ## Directory Structure
@@ -406,6 +416,8 @@ If an error occurs:
 - Window title shows `-ERROR` suffix
 - Completed steps are displayed in green
 - Remaining steps are listed with manual instructions
+- **If the MakeMKV rip itself already completed**, a ready-to-paste `continue-rip.ps1` command is printed under `--- RETRY WITH continue-rip.ps1 ---`, built from this run's own inputs (title, series/season/disc, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`) with `-FromStep` set to whichever step failed (`handbrake`, `organize`, or `open`) — copy it as-is to resume without re-ripping the disc
+  - Not shown when Step 1 (the rip) itself failed — `continue-rip.ps1` has no ripped MKV files to resume from in that case, so re-running `rip-disc.ps1` is the only option
 - Relevant directory is opened for inspection
 - Log file location is provided
 
@@ -435,6 +447,9 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Empty parent directory cleanup | Yes | No |
 | Eject retry with timeout popup | Yes | No |
 | Completion fanfare | Yes | No |
+| `-NoSound` / `-NoEject` flags | Yes | No |
+| Suggested `continue-rip.ps1` retry command on failure | Yes | No |
+| Live disc-label lookup for the target drive (avoids stale cached name) | Yes | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 
@@ -489,7 +504,9 @@ The recovery script skips any files that already have a matching `.mp4` in the o
 
 ### continue-rip.ps1 (resume from any step)
 
-Use `continue-rip.ps1` to resume from any step after the initial MakeMKV rip:
+Use `continue-rip.ps1` to resume from any step after the initial MakeMKV rip. If `rip-disc.ps1`
+fails after the rip completes, it now prints the exact command to run — see
+[Error Handling](#error-handling) — so you usually won't need to build one of these by hand:
 
 ```powershell
 # Continue from HandBrake encoding (step 2)

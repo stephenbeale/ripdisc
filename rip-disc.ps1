@@ -51,7 +51,15 @@
     # Always wins over the disc-label auto-detection below. Supply one name per episode
     # on the disc; any episodes beyond the supplied names fall back to plain numbering.
     [Parameter()]
-    [string[]]$EpisodeNames = @()
+    [string[]]$EpisodeNames = @(),
+
+    # Skip the completion fanfare ([Console]::Beep melody) played at the end of a run.
+    [Parameter()]
+    [switch]$NoSound,
+
+    # Skip ejecting the disc after the MakeMKV rip completes.
+    [Parameter()]
+    [switch]$NoEject
 )
 
 # ========== LOAD CONFIG ==========
@@ -59,6 +67,11 @@
 $makemkvconPath = $script:Config_MakeMkvPath
 
 # Apply config defaults to parameters that weren't explicitly passed
+# Captured before the defaulting below overwrites it - Stop-WithError uses this later to
+# decide whether -OutputDrive belongs in a suggested continue-rip.ps1 retry command. It
+# has to be captured here: $PSBoundParameters is per-function, so Stop-WithError (defined
+# further down as its own function) cannot see the top-level script's copy directly.
+$script:OutputDriveExplicit = $PSBoundParameters.ContainsKey('OutputDrive')
 if (-not $PSBoundParameters.ContainsKey('Drive')) { $Drive = $script:Config_DefaultInputDrive }
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
 
@@ -652,7 +665,21 @@ if ($DriveIndex -ge 0) {
             $drvLetter = $Matches[5]
             if ($drvFlag -lt 256) {
                 $isBusy = $busyIndices -contains $drvIdx
-                $drvLines += [PSCustomObject]@{ Index = $drvIdx; Name = $drvName; DiscName = $drvDiscName; Letter = $drvLetter; Busy = $isBusy }
+                $displayDiscName = $drvDiscName
+                # For OUR target drive specifically, prefer a live Windows volume-label query
+                # over the enumerated MakeMKV name. $drvOutput can be up to 5 minutes stale
+                # (the cache above), so after a disc swap within that window this would
+                # otherwise keep showing the PREVIOUS disc's name/label — both here in the
+                # listing and later, via $script:TargetDiscLabel, in genre-series episode
+                # naming. One extra per-drive-letter WMI query is cheap; re-enumerating every
+                # drive on every run (what the cache exists to avoid) is not.
+                # (No $DriveIndex check needed - this whole branch only runs when $DriveIndex
+                # is unset; see the enclosing if/else above.)
+                if ($drvLetter -eq $driveLetter) {
+                    $liveDiscName = Get-DiscVolumeLabel -DriveLetter $drvLetter
+                    if ($liveDiscName) { $displayDiscName = $liveDiscName }
+                }
+                $drvLines += [PSCustomObject]@{ Index = $drvIdx; Name = $drvName; DiscName = $displayDiscName; Letter = $drvLetter; Busy = $isBusy }
                 if ($drvLetter -eq $driveLetter) {
                     $matchedIndex = $drvIdx
                 }
@@ -1045,6 +1072,68 @@ Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
 Write-Log "Log file: $($script:LogFile)"
 
+# Builds the continue-rip.ps1 command line that would resume a failed run from its
+# first incomplete step, reusing this run's own inputs, so it can be printed on
+# failure for the user to copy and paste. Returns $null when there is nothing to
+# resume: continue-rip.ps1 picks up AFTER the MakeMKV rip, so if Step 1 itself never
+# finished there are no ripped MKV files for it to work with.
+function Get-ContinueRipCommand {
+    param(
+        [string]$Title,
+        [int[]]$RemainingStepNumbers,
+        [switch]$Series,
+        [int]$Season,
+        [int]$Disc,
+        # $null/empty means "use continue-rip.ps1's own default" - omitted from the
+        # command entirely rather than printed as an explicit value.
+        [string]$OutputDrive,
+        [switch]$Extras,
+        [switch]$Bluray,
+        [switch]$Documentary,
+        [switch]$Tutorial,
+        [switch]$Fitness,
+        [switch]$Music,
+        [switch]$Surf,
+        [int]$StartEpisode,
+        [string[]]$EpisodeNames,
+        [switch]$NoSound
+    )
+
+    # Step 1 (MakeMKV rip) has no continue-rip.ps1 equivalent - only 2/3/4 can be resumed.
+    $stepToFromStep = @{ 2 = "handbrake"; 3 = "organize"; 4 = "open" }
+    $firstRemaining = @($RemainingStepNumbers | Sort-Object)[0]
+    if (-not $firstRemaining -or -not $stepToFromStep.ContainsKey($firstRemaining)) {
+        return $null
+    }
+
+    # Escape embedded double quotes so a title/name containing one still round-trips
+    # through copy-paste as a single argument.
+    $quote = { param($s) '"' + ("$s" -replace '"', '`"') + '"' }
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("-title $(& $quote $Title)")
+    $parts.Add("-FromStep $($stepToFromStep[$firstRemaining])")
+    if ($Series) { $parts.Add("-Series") }
+    if ($Season -gt 0) { $parts.Add("-Season $Season") }
+    if ($Disc -ne 1) { $parts.Add("-Disc $Disc") }
+    if ($OutputDrive) { $parts.Add("-OutputDrive $OutputDrive") }
+    if ($Extras) { $parts.Add("-Extras") }
+    if ($Bluray) { $parts.Add("-Bluray") }
+    if ($Documentary) { $parts.Add("-Documentary") }
+    if ($Tutorial) { $parts.Add("-Tutorial") }
+    if ($Fitness) { $parts.Add("-Fitness") }
+    if ($Music) { $parts.Add("-Music") }
+    if ($Surf) { $parts.Add("-Surf") }
+    if ($StartEpisode -ne 1) { $parts.Add("-StartEpisode $StartEpisode") }
+    if ($EpisodeNames -and $EpisodeNames.Count -gt 0) {
+        $quotedNames = $EpisodeNames | ForEach-Object { & $quote $_ }
+        $parts.Add("-EpisodeNames $($quotedNames -join ', ')")
+    }
+    if ($NoSound) { $parts.Add("-NoSound") }
+
+    return ".\continue-rip.ps1 " + ($parts -join " ")
+}
+
 function Stop-WithError {
     param([string]$Step, [string]$Message)
 
@@ -1115,6 +1204,25 @@ function Stop-WithError {
                 }
             }
             4 { Write-Host "  - Open output directory to verify files" -ForegroundColor Yellow }
+        }
+    }
+
+    # Offer a ready-to-paste continue-rip.ps1 command when the MakeMKV rip itself
+    # already completed - it's usually faster than the manual steps just listed.
+    $stepCompleted1 = [bool]($script:CompletedSteps | Where-Object { $_.Number -eq 1 })
+    if ($stepCompleted1) {
+        $continueCommand = Get-ContinueRipCommand -Title $title `
+            -RemainingStepNumbers @($remaining | ForEach-Object { $_.Number }) `
+            -Series:$Series -Season $Season -Disc $Disc `
+            -OutputDrive $(if ($script:OutputDriveExplicit) { $outputDriveLetter } else { $null }) `
+            -Extras:$Extras -Bluray:$Bluray -Documentary:$Documentary -Tutorial:$Tutorial `
+            -Fitness:$Fitness -Music:$Music -Surf:$Surf -StartEpisode $StartEpisode `
+            -EpisodeNames $EpisodeNames -NoSound:$NoSound
+        if ($continueCommand) {
+            Write-Host "`n--- RETRY WITH continue-rip.ps1 ---" -ForegroundColor Cyan
+            Write-Host "The MakeMKV rip already completed - resume from here instead of re-ripping the disc:" -ForegroundColor Gray
+            Write-Host "  $continueCommand" -ForegroundColor White
+            Write-Log "Suggested retry command: $continueCommand"
         }
     }
 
@@ -1530,6 +1638,11 @@ Complete-CurrentStep
 #      trusting a call to return within a deadline. DriveInfo.IsReady costs
 #      single-digit milliseconds even under full load, so polling is cheap and,
 #      unlike a wall-clock timeout, it reports what actually happened.
+if ($NoEject) {
+    Write-Host "`nSkipping disc eject (-NoEject)" -ForegroundColor Gray
+    Write-Log "Disc eject skipped (-NoEject)"
+} else {
+
 Write-Timestamp "Ejecting disc"
 Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
 
@@ -1630,6 +1743,8 @@ if ($ejectSuccess) {
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 }
+
+} # end of -NoEject guard
 
 } # end of MakeMKV rip + eject block
 
@@ -1766,16 +1881,18 @@ if ($Queue) {
     Write-Log "QUEUE MODE: Job added to queue ($($queue.Count) total jobs)"
     Write-Log "Queue file: $queueFilePath"
 
-    # Play triumphant fanfare to signal completion
-    try {
-        [Console]::Beep(523, 150)  # C5
-        [Console]::Beep(659, 150)  # E5
-        [Console]::Beep(784, 150)  # G5
-        [Console]::Beep(1047, 300) # C6 (held)
-        Start-Sleep -Milliseconds 100
-        [Console]::Beep(784, 150)  # G5
-        [Console]::Beep(1047, 450) # C6 (triumphant hold)
-    } catch { }
+    # Play triumphant fanfare to signal completion (skipped with -NoSound)
+    if (-not $NoSound) {
+        try {
+            [Console]::Beep(523, 150)  # C5
+            [Console]::Beep(659, 150)  # E5
+            [Console]::Beep(784, 150)  # G5
+            [Console]::Beep(1047, 300) # C6 (held)
+            Start-Sleep -Milliseconds 100
+            [Console]::Beep(784, 150)  # G5
+            [Console]::Beep(1047, 450) # C6 (triumphant hold)
+        } catch { }
+    }
 
     Enable-ConsoleClose
     $host.UI.RawUI.WindowTitle = "$windowTitle - QUEUED"
@@ -2443,16 +2560,18 @@ if ($script:EncodedFilesTooSmall) {
     }
 }
 
-# Play triumphant fanfare to signal completion
-try {
-    [Console]::Beep(523, 150)  # C5
-    [Console]::Beep(659, 150)  # E5
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 300) # C6 (held)
-    Start-Sleep -Milliseconds 100
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 450) # C6 (triumphant hold)
-} catch { }
+# Play triumphant fanfare to signal completion (skipped with -NoSound)
+if (-not $NoSound) {
+    try {
+        [Console]::Beep(523, 150)  # C5
+        [Console]::Beep(659, 150)  # E5
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 300) # C6 (held)
+        Start-Sleep -Milliseconds 100
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 450) # C6 (triumphant hold)
+    } catch { }
+}
 
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"
