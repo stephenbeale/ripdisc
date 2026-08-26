@@ -455,7 +455,8 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Suggested `continue-rip.ps1` retry command on failure | Yes | No |
 | Live disc-label lookup for the target drive (avoids stale cached name) | Yes | No |
 | Bounded drive-query timeout (60s) with leftover-process diagnostics | Yes | No |
-| Device-disconnect vs. no-disc error classification | Yes | No |
+| MakeMKV rip process hang safety net (kills a stuck/unresponsive process rather than blocking forever) | Yes (stuck-sector detection) | Yes (flat 4h timeout) |
+| Device-disconnect vs. no-disc error classification | Yes | Yes |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 

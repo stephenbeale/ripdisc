@@ -430,6 +430,49 @@ function Clean-DiscName {
     }
 }
 
+# Given the parsed MakeMKV drive list, resolves the SINGLE entry that matches both the
+# disc:N index AND the target drive letter. Index alone is not guaranteed unique: a drive that
+# reconnects mid-session can appear in MakeMKV's own list twice under the same index - once
+# keyed by drive letter, once by raw device path (e.g. \Device\CdRom3) - seen live on a flaky
+# USB DVD drive. Matching on index alone can then silently return more than one object, and
+# PowerShell string interpolation joins every property from all of them with a space (e.g. a
+# drive name doubled up in the "Using disc:N (...)" confirmation line).
+function Select-MatchedDrive {
+    param(
+        [array]$DrvLines,
+        [int]$MatchedIndex,
+        [string]$DriveLetter
+    )
+    $matched = $DrvLines | Where-Object { $_.Index -eq $MatchedIndex -and $_.Letter -eq $DriveLetter } | Select-Object -First 1
+    if (-not $matched) {
+        # Shouldn't normally happen ($MatchedIndex is expected to have come from a Letter match
+        # in the caller), but fall back to the first same-index entry rather than return nothing.
+        $matched = $DrvLines | Where-Object { $_.Index -eq $MatchedIndex } | Select-Object -First 1
+    }
+    return $matched
+}
+
+# Polls a started Process until it exits or the timeout elapses, killing it on timeout. A plain
+# `&` invocation (or a bare Start()) has no timeout mechanism of its own; this is what stops an
+# external process - MakeMKV's own drive probe, specifically - from hanging the whole script
+# indefinitely when a physical drive is malfunctioning. Returns $true if the process exited on
+# its own within the timeout, $false if it had to be killed.
+function Wait-ProcessWithTimeout {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [double]$TimeoutSec
+    )
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $Process.HasExited -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        Start-Sleep -Milliseconds 250
+    }
+    if (-not $Process.HasExited) {
+        try { $Process.Kill() } catch {}
+        return $false
+    }
+    return $true
+}
+
 # Windows-side fallback for the disc's volume label. MakeMKV's DRV: line leaves the disc
 # name empty for some drives (reproducibly so on the USB DVD units here), but Windows still
 # reports the label fine. Returns "" when the drive has no letter (i.e. under -DriveIndex),
@@ -662,14 +705,9 @@ if ($DriveIndex -ge 0) {
         # spin up from idle took ~30-35s to complete on its own. A shorter timeout would kill a
         # query that was actually about to succeed, not just a genuinely hung one.
         $drvQueryTimeoutSec = 60
-        $drvQuerySw = [System.Diagnostics.Stopwatch]::StartNew()
-        while (-not $drvProc.HasExited -and $drvQuerySw.Elapsed.TotalSeconds -lt $drvQueryTimeoutSec) {
-            Start-Sleep -Milliseconds 250
-        }
+        $drvQueryExitedInTime = Wait-ProcessWithTimeout -Process $drvProc -TimeoutSec $drvQueryTimeoutSec
 
-        if (-not $drvProc.HasExited) {
-            try { $drvProc.Kill() } catch {}
-
+        if (-not $drvQueryExitedInTime) {
             # No $script:LogFile exists yet at this point - LOGGING SETUP runs later, once a
             # drive has actually been identified - so there is nothing to write this to. Make
             # the console output carry the same information a log entry would instead.
@@ -775,18 +813,12 @@ if ($DriveIndex -ge 0) {
     }
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
-        # Same non-unique-index reasoning as the marker above: match on Letter too, and take
-        # exactly one entry. Without this, $matchedDrv.Name below silently becomes a 2-element
-        # array when there's an index collision - PowerShell string interpolation then joins
-        # both values with a space, e.g. "Drive Name Drive Name" in the confirmation line, and
-        # the same corruption reaches $script:TargetDriveName / $script:TargetDiscLabel.
-        $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex -and $_.Letter -eq $driveLetter } | Select-Object -First 1
-        if (-not $matchedDrv) {
-            # Shouldn't normally happen (matchedIndex was set from a Letter match in the loop
-            # above), but fall back to the first same-index entry rather than leave $matchedDrv
-            # unset if it ever does.
-            $matchedDrv = $drvLines | Where-Object { $_.Index -eq $matchedIndex } | Select-Object -First 1
-        }
+        # See Select-MatchedDrive: without matching on Letter too, $matchedDrv.Name below could
+        # silently become a 2-element array when there's an index collision - PowerShell string
+        # interpolation then joins both values with a space, e.g. "Drive Name Drive Name" in the
+        # confirmation line, and the same corruption reaches $script:TargetDriveName /
+        # $script:TargetDiscLabel.
+        $matchedDrv = Select-MatchedDrive -DrvLines $drvLines -MatchedIndex $matchedIndex -DriveLetter $driveLetter
         # Remember MakeMKV's name for this drive so Step 1 can ignore read errors from other drives
         $script:TargetDriveName = $matchedDrv.Name
         # Remember the disc's volume label too - genre-series mode uses it to name episodes.

@@ -1508,10 +1508,44 @@ Both real bugs, both shipped - but the hang kept happening after this PR merged,
 **Work In Progress:**
 - None - working tree clean, all PRs (#119-#126, plus the `claude-conventions` repo's PR #1) merged, nothing unpushed.
 
-**Outstanding Work for Future Sessions:**
+**Outstanding Work for Future Sessions (as of the #123-#126 entry above):**
 - **The whole #123-#126 incident chain deserves a "did this actually fully resolve it" follow-up, not a close-out.** Tonight's confirmation was one successful rip after three back-to-back fix iterations against hardware (`H:`) that was independently flaky earlier the same session. Watch the next several rips on `H:` (and other drives) specifically for: the drive-query hang recurring even at 60s, the 60s wait itself becoming a new annoyance if it turns out most real hangs exceed even that, and the leftover-process detection actually firing/being useful when it happens for real.
-- No automated test coverage for any of #124-#126 (WMI timeout, duplicate-index dedup, `Process`-based drive-query timeout-and-kill, leftover-process detection, retry-diagnostics message). Worth a `tests/Test-DriveQueryTimeout.ps1` or similar following the existing AST-extraction pattern, once the dust settles.
-- `-DriveIndex`-related timeout/diagnostics work has not been ported to the C# implementation - `RipDiscApplication.cs`'s own drive-query/enumeration path still has no timeout mechanism at all. (`continue-rip.ps1` was checked and does not need this port - it never reads the disc, confirmed by grep.)
-- `H:`'s underlying hardware flakiness (loose USB cable/port, hub power, or Windows USB selective suspend - noted two entries above) is still just a hypothesis, not investigated or resolved.
+- `H:`'s underlying hardware flakiness (loose USB cable/port, hub power, or Windows USB selective suspend) is still just a hypothesis, not investigated or resolved.
 - Real-world validation still pending for everything added 2026-08-25/26 that predates tonight's incident (`-NoSound`, `-NoEject`, the retry-hint suggestion, the live disc-label fix, PR #119's `$finalOutputDir` validation) - tonight's two real rips both centred on the drive-lookup/error-message path, not these.
-- Port missing features to C# implementation generally (see Feature Parity table in README) - carried since 2026-02-16, now six months+, still not formally resolved as "abandon" or "keep porting."
+- Port missing features to C# implementation generally (see Feature Parity table in README) - carried since 2026-02-16, now six months+, still not formally resolved as "abandon" or "keep porting" (the two items below were the only pieces of this specifically requested and are now done).
+
+---
+
+### 2026-08-26 (continued again) - Test Coverage and C# Port for the Drive-Query Hang Fixes
+
+User asked to "fix all outstanding issues mentioned above," referring to the closure summary just delivered. `project-manager` did a quick verification pass first and confirmed the actionable list was exactly two items (test coverage, C# port) - the other two flagged items (watching future rips, `H:`'s hardware) are observational/physical, not code-fixable, and were correctly left alone.
+
+**1. Test coverage for #124-#126.** The relevant logic was inline in the main script body, not in named functions, so the repo's usual AST-extraction test pattern couldn't reach it directly. Extracted two small, behaviour-preserving functions specifically to make this testable:
+- `Select-MatchedDrive` - the duplicate-drive-index selection logic (pure, no side effects)
+- `Wait-ProcessWithTimeout` - the process-poll-and-kill mechanic (inherently a real-process integration point, so tested against actual short-lived child processes rather than mocked - a fast one and a simulated hang via `Start-Sleep -Seconds 120`, bounded to short test timeouts so the suite stays quick)
+
+New `tests/Test-DriveQueryTimeout.ps1`, 16/16 passing. Re-ran the full pre-existing 79-test suite before AND after the extraction/refactor to confirm the behaviour-preserving claim - still 79/79, no regressions. Full suite total is now 95 tests across 5 files.
+
+**2. C# port.** Investigated the actual C# architecture rather than assume a literal 1:1 port was possible - it wasn't, and forcing one would have been dishonest:
+- The C# app has **no equivalent of the PowerShell drive-enumeration call** (`-r info disc:9999`) at all - it goes straight to `dev:{driveLetter}` or `disc:{DriveIndex}`. So there is no short call to attach a 60s timeout to; that specific feature (`Bounded drive-query timeout (60s) with leftover-process diagnostics` in the README table) genuinely does not apply to this architecture, not just "not yet ported."
+- What DID port cleanly and with high confidence: the exact same `.Contains("0 titles")` overmatch bug from PR #123 existed in C#'s `AnalyzeMakeMKVNoFilesError` too, word for word. Fixed identically - device-disconnect text checked first and given a specific message, ahead of a narrowed "no valid title" check. Also added the same device-disconnect check to `AnalyzeMakeMKVError` (the exit-code path), matching the PowerShell structure.
+- What's a deliberate adaptation, not a port: added a 4-hour safety-net timeout to the actual MakeMKV rip call via a new optional `timeoutSeconds`/`timeoutStepLabel` parameter pair on `ExecuteProcess` (defaults to unbounded elsewhere - the two HandBrake calls are untouched). This protects against the same underlying risk class (a hung/disconnected drive causing an indefinite wait) as the PowerShell fixes, but attached to the one call site that actually shares that risk in this simpler architecture, with a timeout deliberately generous enough to never interrupt a real rip - unlike PowerShell's existing stuck-sector pattern detection, which can react much faster because it inspects output as it streams rather than waiting on a flat clock.
+- README Feature Parity table updated to match reality: `Device-disconnect vs. no-disc error classification` is now `Yes | Yes`; a new row distinguishes the two different hang-protection mechanisms rather than claiming false parity.
+
+**Verification:** `dotnet build` succeeded (0 errors, 0 warnings) after excluding this machine's global work NuGet feed from the restore (`--source https://api.nuget.org/v3/index.json` - the feed requires auth this session doesn't have and is unrelated; this project has zero package references, so nuget.org alone is sufficient). No C# test project exists in this repo to run - this is itself a pre-existing gap (`tests/` only covers the PowerShell scripts), out of scope for this pass.
+
+**Files changed:**
+- `rip-disc.ps1` - `Select-MatchedDrive` and `Wait-ProcessWithTimeout` extracted, inline call sites updated to use them
+- `tests/Test-DriveQueryTimeout.ps1` - new, 16 tests
+- `RipDisc/RipDisc/RipDiscApplication.cs` - device-disconnect classification in both `AnalyzeMakeMKVError` and `AnalyzeMakeMKVNoFilesError`; `ExecuteProcess` gained optional timeout support; MakeMKV rip call given a 4-hour safety-net timeout
+- `README.md` - Feature Parity table (2 rows updated/added)
+- `CHANGELOG.md` - new entry
+
+**Work In Progress:**
+- None - both items complete, ready to commit/PR/merge the same way as the rest of tonight's work.
+
+**Outstanding Work for Future Sessions:**
+- Everything from the #123-#126 entry above still stands (watch real rips on `H:`, investigate `H:`'s hardware, real-world validation of 2026-08-25's earlier work) - none of that changed by adding test coverage or the C# port.
+- No C# test project exists at all in this repo - a separate, pre-existing gap from tonight's "no tests for #124-#126" item, not addressed here.
+- The C# safety-net timeout (4 hours) is unverified against any real scenario - like the PowerShell 60s value before it, it's a reasoned estimate, not something exercised against an actual hang.
+- General C# parity backlog otherwise unchanged - see README Feature Parity table for what's still PowerShell-only.

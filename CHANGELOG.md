@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-26 (continued again) - Test Coverage and C# Port for the Drive-Query Hang Fixes
+
+### Added
+- `tests/Test-DriveQueryTimeout.ps1` — 16 tests covering the two genuinely pure/reusable pieces of the drive-query hang fixes below, extracted into named functions specifically so they could be tested (they were previously inline in the main script body):
+  - `Select-MatchedDrive` (new function) — the duplicate-drive-index selection logic from the earlier fix, tested against a fixture reproducing the exact live scenario (two `DRV:` entries sharing the same index, one by drive letter, one by raw device path)
+  - `Wait-ProcessWithTimeout` (new function) — the process-timeout-and-kill mechanic, tested against real short-lived child processes (a fast-exiting one, and one simulating a hang via `Start-Sleep`) rather than mocked, since it's inherently a real-process integration point
+  - `rip-disc.ps1`'s inline drive-matching and timeout-polling code now calls these two functions instead of duplicating the logic inline - a behaviour-preserving refactor, verified by re-running the full existing 79-test suite (all still passing) before and after
+- Ported the equivalent of the "misleading no-disc-detected message" fix (see the 2026-08-26 entry below, PR #123) to the C# implementation (`RipDisc/RipDisc/RipDiscApplication.cs`) - the exact same `.Contains("0 titles")` overmatch bug existed there too, in `AnalyzeMakeMKVNoFilesError`. Added the same higher-priority device-disconnect check (`STATUS_DEVICE_NOT_CONNECTED` / "does not exist") ahead of the narrowed "no valid title" check, in both `AnalyzeMakeMKVError` and `AnalyzeMakeMKVNoFilesError`
+- Added a 4-hour safety-net timeout to the C# implementation's MakeMKV rip call, via a new optional `timeoutSeconds`/`timeoutStepLabel` parameter pair on `ExecuteProcess` (defaults to unbounded - the two HandBrake call sites are unaffected). This is *not* a literal port of the PowerShell drive-query timeout: the C# app has no equivalent short drive-enumeration call to begin with (it goes straight to `dev:{driveLetter}` or `disc:{DriveIndex}`, unlike the PowerShell version's `-r info disc:9999` step), so there was nothing to attach a short timeout to. Instead this guards the one call site that actually shares the underlying risk - a hung/disconnected drive during the real rip - with a timeout generous enough to never interrupt a legitimate rip
+- README Feature Parity table updated to reflect both ports accurately, including a new row distinguishing the two different hang-protection *mechanisms* (PowerShell's existing stuck-sector pattern detection vs. C#'s new flat safety-net timeout) rather than claiming a false 1:1 match
+
 ## 2026-08-26 (continued) - Drive-Query Hang: Root Cause, Timeout, and Diagnostics
 
 ### Fixed
