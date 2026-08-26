@@ -1328,3 +1328,51 @@ New parameters:
 **Outstanding Work for Future Sessions:**
 - Real-world validation: confirm `-NoEject` actually leaves the disc in the drive and `-NoSound` actually silences the fanfare on a real rip
 - Port to the C# implementation if/when C# parity work resumes (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 - continue-rip.ps1 Retry Suggestion & Stale Disc-Label Cache Fix
+
+**PR #120 merged** (previous session's `-NoSound`/`-NoEject` work): approval blocked by GitHub's no-self-approval rule, as it has been on this user's other repos; `git-manager` fell back to a comment recording chat approval, then squash-merged as `b85f04d`. Local `main` confirmed up to date. Loose end noted but not acted on: branch `fix/null-output-path-and-resume-hint` still sits unmerged (local + remote) — unrelated to this work.
+
+**Feature: continue-rip.ps1 retry suggestion on failure**
+
+**Problem:**
+When `rip-disc.ps1` failed partway (HandBrake, organize, or open step), the user had to manually work out the equivalent `continue-rip.ps1` command — right `-FromStep`, and every genre/series/episode flag from the original run repeated by hand.
+
+**Solution:**
+New `Get-ContinueRipCommand` function (defined just above `Stop-WithError`) builds that command line from the run's own parameter values and prints it under a new `--- RETRY WITH continue-rip.ps1 ---` section in `Stop-WithError`'s failure output, right after the existing "MANUAL STEPS NEEDED" list.
+
+- Maps the earliest incomplete step (`Get-RemainingSteps`) to `-FromStep`: step 2 → `handbrake`, step 3 → `organize`, step 4 → `open`
+- Returns `$null` (prints nothing) when step 1 itself is still incomplete — `continue-rip.ps1` resumes after the MakeMKV rip, so there's nothing to hand it if the rip never produced files
+- Carries over `-title`, `-Series`/`-Season`/`-Disc`, every genre flag, `-StartEpisode`, `-EpisodeNames`, `-NoSound` — omitting each when it equals `continue-rip.ps1`'s own default, to keep the printed command short
+- `-OutputDrive` is included only when the user explicitly passed `-OutputDrive` on this run (both scripts share the same config-driven default otherwise, so omitting it still reproduces the same output path)
+- Titles/episode names with an embedded double quote are escaped with a backtick so the command still parses correctly when pasted back into PowerShell
+
+**Bug caught during implementation, before it shipped:** the first draft checked `$PSBoundParameters.ContainsKey('OutputDrive')` *inside* `Stop-WithError` to decide whether to include `-OutputDrive` — but `$PSBoundParameters` is per-function-scope in PowerShell, so inside `Stop-WithError` (which only takes `-Step`/`-Message`) that check silently always returns `$false`. Fixed by capturing `$script:OutputDriveExplicit = $PSBoundParameters.ContainsKey('OutputDrive')` once at the top of the script, right before the existing config-default logic overwrites `$OutputDrive`, and reading that script-scoped flag from `Stop-WithError` instead.
+
+**Fix: stale disc-label cache**
+
+**Problem (found live, mid-session):** user reported the drive listing showing `[FREDDY_GOT_FINGERED]` for a drive while holding that physical disc in hand — i.e., a different disc was actually in the drive (or none), but the display still showed the old one. Root cause: the drive-index lookup at the top of the script caches the full `makemkvcon -r info disc:9999` output for 5 minutes to avoid a slow re-enumeration on every run (see 2026-02-23 session notes). That cache includes each drive's `DRV:` disc-name field. Swap a disc within that 5-minute window and the cached name — shown in the "MakeMKV drives:" listing AND used via `$script:TargetDiscLabel` to auto-name genre-series episodes from the disc label — still reflects the *previous* disc.
+
+Actual ripped content was never wrong (the rip itself always reads live from the drive via a fresh `makemkvcon mkv disc:N ...` call, cache or no cache) — this only affected the cosmetic listing and genre-series auto-naming.
+
+**Solution:** For the one drive that matches `-Drive`/`$driveLetter` specifically (not every drive in the cached list — that would reintroduce the slow re-enumeration the cache exists to avoid), prefer a live `Get-DiscVolumeLabel` query (already used elsewhere in the file as a fallback) over the cached MakeMKV name, both when building the `drvLines` display list and — since `$script:TargetDiscLabel` is populated from that same list — for genre-series episode naming. One extra fast, per-drive-letter WMI call; every other drive's cached data is untouched. Only applies when `-DriveIndex` is not used (that path has no drive letter to query Windows with, and already had no label available — pre-existing, documented).
+
+**Deliberately not done:** shortening the cache TTL, or re-querying `makemkvcon -r info` live for the matched drive every run — the user explicitly asked to skip a fix "if it really slows things down," and a single-drive MakeMKV info query is the same 30-60+ second operation PR #64 already chose to avoid for exactly this reason. The Windows-side fix avoids that cost entirely.
+
+**Files changed:**
+- `rip-disc.ps1` — `Get-ContinueRipCommand` function, `Stop-WithError` retry-suggestion block, `$script:OutputDriveExplicit` capture, live disc-label preference in the drive-matching loop
+- `README.md` — Error Handling section, continue-rip.ps1 section cross-reference, Feature Parity table (two new rows)
+- `CHANGELOG.md` — 2026-08-26 entry
+
+**Testing status:** Parse-checked clean (`[System.Management.Automation.Language.Parser]::ParseFile`, 0 errors). `Get-ContinueRipCommand` was extracted via the AST (same technique as `tests/Test-EpisodeNaming.ps1`) and exercised ad hoc against 5 cases (plain genre disc, series with season/disc/output-drive/start-episode, step-1-only-remaining → `$null`, quoted title + episode names + `-NoSound`, no-remaining-steps → `$null`) — all produced correct output, but this was scratch verification, not a committed test file. The disc-label fix has **not** been runtime-tested against a real drive/disc swap this session.
+
+**Work In Progress:**
+- None — both changes complete on a feature branch, not yet committed/PR'd.
+
+**Outstanding Work for Future Sessions:**
+- Consider committing `Get-ContinueRipCommand`'s ad hoc test cases as a real `tests/Test-ContinueRipCommand.ps1` suite, matching the project's established pattern (AST-extracted, re-runnable)
+- Real-world validation: trigger an actual Step 2/3/4 failure and confirm the printed `continue-rip.ps1` command works verbatim; swap discs in a drive within the 5-minute cache window and confirm the listing/episode naming now reflects the new disc immediately
+- `fix/null-output-path-and-resume-hint` branch still unmerged — pick up or close
+- Port missing features to C# implementation (see Feature Parity table in README)

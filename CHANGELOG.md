@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## 2026-08-26
+
+### Added
+- On failure, `rip-disc.ps1` now prints a ready-to-paste `continue-rip.ps1` command under `--- RETRY WITH continue-rip.ps1 ---`, reformatted from this run's own inputs
+  - New `Get-ContinueRipCommand` function maps the earliest incomplete step to `continue-rip.ps1`'s `-FromStep` (`handbrake`/`organize`/`open`) and carries over `-title`, `-Series`/`-Season`/`-Disc`, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`, and (only when explicitly passed) `-OutputDrive`; values matching `continue-rip.ps1`'s own defaults are omitted to keep the command short
+  - Returns `$null`, and prints nothing, when Step 1 (the MakeMKV rip) itself never completed — `continue-rip.ps1` resumes AFTER that step, so there is nothing for it to work with
+  - Titles/episode names containing a literal double quote are escaped (`` ` " ``) so the printed command still parses as a single argument when pasted back into PowerShell
+
+### Fixed
+- Genre-series episode naming (and the "MakeMKV drives:" listing) could use a stale disc label after swapping discs in the same drive within the drive-lookup cache's 5-minute TTL — the cached MakeMKV `DRV:` line, not the disc actually in the drive, was shown and used to name episodes
+  - The target drive's entry now prefers a live, per-drive-letter Windows volume-label query (`Get-DiscVolumeLabel`, already used elsewhere as a fallback) over the cached MakeMKV name, so a disc swap is reflected immediately without re-enumerating every drive
+  - Scoped to the one matched drive only, so the existing cache (and the slow full `disc:9999` re-query it exists to avoid) is untouched for every other drive
+  - Only applies when `-DriveIndex` is not used — that path has no drive letter to query and already had no label available (documented pre-existing limitation)
+
 ## 2026-08-25
 
 ### Added

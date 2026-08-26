@@ -414,6 +414,8 @@ If an error occurs:
 - Window title shows `-ERROR` suffix
 - Completed steps are displayed in green
 - Remaining steps are listed with manual instructions
+- **If the MakeMKV rip itself already completed**, a ready-to-paste `continue-rip.ps1` command is printed under `--- RETRY WITH continue-rip.ps1 ---`, built from this run's own inputs (title, series/season/disc, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`) with `-FromStep` set to whichever step failed (`handbrake`, `organize`, or `open`) — copy it as-is to resume without re-ripping the disc
+  - Not shown when Step 1 (the rip) itself failed — `continue-rip.ps1` has no ripped MKV files to resume from in that case, so re-running `rip-disc.ps1` is the only option
 - Relevant directory is opened for inspection
 - Log file location is provided
 
@@ -444,6 +446,8 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Eject retry with timeout popup | Yes | No |
 | Completion fanfare | Yes | No |
 | `-NoSound` / `-NoEject` flags | Yes | No |
+| Suggested `continue-rip.ps1` retry command on failure | Yes | No |
+| Live disc-label lookup for the target drive (avoids stale cached name) | Yes | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 
@@ -498,7 +502,9 @@ The recovery script skips any files that already have a matching `.mp4` in the o
 
 ### continue-rip.ps1 (resume from any step)
 
-Use `continue-rip.ps1` to resume from any step after the initial MakeMKV rip:
+Use `continue-rip.ps1` to resume from any step after the initial MakeMKV rip. If `rip-disc.ps1`
+fails after the rip completes, it now prints the exact command to run — see
+[Error Handling](#error-handling) — so you usually won't need to build one of these by hand:
 
 ```powershell
 # Continue from HandBrake encoding (step 2)
