@@ -1440,3 +1440,36 @@ Three outstanding items from the review were picked up together:
 **Outstanding Work for Future Sessions:**
 - Real-world validation still pending for everything added 2026-08-25/26 (`-NoSound`, `-NoEject`, the retry-hint suggestion, the live disc-label fix, and now the rescued `$finalOutputDir` validation from PR #119) — none of it has touched an actual drive yet
 - Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 (same day, continued again) - Real-Disc Testing Finally Happens: H: Drive Hardware Flakiness, Misleading Error Message Fixed
+
+**First real-disc test since 2026-08-25's flurry of PowerShell-only changes.** User ran `rip-disc.ps1 -title "Burn A Surf Movie" -Documentary -Drive H -OutputDrive "F" -NoSound -NoEject` against the `H:` drive (`GP75N 1.01 K0MMB391933` - the same unit flagged in earlier session notes as unable to authenticate discs, though today's symptom was different).
+
+**What happened:**
+- MakeMKV found the drive, read the disc (`[BURN]`) fine, enumerated 21 titles - then failed to save **any** of them: `Error 'OS error - STATUS_DEVICE_NOT_CONNECTED' occurred while reading '/VIDEO_TS/VTS_01_1.VOB'`, `Error 'OS error - A device which does not exist was specified' occurred while reading '\Device\CdRom1'`, repeated per title. Ended with `0 titles saved, 21 failed`.
+- The script reported **"No disc detected in drive - MakeMKV could not find any valid titles"** - actively misleading, since the disc had already been read successfully moments earlier.
+- User tried `continue-rip.ps1 -FromStep 2` anyway; it correctly refused ("No MKV files in: ...") since 0 files existed. This is correct behaviour, not a bug - and confirms `Get-ContinueRipCommand` (added yesterday) was also right not to suggest it, since Step 1 never completed.
+- User re-ran `rip-disc.ps1` a second time on the same drive minutes later, for comparison. This attempt failed even faster (~57s) and *differently*: `Drive not found: H: - verify the drive letter is correct` - it couldn't even open the drive this time, never mind read 21 titles from it.
+
+**Diagnosis:** Not a script bug in the retry/step-tracking logic - both runs' behaviour was internally consistent given what MakeMKV actually reported. The pattern (reads fine once, then can't even be opened minutes later) points at **`H:` drive hardware/connection flakiness** - a loose USB cable/port, insufficient hub power, or Windows USB selective suspend - rather than a dead drive (a genuinely dead drive would not have read 21 titles cleanly on the first attempt). Told the user to physically check the USB connection, try a different port (ideally not through a hub), and check USB selective suspend is off for that device. Not something fixable in the script.
+
+**Bug found and fixed:** the "no disc / no valid titles" classification in `rip-disc.ps1` used `$makemkvOutputText -match "0 titles"`, which also matches MakeMKV's own end-of-rip summary line ("Copy complete. 0 titles saved, 21 failed") whenever every title fails to save, for ANY reason - not specifically because no disc was found. That's what produced the misleading message here. Fixed by adding a dedicated, higher-priority check for the Windows device-disconnect error text (`STATUS_DEVICE_NOT_CONNECTED`, "device does not exist") in **both** places `rip-disc.ps1` classifies a MakeMKV failure (the non-zero-exit-code path and the zero-files-created path), and narrowing the old catch-all to `-match "no valid title"` / `-match "no titles found"` instead of the bare `"0 titles"` substring. This case now reports "The drive disconnected (or the disc was ejected) ..." instead.
+
+**A false alarm investigated and ruled out along the way:** the user's terminal paste showed an empty "--- MANUAL STEPS NEEDED ---" section with none of the expected per-step lines under it. Extracted the exact loop (`foreach ($step in $remaining) { switch ($step.Number) { ... } }`) and ran it in isolation against the real `$script:AllSteps` hashtable shape with nothing completed - all 4 steps matched and printed correctly. No code path found that could produce an empty section here. Concluded this was very likely a copy/paste or terminal-rendering artifact in what the user pasted, not a real defect - flagged as ruled out rather than silently ignored, in case it recurs.
+
+**Files changed:**
+- `rip-disc.ps1` - device-disconnect classification added to both error-analysis blocks; narrowed the `"0 titles"` match
+- `CHANGELOG.md` - `[Unreleased]` entry
+
+**Testing status:** Parse-checked clean. Not yet re-tested against a real device-disconnect (would need to reproduce the drive dropping out again, which is exactly the flaky-hardware behaviour this session couldn't control on demand) - the message text itself has not been visually confirmed in a live failure yet, only verified to compile and to match the exact log text captured from the two real failures above.
+
+**Work In Progress:**
+- None - fix complete, on a feature branch, about to be committed/PR'd/merged the same way as this session's other work.
+
+**Outstanding Work for Future Sessions:**
+- Confirm the new error message actually displays correctly next time `H:` (or any drive) disconnects mid-rip
+- Investigate `H:`'s flakiness directly if it keeps happening - cable/port/hub swap, or consider it may need replacing if the pattern continues across sessions
+- Real-world validation still pending for `-NoSound`/`-NoEject`/the retry-hint suggestion/the live disc-label fix/PR #119's fixes - the two attempts this session both failed at Step 1, so none of steps 2-4 (where most of that recent work lives) got exercised yet
+- Port missing features to C# implementation (see Feature Parity table in README)
