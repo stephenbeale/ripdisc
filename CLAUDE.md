@@ -1549,3 +1549,26 @@ New `tests/Test-DriveQueryTimeout.ps1`, 16/16 passing. Re-ran the full pre-exist
 - No C# test project exists at all in this repo - a separate, pre-existing gap from tonight's "no tests for #124-#126" item, not addressed here.
 - The C# safety-net timeout (4 hours) is unverified against any real scenario - like the PowerShell 60s value before it, it's a reasoned estimate, not something exercised against an actual hang.
 - General C# parity backlog otherwise unchanged - see README Feature Parity table for what's still PowerShell-only.
+
+---
+
+### 2026-08-26 (session close) - Full Session Wrap: PRs #119-#128
+
+**Scope of this close-out:** covers the whole session's arc, not just the last increment - `-NoSound`/`-NoEject` (PR #120) through the drive-query hang incident chain, its test coverage, and the C# port (PR #128). Ten PRs total this session (#119-#128), all merged to `main`, all documented in the entries above as they landed. This entry is the final verification pass, not new work.
+
+**Verification performed at close:**
+- `ripdisc`: `git status` clean, `main` up to date with `origin/main` (HEAD `31ceb65`, PR #128), no unpushed commits, no stashes, no open PRs, no stale local branches (all ten feature branches were already deleted post-merge).
+- `claude-conventions` (`C:\Users\sjbeale\source\repos`, the repo-root shared-conventions repo): `git status` clean, `master` up to date with `origin/master` (PR #1 - the "options as numbered list applies to every response" clarification - merged), no open PRs, no stale branches.
+- Global `~/.claude/settings.json` hook (`numbered-options-session-start.sh`, wired to `SessionStart`) confirmed present and executable on disk - this was session-scoped machine config, not something either repo's git history could confirm, so noting it explicitly here for continuity.
+- Re-verified rather than trusted the PR #128 commit message's documentation claims: README Feature Parity table, CHANGELOG.md, and this file were all in fact updated in that same commit (`git show 31ceb65 --stat` confirms `CHANGELOG.md`, `CLAUDE.md`, `README.md` all touched alongside the code). `tests/` has 5 files matching the "95 tests across 5 files" claim. No stray C# test project exists (one `.csproj` total, confirming the "no C# tests" gap is real, not an oversight).
+
+**Two items flagged by git-manager during the PR #128 merge, carried forward here for a decision:**
+1. **Branch naming deviation.** PR #128's branch was `feat/drive-query-tests-and-csharp-port` - the repo-root `CLAUDE.md` (`C:\Users\sjbeale\source\repos\CLAUDE.md`) documents `feature/<description>`, `fix/<description>`, `refactor/<description>` only, no `feat/` short form. Cosmetic (branch is already merged and deleted) and low-stakes, but it's a real deviation from the written convention. Not fixed unilaterally this pass - worth a quick decision next session: either amend the convention doc to allow `feat/` as an accepted alias (it's a common enough shorthand that this may just be catching up the doc to actual practice), or tighten enforcement so `feat/` doesn't recur. Either is a one-line change to `claude-conventions`.
+2. **C# test coverage gap grew slightly.** PR #128 added new branching logic on the C# side (the device-disconnect checks in `AnalyzeMakeMKVError`/`AnalyzeMakeMKVNoFilesError`, the `ExecuteProcess` timeout parameters) verified only by `dotnet build` succeeding - no test exercises the actual branching behaviour. This isn't new: the repo has never had a C# test project (`RipDisc/RipDisc/RipDisc.csproj` is the only `.csproj` in the tree), so this was a pre-existing gap that this session's C# port work necessarily added more untested surface to. Stands as a real, if long-standing, gap - not a regression introduced carelessly, but worth flagging for whoever eventually decides to invest in a C# test project.
+
+**Session-wide outstanding work (superset of the per-entry lists above, for a single place to start next time):**
+1. Watch real rips on `H:` (and other drives) for whether the 60s drive-query timeout and leftover-process diagnostics actually hold up - one confirmed successful rip so far, not enough to call it resolved.
+2. Investigate `H:`'s underlying hardware flakiness directly (cable/port/hub/USB selective suspend) - still just a hypothesis.
+3. Real-world validation still pending for several 2026-08-25/26 features that predate the hang incident and haven't been exercised by a real rip yet: `-NoSound`, `-NoEject`, the `continue-rip.ps1` retry-hint suggestion, the live disc-label fix, PR #119's output-path validation.
+4. Decide on the branch-naming convention question above (`feat/` vs `feature/`) and, if changing the doc, make the edit in `claude-conventions`.
+5. No action needed to "wrap up" further - this is the natural end of the session. Nothing is uncommitted, unpushed, or unmerged in either `ripdisc` or `claude-conventions`.
