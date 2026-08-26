@@ -540,8 +540,12 @@ public class RipDiscApplication
         ConsoleHelper.WriteGray($"Command: makemkvcon mkv {discSource} all \"{_makemkvOutputDir}\" --minlength=120");
         _logger.Log($"MakeMKV command: makemkvcon mkv {discSource} all \"{_makemkvOutputDir}\" --minlength=120");
 
+        // 4-hour safety-net timeout: generous enough to never interrupt any realistic rip (even
+        // a large Blu-ray box set), but bounded enough to eventually recover from a genuinely
+        // stuck MakeMKV process instead of hanging forever with no recourse.
         var (exitCode, output) = ExecuteProcess(_makemkvconPath,
-            $"mkv {discSource} all \"{_makemkvOutputDir}\" --minlength=120", showOutput: true);
+            $"mkv {discSource} all \"{_makemkvOutputDir}\" --minlength=120", showOutput: true,
+            timeoutSeconds: 4 * 60 * 60, timeoutStepLabel: "STEP 1/4: MakeMKV rip");
 
         // Check for errors
         if (exitCode != 0)
@@ -654,8 +658,18 @@ public class RipDiscApplication
     {
         var errorMessage = $"MakeMKV exited with code {exitCode}";
 
+        // Check for the drive disconnecting (or the disc being ejected) mid-rip first - it has
+        // its own unmistakable Windows error text and, unlike the checks below, means the disc
+        // WAS read fine; something interrupted writing partway through, so "drive/disc not
+        // found" would be actively misleading here.
+        if (output.Contains("STATUS_DEVICE_NOT_CONNECTED", StringComparison.OrdinalIgnoreCase) ||
+            output.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+        {
+            errorMessage = "The drive disconnected (or the disc was ejected) partway through the rip - check the drive's USB/power connection and that the disc is still seated, then try again";
+            ConsoleHelper.WriteError($"\nERROR: {errorMessage}");
+        }
         // Check for drive not found
-        if (output.Contains("Failed to open disc", StringComparison.OrdinalIgnoreCase) ||
+        else if (output.Contains("Failed to open disc", StringComparison.OrdinalIgnoreCase) ||
             output.Contains("no disc", StringComparison.OrdinalIgnoreCase) ||
             output.Contains("can't find", StringComparison.OrdinalIgnoreCase) ||
             output.Contains("invalid drive", StringComparison.OrdinalIgnoreCase))
@@ -700,8 +714,20 @@ public class RipDiscApplication
     {
         var errorMessage = "No MKV files were created";
 
-        if (output.Contains("no valid", StringComparison.OrdinalIgnoreCase) ||
-            output.Contains("0 titles", StringComparison.OrdinalIgnoreCase))
+        // Device-disconnect is checked first and specifically excludes the generic "no valid
+        // title" match below: MakeMKV always prints a "X titles saved, Y failed" summary at the
+        // end of a rip, so "0 titles saved" appears whenever EVERY title fails to save for ANY
+        // reason - a disconnected drive, a full disk, permissions, anything - not just "no disc
+        // was found". Matching that bare "0 titles" substring (as this used to) misreported a
+        // drive that disconnected mid-save - which MakeMKV had already read titles from moments
+        // earlier - as if no disc were present at all.
+        if (output.Contains("STATUS_DEVICE_NOT_CONNECTED", StringComparison.OrdinalIgnoreCase) ||
+            output.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+        {
+            errorMessage = "The drive disconnected (or the disc was ejected) while MakeMKV was saving titles - the disc itself was read fine, but nothing could be written. Check the drive's USB/power connection and try again.";
+        }
+        else if (output.Contains("no valid title", StringComparison.OrdinalIgnoreCase) ||
+                 output.Contains("no titles found", StringComparison.OrdinalIgnoreCase))
         {
             errorMessage = "No disc detected in drive - MakeMKV could not find any valid titles";
         }
@@ -1277,7 +1303,15 @@ public class RipDiscApplication
         }
     }
 
-    private (int ExitCode, string Output) ExecuteProcess(string fileName, string arguments, bool showOutput = false)
+    // timeoutSeconds is optional and defaults to unbounded, matching the previous behaviour
+    // exactly for every existing call site that doesn't pass it (HandBrake encodes, which run
+    // against already-ripped local files and are not exposed to a drive disconnecting mid-call).
+    // When set, this is a safety net against a hung external process - e.g. MakeMKV never
+    // returning because a physical drive disconnected mid-rip (the PowerShell scripts in this
+    // repo hit exactly that live; this app has no equivalent recovery today). Output is still
+    // drained asynchronously via the event handlers below while waiting, so a timed-out wait
+    // cannot deadlock on a full stdout/stderr pipe the way a synchronous read would.
+    private (int ExitCode, string Output) ExecuteProcess(string fileName, string arguments, bool showOutput = false, int? timeoutSeconds = null, string? timeoutStepLabel = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -1315,7 +1349,22 @@ public class RipDiscApplication
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        process.WaitForExit();
+
+        if (timeoutSeconds.HasValue)
+        {
+            var exitedInTime = process.WaitForExit(timeoutSeconds.Value * 1000);
+            if (!exitedInTime)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* best effort - already stuck, not worth failing over */ }
+                var step = timeoutStepLabel ?? Path.GetFileName(fileName);
+                throw new ProcessingException(step,
+                    $"{Path.GetFileName(fileName)} did not respond within {timeoutSeconds.Value}s and was terminated - the drive may have disconnected, or a leftover process from an earlier run may still be holding it. Check Task Manager for an orphaned {Path.GetFileName(fileName)} process and try again.");
+            }
+        }
+        else
+        {
+            process.WaitForExit();
+        }
 
         return (process.ExitCode, outputBuilder.ToString());
     }
