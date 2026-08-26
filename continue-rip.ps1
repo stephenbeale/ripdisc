@@ -628,13 +628,23 @@ function Show-LogFileReminder {
 
 # ========== CONFIGURATION ==========
 $tempRoot = $script:Config_TempRoot
+
+# Filesystem-illegal characters in the title (e.g. a "/" in "05/06 Highlight Reel") get
+# interpreted by Windows as a path separator wherever $title is used to build a path or
+# filename - silently splitting one intended folder into two nested ones, or breaking
+# log-file creation outright ("Could not find a part of the path"). $safeTitle is what
+# every path/filename built below uses instead; $title itself is left untouched for
+# display text (console output, log message content, window title) so the user always
+# sees their real title, not the sanitized one.
+$safeTitle = $title -replace '[\\/:*?"<>|]', '_'
+
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
-    $makemkvOutputDir = "$tempRoot\$title\Extras"
+    $makemkvOutputDir = "$tempRoot\$safeTitle\Extras"
 } elseif ($Series -and $Season -gt 0) {
-    $makemkvOutputDir = "$tempRoot\$title\Season$Season\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$safeTitle\Season$Season\Disc$Disc"
 } else {
-    $makemkvOutputDir = "$tempRoot\$title\Disc$Disc"
+    $makemkvOutputDir = "$tempRoot\$safeTitle\Disc$Disc"
 }
 
 # Normalize output drive letter
@@ -642,7 +652,7 @@ $outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${Ou
 
 # Build final output directory path
 if ($script:IsGenreSeries) {
-    $genreSeriesBaseDir = "$outputDriveLetter\$($script:GenreFolder)\$title"
+    $genreSeriesBaseDir = "$outputDriveLetter\$($script:GenreFolder)\$safeTitle"
     if ($Season -gt 0) {
         $seasonTag = "S{0:D2}" -f $Season
         $seasonFolder = "Season $Season"
@@ -653,17 +663,17 @@ if ($script:IsGenreSeries) {
     }
     $finalOutputDir = Join-Path $genreSeriesSeasonDir "Disc$Disc"
 } elseif ($Documentary) {
-    $finalOutputDir = "$outputDriveLetter\Documentaries\$title"
+    $finalOutputDir = "$outputDriveLetter\Documentaries\$safeTitle"
 } elseif ($Tutorial) {
-    $finalOutputDir = "$outputDriveLetter\Tutorials\$title"
+    $finalOutputDir = "$outputDriveLetter\Tutorials\$safeTitle"
 } elseif ($Fitness) {
-    $finalOutputDir = "$outputDriveLetter\Fitness\$title"
+    $finalOutputDir = "$outputDriveLetter\Fitness\$safeTitle"
 } elseif ($Music) {
-    $finalOutputDir = "$outputDriveLetter\Music\$title"
+    $finalOutputDir = "$outputDriveLetter\Music\$safeTitle"
 } elseif ($Surf) {
-    $finalOutputDir = "$outputDriveLetter\Surf\$title"
+    $finalOutputDir = "$outputDriveLetter\Surf\$safeTitle"
 } elseif ($Series) {
-    $seriesBaseDir = "$outputDriveLetter\Series\$title"
+    $seriesBaseDir = "$outputDriveLetter\Series\$safeTitle"
     if ($Season -gt 0) {
         $seasonTag = "S{0:D2}" -f $Season
         $seasonFolder = "Season $Season"
@@ -675,9 +685,9 @@ if ($script:IsGenreSeries) {
     # Use per-disc subdirectory to isolate concurrent disc rips (prevents rename conflicts)
     $finalOutputDir = Join-Path $seriesSeasonDir "Disc$Disc"
 } elseif ($Bluray) {
-    $finalOutputDir = "$outputDriveLetter\Bluray\$title"
+    $finalOutputDir = "$outputDriveLetter\Bluray\$safeTitle"
 } else {
-    $finalOutputDir = "$outputDriveLetter\DVDs\$title"
+    $finalOutputDir = "$outputDriveLetter\DVDs\$safeTitle"
 }
 
 # Extras: encode directly into extras subdirectory of the title folder
@@ -716,7 +726,7 @@ $logDir = Join-Path $tempRoot "logs"
 if (!(Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logDiscLabel = if ($Extras) { "extras" } else { "disc${Disc}" }
-$script:LogFile = Join-Path $logDir "${title}_${logDiscLabel}_continue_${logTimestamp}.log"
+$script:LogFile = Join-Path $logDir "${safeTitle}_${logDiscLabel}_continue_${logTimestamp}.log"
 
 Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
@@ -1437,7 +1447,7 @@ if ($StartFromStepNumber -le 3) {
         Write-Host "`nPrefixing series files..." -ForegroundColor Yellow
         $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
         $discTag = "D$Disc"
-        $prefix = "$title-$seasonTag-$discTag"
+        $prefix = "$safeTitle-$seasonTag-$discTag"
 
         $episodeFiles = Get-ChildItem -File | Where-Object {
             $_.Extension -match '\.(mp4|mkv)$'
@@ -1510,15 +1520,15 @@ if ($StartFromStepNumber -le 3) {
         } elseif ($Extras) {
             # Extras disc: prefix with title only (no "-extras" or "-Special Features" in name)
             Write-Host "`nPrefixing extras files with title..." -ForegroundColor Yellow
-            $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$title-*") }
+            $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$safeTitle-*") }
             if ($filesToPrefix) {
                 Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
                 $filesToPrefix | ForEach-Object {
                     $file = $_
-                    if ($file.Name -like ("$title" + "_*")) {
-                        $newName = "$title-" + $file.Name.Substring($title.Length + 1)
+                    if ($file.Name -like ("$safeTitle" + "_*")) {
+                        $newName = "$safeTitle-" + $file.Name.Substring($safeTitle.Length + 1)
                     } else {
-                        $newName = "$title-" + $file.Name
+                        $newName = "$safeTitle-" + $file.Name
                     }
                     Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
                     $maxRetries = 10

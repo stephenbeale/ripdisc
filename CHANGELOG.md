@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-26 (yet again, once more) - Sanitize Title Before Building Any Path
+
+### Fixed
+- Live incident: `rip-disc.ps1 -title "The Arena Hawaii 05/06 Highlight Reel - ASL" -Documentary` failed continuously with `Add-Content : Could not find a part of the path 'C:\Video\logs\The Arena Hawaii 05\06 Highlight Reel - ASL_disc1_...log'`. Root cause: `$title` was used raw everywhere a path or filename got built, and Windows treats `/` exactly like `\` — a `/` inside the title silently turned one intended folder into two nested ones (`...\The Arena Hawaii 05\06 Highlight Reel - ASL\`), and broke `Write-Log`'s `Add-Content` outright since only the outer directory had been created.
+- Not fatal to the rip itself — MakeMKV and HandBrake both completed regardless, and `New-Item -ItemType Directory` creates the full nested path automatically — but the final output landed in the wrong nested location, file-prefixing in Step 3 would have used only the innermost folder name as the prefix (silently dropping everything before the `/`), and no session log was written for the run at all.
+- A `$safeTitle` sanitizer (`-replace '[\\/:*?"<>|]', '_'`) already existed in both scripts, but only for the recovery-script filename — defined far too late to help `$finalOutputDir`, `$makemkvOutputDir`, or the log file path, all of which are built earlier. Moved the sanitization to the top of the `CONFIGURATION` section in both scripts, immediately after `$title` is finalized, and switched every path/filename-building use of `$title` to `$safeTitle`: `$makemkvOutputDir` (all 3 branches), every `$finalOutputDir` branch (genre, genre-series, series, Blu-ray, DVD), `$script:LogFile`, the series-mode `$prefix`, and the extras-mode prefix-matching block. Display-only uses of `$title` (console output, log message text, window title, TMDb lookups) are deliberately untouched, so the user still sees their real title everywhere it's shown, not the sanitized form.
+- Movie-mode's main-feature-disc prefixing needed no change — it already reads the prefix back from the real directory (`(Get-Item $finalOutputDir).Name`) rather than reconstructing it from `$title`, so it self-corrects now that `$finalOutputDir` itself is built from `$safeTitle`.
+
+**Testing status:** `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM confirmed intact by inspecting raw file bytes. Full existing test suite re-run: 95/95 passing, no regressions. Not yet re-exercised against a real disc with a slash-containing title — the live incident's rip was left running rather than interrupted, so this fix will first prove itself on the next affected title.
+
 ## 2026-08-26 (continued yet again) - Widen the File-Lock Retry Window on Rename/Move
 
 ### Fixed
