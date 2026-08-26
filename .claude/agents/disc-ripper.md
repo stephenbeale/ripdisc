@@ -165,6 +165,8 @@ The script runs 4 steps:
   - For extras discs: `The Dark Knight-extras`, `The Dark Knight-extras - DONE`, etc.
 - The script auto-ejects the disc after MakeMKV rip (before HandBrake), unless `-NoEject` is passed
 - The completion fanfare beep melody can be silenced with `-NoSound`
+- On failure after the MakeMKV rip has completed (HandBrake/organize/open step), the script prints a ready-to-paste `continue-rip.ps1` command built from the original run's own arguments — no failure retry command is shown if the rip itself never completed
+- The drive listing (and genre-series episode auto-naming) queries Windows live for the target drive's disc label rather than trusting the cached MakeMKV drive list, so a disc swapped mid-session is reflected immediately instead of showing the previous disc for up to 5 minutes
 - 3-second delay after HandBrake encoding to prevent file locking issues
 - MakeMKV must be installed at: `Default MakeMKV install location`
 - HandBrake CLI must be installed at: `Default HandBrake CLI install location (via Chocolatey)`
