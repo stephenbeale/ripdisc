@@ -643,9 +643,38 @@ if ($DriveIndex -ge 0) {
     }
     if (-not $drvOutput) {
         Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
-        $drvOutput = & $makemkvconPath -r info disc:9999 2>&1 | Where-Object { $_ -is [string] }
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: MakeMKV drive query failed (exit code $LASTEXITCODE)" -ForegroundColor Red
+        # Run this as a real Process with a hard timeout, not a plain `&` call - `&` has no
+        # timeout mechanism at all, and MakeMKV's own drive probe can hang indefinitely when a
+        # physical drive is malfunctioning (seen live: a USB DVD drive that had started
+        # dropping connection made this exact query hang for 5+ minutes with nothing to show
+        # for it). Only stdout is redirected, matching the main rip step further down -
+        # MakeMKV's error lines land on stdout, not stderr.
+        $drvProc = New-Object System.Diagnostics.Process
+        $drvProc.StartInfo.FileName = $makemkvconPath
+        $drvProc.StartInfo.Arguments = "-r info disc:9999"
+        $drvProc.StartInfo.UseShellExecute = $false
+        $drvProc.StartInfo.RedirectStandardOutput = $true
+        $drvProc.StartInfo.RedirectStandardError = $false
+        $drvProc.StartInfo.CreateNoWindow = $true
+        $drvProc.Start() | Out-Null
+
+        $drvQueryTimeoutSec = 30
+        $drvQuerySw = [System.Diagnostics.Stopwatch]::StartNew()
+        while (-not $drvProc.HasExited -and $drvQuerySw.Elapsed.TotalSeconds -lt $drvQueryTimeoutSec) {
+            Start-Sleep -Milliseconds 250
+        }
+
+        if (-not $drvProc.HasExited) {
+            Write-Host "ERROR: MakeMKV drive query did not respond within ${drvQueryTimeoutSec}s - a drive is likely malfunctioning or disconnected. Check drive connections (USB/power) and try again." -ForegroundColor Red
+            try { $drvProc.Kill() } catch {}
+            exit 1
+        }
+
+        # Safe to read now without blocking: the process has already exited, so its stdout
+        # pipe is closed and ReadToEnd() returns immediately with whatever it wrote.
+        $drvOutput = @($drvProc.StandardOutput.ReadToEnd() -split "`r?`n")
+        if ($drvProc.ExitCode -ne 0) {
+            Write-Host "ERROR: MakeMKV drive query failed (exit code $($drvProc.ExitCode))" -ForegroundColor Red
             exit 1
         }
         # Cache the output for subsequent runs — but only if every drive enumerated cleanly.
