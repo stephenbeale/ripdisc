@@ -6,6 +6,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- `rip-disc.ps1` reported "No disc detected in drive" when a drive disconnected (or the disc was ejected) mid-rip, even after MakeMKV had already read the disc's titles successfully — found live, mid-session, when a USB DVD drive dropped out partway through saving 21 already-detected titles. The old check matched `-match "0 titles"`, which also matches MakeMKV's own end-of-rip summary line ("Copy complete. 0 titles saved, 21 failed") whenever every title fails to save, for any reason — not specifically "no disc was ever found". Added a dedicated, higher-priority check for the Windows device-disconnect error text (`STATUS_DEVICE_NOT_CONNECTED`, "device does not exist") in both places `rip-disc.ps1` classifies a MakeMKV failure, so this case now reports "The drive disconnected (or the disc was ejected) ..." instead
+
 ## 2026-08-26
 
 ### Added

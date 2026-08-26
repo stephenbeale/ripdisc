@@ -1516,8 +1516,16 @@ if ($makemkvExitCode -ne 0) {
     # Analyze output to determine the specific error
     $errorMessage = "MakeMKV exited with code $makemkvExitCode"
 
+    # Check for the drive disconnecting (or the disc being ejected) mid-rip first - it has its
+    # own unmistakable Windows error text and, unlike the checks below, means the disc WAS read
+    # fine; something interrupted writing partway through, so "drive/disc not found" would be
+    # actively misleading here.
+    if ($makemkvOutputText -match "STATUS_DEVICE_NOT_CONNECTED" -or $makemkvOutputText -match "device (which )?does not exist") {
+        $errorMessage = "The drive disconnected (or the disc was ejected) partway through the rip - check the drive's USB/power connection and that the disc is still seated, then try again"
+        Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+    }
     # Check for CSS authentication failure first — it can occur without "Failed to open disc"
-    if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION") {
+    elseif ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION") {
         # CSS authentication failure. MakeMKV often reports only the SCSI errors and never prints
         # "Failed to open disc", so this must be checked before that branch or it never fires.
         $cssDrive = ""
@@ -1591,8 +1599,17 @@ if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
     # MakeMKV succeeded but no files created - likely no valid titles found
     $errorMessage = "No MKV files were created"
 
-    # Check output for clues about why no files were created
-    if ($makemkvOutputText -match "no valid" -or $makemkvOutputText -match "0 titles") {
+    # Check output for clues about why no files were created.
+    # Device-disconnect is checked first and specifically excludes the generic "no valid title"
+    # match below: MakeMKV always prints a "X titles saved, Y failed" summary at the end of a
+    # rip, so "0 titles saved" appears whenever EVERY title fails to save for ANY reason - a
+    # disconnected drive, a full disk, permissions, anything - not just "no disc was found".
+    # Matching that bare "0 titles" substring (as this used to) misreported a drive that
+    # disconnected mid-save - which MakeMKV had already read 21 titles from moments earlier -
+    # as if no disc were present at all.
+    if ($makemkvOutputText -match "STATUS_DEVICE_NOT_CONNECTED" -or $makemkvOutputText -match "device (which )?does not exist") {
+        $errorMessage = "The drive disconnected (or the disc was ejected) while MakeMKV was saving titles - the disc itself was read fine, but nothing could be written. Check the drive's USB/power connection and try again."
+    } elseif ($makemkvOutputText -match "no valid title" -or $makemkvOutputText -match "no titles found") {
         $errorMessage = "No disc detected in drive - MakeMKV could not find any valid titles"
     } elseif ($makemkvOutputText -match "copy protection" -or $makemkvOutputText -match "protected") {
         $errorMessage = "Disc may be copy-protected or encrypted - MakeMKV could not extract titles"
