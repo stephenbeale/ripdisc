@@ -1372,7 +1372,28 @@ Actual ripped content was never wrong (the rip itself always reads live from the
 - None — both changes complete on a feature branch, not yet committed/PR'd.
 
 **Outstanding Work for Future Sessions:**
-- Consider committing `Get-ContinueRipCommand`'s ad hoc test cases as a real `tests/Test-ContinueRipCommand.ps1` suite, matching the project's established pattern (AST-extracted, re-runnable)
 - Real-world validation: trigger an actual Step 2/3/4 failure and confirm the printed `continue-rip.ps1` command works verbatim; swap discs in a drive within the 5-minute cache window and confirm the listing/episode naming now reflects the new disc immediately
-- `fix/null-output-path-and-resume-hint` branch still unmerged — pick up or close
+- Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 (same day, continued) - Follow-Up Cleanup, Test Suite, and PR #119 Rescue
+
+**PR #121 merged** (the retry-hint + disc-label work above): approval blocked by the same self-approval rule as #120; `git-manager` used the comment-fallback again, then squash-merged as `2c79f5d`. `git-manager` flagged one cosmetic nit from its own review of that PR: the new disc-label guard carried a redundant `-and $DriveIndex -lt 0` — the enclosing branch only ever runs with `$DriveIndex` unset, so the clause was always true. Fixed in this session (see Changed, below).
+
+Three outstanding items from the review were picked up together:
+
+**1. Dropped the redundant clause** (see above) — one-line change, no behaviour change.
+
+**2. Committed `tests/Test-ContinueRipCommand.ps1`** — promotes the ad hoc verification used while building `Get-ContinueRipCommand` into a real, re-runnable suite, following the same AST-extraction pattern as `Test-EpisodeNaming.ps1` / `Test-LogFileReminder.ps1`. 11/11 passing. One test-authoring mistake caught by the suite itself before commit: the first draft of the genre-flags test omitted `-Disc 1`, so PowerShell's own `[int]` parameter default (`0`, not `1`) leaked into the expected command as an unwanted `-Disc 0` — fixed by passing `-Disc 1` explicitly, matching how the real call site in `Stop-WithError` always passes it.
+
+**3. Rescued PR #119 (`fix/null-output-path-and-resume-hint`)** — this branch had been open and unmerged since before the `-NoSound`/`-NoEject` work even started (its single commit, `bb2afd2`, predates everything from 2026-08-25 onward), so a raw `main`-vs-branch diff misleadingly looked like the branch was *removing* `-NoSound`/`-NoEject`/the retry hint/etc. — it wasn't; it simply forked before they existed. Confirmed via `gh pr list` that PR #119 was still open and its actual fix (Sort-Object descending-sort bug on PS 5.1 hashtables in `continue-rip.ps1`, `Test-DriveReady` null-path guard, the `$finalOutputDir` fail-fast validation in `rip-disc.ps1`, `Test-StepPrerequisites` null guards) was **not** present on `main` and **not** superseded by anything merged since — genuinely still needed, just stale. Handled by merging `main` into the branch, resolving conflicts (the two diverged in disjoint regions of `rip-disc.ps1`/`continue-rip.ps1`, so this was low-risk), and re-verifying before push. See the PR itself for the final merge commit.
+
+**Testing status:** All three items parse-checked clean and the full local test suite (`Test-EpisodeNaming.ps1`, `Test-LogFileReminder.ps1`, `Test-ContinueRipCommand.ps1`) passes after the PR #119 merge-forward. Still no real-disc runtime testing this session.
+
+**Work In Progress:**
+- None — all three items complete.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation still pending for everything added 2026-08-25/26 (`-NoSound`, `-NoEject`, the retry-hint suggestion, the live disc-label fix, and now the rescued `$finalOutputDir` validation from PR #119) — none of it has touched an actual drive yet
 - Port missing features to C# implementation (see Feature Parity table in README)
