@@ -658,15 +658,51 @@ if ($DriveIndex -ge 0) {
         $drvProc.StartInfo.CreateNoWindow = $true
         $drvProc.Start() | Out-Null
 
-        $drvQueryTimeoutSec = 30
+        # 60s, not 30s: seen live, a legitimate (not stuck) query on a USB drive that had to
+        # spin up from idle took ~30-35s to complete on its own. A shorter timeout would kill a
+        # query that was actually about to succeed, not just a genuinely hung one.
+        $drvQueryTimeoutSec = 60
         $drvQuerySw = [System.Diagnostics.Stopwatch]::StartNew()
         while (-not $drvProc.HasExited -and $drvQuerySw.Elapsed.TotalSeconds -lt $drvQueryTimeoutSec) {
             Start-Sleep -Milliseconds 250
         }
 
         if (-not $drvProc.HasExited) {
-            Write-Host "ERROR: MakeMKV drive query did not respond within ${drvQueryTimeoutSec}s - a drive is likely malfunctioning or disconnected. Check drive connections (USB/power) and try again." -ForegroundColor Red
             try { $drvProc.Kill() } catch {}
+
+            # No $script:LogFile exists yet at this point - LOGGING SETUP runs later, once a
+            # drive has actually been identified - so there is nothing to write this to. Make
+            # the console output carry the same information a log entry would instead.
+            Write-Host "`n========================================" -ForegroundColor Red
+            Write-Host "MakeMKV drive query timed out after ${drvQueryTimeoutSec}s" -ForegroundColor Red
+            Write-Host "========================================" -ForegroundColor Red
+            Write-Host "No session log exists yet for this run - logging only starts once a drive is" -ForegroundColor Gray
+            Write-Host "identified, and this failed before that point." -ForegroundColor Gray
+
+            # A previous run that was Ctrl+C'd can leave its own makemkvcon64.exe still running
+            # and holding the drive exclusively - PowerShell's Ctrl+C does not kill a script's
+            # child processes for you. That looks identical to a hung/disconnected drive from
+            # here, so surface it explicitly rather than just guessing "malfunctioning".
+            $otherMkvProcs = @(Get-Process -Name "makemkvcon", "makemkvcon64" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $drvProc.Id })
+            if ($otherMkvProcs.Count -gt 0) {
+                $pidList = ($otherMkvProcs | ForEach-Object { $_.Id }) -join ", "
+                Write-Host "`nLikely cause: $($otherMkvProcs.Count) other MakeMKV process(es) already running (PID $pidList)." -ForegroundColor Yellow
+                Write-Host "If an earlier rip was stopped with Ctrl+C, its makemkvcon process can be left" -ForegroundColor Yellow
+                Write-Host "running and holding the drive - Ctrl+C does not close it for you. Close it with:" -ForegroundColor Yellow
+                Write-Host "  Get-Process makemkvcon,makemkvcon64 | Stop-Process -Force" -ForegroundColor White
+            } else {
+                Write-Host "`nNo other MakeMKV process is currently running, so this isn't a leftover process" -ForegroundColor Gray
+                Write-Host "holding the drive. Other likely causes:" -ForegroundColor Gray
+                Write-Host "  - The drive is just slow to spin up from idle - simply retrying often works" -ForegroundColor Gray
+                Write-Host "  - The drive/cable/hub genuinely disconnected - check the physical connection" -ForegroundColor Gray
+            }
+
+            Write-Host "`n--- RETRY OPTIONS ---" -ForegroundColor Cyan
+            Write-Host "  1. Re-run the exact same command - a slow-spin-up drive often succeeds on retry" -ForegroundColor White
+            Write-Host "  2. If you already know the MakeMKV drive index, skip this lookup entirely:" -ForegroundColor White
+            Write-Host "       -DriveIndex <N>   (e.g. -DriveIndex 0 or -DriveIndex 1)" -ForegroundColor Gray
+            Write-Host "  3. If this keeps happening on the same drive, check Task Manager for a" -ForegroundColor White
+            Write-Host "     leftover makemkvcon64.exe process even after this script exits" -ForegroundColor Gray
             exit 1
         }
 
