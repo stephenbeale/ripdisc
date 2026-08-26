@@ -669,7 +669,9 @@ if ($DriveIndex -ge 0) {
                 # listing and later, via $script:TargetDiscLabel, in genre-series episode
                 # naming. One extra per-drive-letter WMI query is cheap; re-enumerating every
                 # drive on every run (what the cache exists to avoid) is not.
-                if ($drvLetter -eq $driveLetter -and $DriveIndex -lt 0) {
+                # (No $DriveIndex check needed - this whole branch only runs when $DriveIndex
+                # is unset; see the enclosing if/else above.)
+                if ($drvLetter -eq $driveLetter) {
                     $liveDiscName = Get-DiscVolumeLabel -DriveLetter $drvLetter
                     if ($liveDiscName) { $displayDiscName = $liveDiscName }
                 }

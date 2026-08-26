@@ -20,6 +20,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Scoped to the one matched drive only, so the existing cache (and the slow full `disc:9999` re-query it exists to avoid) is untouched for every other drive
   - Only applies when `-DriveIndex` is not used — that path has no drive letter to query and already had no label available (documented pre-existing limitation)
 
+### Changed
+- Dropped a redundant `-and $DriveIndex -lt 0` condition from the disc-label live-query guard added above — the surrounding branch only ever runs when `$DriveIndex` is unset, so the check was always true and added nothing (cosmetic follow-up, same run's PR review)
+
+### Added
+- `tests/Test-ContinueRipCommand.ps1` — 11 tests for `Get-ContinueRipCommand`, promoting the ad hoc verification from the retry-suggestion work above into a committed, re-runnable suite (AST-extracted from `rip-disc.ps1`, same technique as the other `tests/*.ps1` files). Covers step-to-`-FromStep` mapping, the step-1-unresolved `$null` case, default-value omission, non-default value carry-through and ordering, and quote escaping in `-title`/`-EpisodeNames`
+
 ## 2026-08-25
 
 ### Added
