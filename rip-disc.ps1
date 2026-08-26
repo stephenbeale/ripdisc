@@ -51,7 +51,15 @@
     # Always wins over the disc-label auto-detection below. Supply one name per episode
     # on the disc; any episodes beyond the supplied names fall back to plain numbering.
     [Parameter()]
-    [string[]]$EpisodeNames = @()
+    [string[]]$EpisodeNames = @(),
+
+    # Skip the completion fanfare ([Console]::Beep melody) played at the end of a run.
+    [Parameter()]
+    [switch]$NoSound,
+
+    # Skip ejecting the disc after the MakeMKV rip completes.
+    [Parameter()]
+    [switch]$NoEject
 )
 
 # ========== LOAD CONFIG ==========
@@ -1494,6 +1502,11 @@ Complete-CurrentStep
 #      trusting a call to return within a deadline. DriveInfo.IsReady costs
 #      single-digit milliseconds even under full load, so polling is cheap and,
 #      unlike a wall-clock timeout, it reports what actually happened.
+if ($NoEject) {
+    Write-Host "`nSkipping disc eject (-NoEject)" -ForegroundColor Gray
+    Write-Log "Disc eject skipped (-NoEject)"
+} else {
+
 Write-Timestamp "Ejecting disc"
 Write-Host "`nEjecting disc from drive $driveLetter..." -ForegroundColor Yellow
 
@@ -1594,6 +1607,8 @@ if ($ejectSuccess) {
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 }
+
+} # end of -NoEject guard
 
 } # end of MakeMKV rip + eject block
 
@@ -1730,16 +1745,18 @@ if ($Queue) {
     Write-Log "QUEUE MODE: Job added to queue ($($queue.Count) total jobs)"
     Write-Log "Queue file: $queueFilePath"
 
-    # Play triumphant fanfare to signal completion
-    try {
-        [Console]::Beep(523, 150)  # C5
-        [Console]::Beep(659, 150)  # E5
-        [Console]::Beep(784, 150)  # G5
-        [Console]::Beep(1047, 300) # C6 (held)
-        Start-Sleep -Milliseconds 100
-        [Console]::Beep(784, 150)  # G5
-        [Console]::Beep(1047, 450) # C6 (triumphant hold)
-    } catch { }
+    # Play triumphant fanfare to signal completion (skipped with -NoSound)
+    if (-not $NoSound) {
+        try {
+            [Console]::Beep(523, 150)  # C5
+            [Console]::Beep(659, 150)  # E5
+            [Console]::Beep(784, 150)  # G5
+            [Console]::Beep(1047, 300) # C6 (held)
+            Start-Sleep -Milliseconds 100
+            [Console]::Beep(784, 150)  # G5
+            [Console]::Beep(1047, 450) # C6 (triumphant hold)
+        } catch { }
+    }
 
     Enable-ConsoleClose
     $host.UI.RawUI.WindowTitle = "$windowTitle - QUEUED"
@@ -2407,16 +2424,18 @@ if ($script:EncodedFilesTooSmall) {
     }
 }
 
-# Play triumphant fanfare to signal completion
-try {
-    [Console]::Beep(523, 150)  # C5
-    [Console]::Beep(659, 150)  # E5
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 300) # C6 (held)
-    Start-Sleep -Milliseconds 100
-    [Console]::Beep(784, 150)  # G5
-    [Console]::Beep(1047, 450) # C6 (triumphant hold)
-} catch { }
+# Play triumphant fanfare to signal completion (skipped with -NoSound)
+if (-not $NoSound) {
+    try {
+        [Console]::Beep(523, 150)  # C5
+        [Console]::Beep(659, 150)  # E5
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 300) # C6 (held)
+        Start-Sleep -Milliseconds 100
+        [Console]::Beep(784, 150)  # G5
+        [Console]::Beep(1047, 450) # C6 (triumphant hold)
+    } catch { }
+}
 
 Enable-ConsoleClose
 $host.UI.RawUI.WindowTitle = "$windowTitle - DONE"

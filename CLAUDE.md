@@ -1294,3 +1294,37 @@ Earlier entries in this file claim "8/8" and "12/12 logic unit tests pass" with 
 - Validate stuck sector detection on a genuinely damaged disc
 - The C# port items have now been carried since 2026-02-16 (over six months) with no commit touching `RipDisc/*.cs` — still unresolved whether to formally abandon this
 - Stray `nul` files at repo root and `.claude\nul` — still not cleaned up, still low priority
+
+---
+
+### 2026-08-25 - -NoSound and -NoEject Flags
+
+**Problem:**
+The completion fanfare (`[Console]::Beep` melody) and automatic disc eject were always-on. Users running overnight batches, or ripping in a room where others are asleep, had no way to silence the fanfare; users who wanted to leave a disc in the drive (e.g. queuing another rip on it, or manually inspecting it) had no way to skip the eject.
+
+**Solution:**
+
+New parameters:
+- `-NoSound` (both scripts) — wraps each `[Console]::Beep` fanfare block in `if (-not $NoSound) { ... }`. `rip-disc.ps1` has two fanfare sites (normal completion, `-Queue` completion); `continue-rip.ps1` has one.
+- `-NoEject` (`rip-disc.ps1` only) — wraps the entire eject block (helper functions, retry loop, success/failure messaging, and the `MessageBox` popup on failure) in `if ($NoEject) { <skip message> } else { <existing eject logic> }`. The eject block only runs during the initial MakeMKV rip (Step 1), so `continue-rip.ps1` — which always resumes after that step — has no eject logic to guard. It still accepts `-NoEject` as a parameter (ignored) purely for command-line compatibility, matching the existing treatment of `-Drive`/`-DriveIndex`: a failed `rip-disc.ps1` command line can be pasted into `continue-rip.ps1` unchanged.
+
+**Usage:**
+```powershell
+# Rip quietly overnight, leave the disc in the drive afterwards
+.\rip-disc.ps1 -title "The Matrix" -NoSound -NoEject
+```
+
+**Files changed:**
+- `rip-disc.ps1` — `-NoSound`/`-NoEject` parameters, eject block guard, both fanfare block guards
+- `continue-rip.ps1` — `-NoSound` parameter and fanfare block guard; `-NoEject` accepted and ignored
+- `README.md` — Features list, parameter table, new usage example, feature parity table
+- `CHANGELOG.md` — 2026-08-25 entry
+
+**Testing status:** Parse-checked only (`[System.Management.Automation.Language.Parser]::ParseFile` reports 0 errors on both scripts) and the UTF-8 BOM was verified intact after editing. Not runtime-tested against a real disc — no committed test exercises the eject/fanfare code paths themselves (they need real hardware or would require extracting them behind a testable seam, which this change did not do).
+
+**Work In Progress:**
+- None — implementation complete, PR opened for review before merge.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: confirm `-NoEject` actually leaves the disc in the drive and `-NoSound` actually silences the fanfare on a real rip
+- Port to the C# implementation if/when C# parity work resumes (see Feature Parity table in README)
