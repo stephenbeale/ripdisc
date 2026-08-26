@@ -234,6 +234,10 @@ function Get-UniqueFilePath {
 function Test-DriveReady {
     param([string]$Path)
 
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return @{ Ready = $false; Drive = "Unknown"; Message = "Cannot check drive readiness: output path is empty" }
+    }
+
     # Extract the drive letter from the path (e.g., "E:" from "E:\DVDs\Movie")
     $driveLetter = [System.IO.Path]::GetPathRoot($Path)
     if (-not $driveLetter) {
@@ -1008,6 +1012,38 @@ if ($script:IsGenreSeries) {
 # Extras: encode directly into extras subdirectory of the title folder
 if ($Extras -and -not $Series) {
     $finalOutputDir = Join-Path $finalOutputDir "extras"
+}
+
+# Fail fast if the path didn't come out usable. A malformed or empty -OutputDrive can
+# make one of the Join-Path calls above emit a non-terminating error and silently
+# leave $finalOutputDir null/empty (e.g. a provider-qualified-looking path such as
+# "F::\..." makes Join-Path fail with "Cannot find a provider with the name 'F'" and
+# return nothing, while the script carries on regardless). Left unchecked, every
+# downstream Test-Path/Join-Path call on it throws a raw parameter-binding exception
+# instead of a clear message. Catch it here, at construction time, instead of at each
+# call site - and before spending 20+ minutes on a MakeMKV rip for nothing.
+if ([string]::IsNullOrWhiteSpace($finalOutputDir) -or $finalOutputDir -notmatch '^[A-Za-z]:\\') {
+    Write-Host "`nERROR: Could not build a valid output path from -OutputDrive '$OutputDrive'." -ForegroundColor Red
+    Write-Host "  Resolved to: '$finalOutputDir'" -ForegroundColor Red
+    Write-Host "  Expected something like 'E:\...' - check the -OutputDrive value." -ForegroundColor Yellow
+    exit 1
+}
+
+# Fail fast if the destination drive itself isn't there. HandBrake encodes straight to
+# this drive, so continuing here just means finding out the hard way, part-way through
+# (or at the very end of) an encode that can run for many minutes - after also having
+# spent time ripping the disc in Step 1.
+#
+# Skipped under -Queue: queue mode only rips to the local MakeMKV temp folder and
+# writes an encoding job for later (see "QUEUE MODE" below) - it never touches
+# $finalOutputDir in this invocation, so the destination drive is allowed to still be
+# disconnected now and plugged in before -processQueue runs.
+if (-not $Queue) {
+    $outputDriveCheck = Test-DriveReady -Path $finalOutputDir
+    if (-not $outputDriveCheck.Ready) {
+        Write-Host "`nERROR: $($outputDriveCheck.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
 
 $handbrakePath = $script:Config_HandBrakePath

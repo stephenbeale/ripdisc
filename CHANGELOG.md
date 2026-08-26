@@ -70,6 +70,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - The mid-run `Log file:` line in `Stop-WithError` moved from above the error banner to after it, in both scripts — on a failure the log is what the user needs, and printing it first meant it scrolled away behind the recovery guidance
 - README "Session logging" feature bullet extended to mention the clickable log path shown at the end of every run
 
+## 2026-08-24 (continued) - Null output path and wrong resume-step hint
+
+### Fixed
+- `$finalOutputDir` could end up `$null`/empty in both `rip-disc.ps1` and `continue-rip.ps1`, producing raw `Test-Path`/`Join-Path` parameter-binding exceptions and a blank `Output folder :` line instead of a clear error
+  - A malformed or empty `-OutputDrive` can make one of the `Join-Path` calls that build `$finalOutputDir` emit a *non-terminating* error and return nothing while the script continues regardless — e.g. a provider-qualified-looking path such as `F::\...` fails with `Cannot find a provider with the name 'F'` rather than throwing
+  - Fixed with a construction-time validation immediately after `$finalOutputDir` is built in both scripts: it must match `^[A-Za-z]:\\`, or the script stops immediately with a clear message showing what it resolved to
+  - Defensive `-not [string]::IsNullOrWhiteSpace(...)` guards also added at the two original crash sites in `continue-rip.ps1` (the prerequisite check and the already-encoded lookup) as a second line of defense
+- Both scripts now fail fast when the destination drive itself is missing, instead of running the prerequisite checks (and, previously, starting an encode) against an unusable path
+  - Reuses the existing `Test-DriveReady` helper, called right after `$finalOutputDir` is validated — before `rip-disc.ps1` even starts ripping the disc in Step 1
+  - `Test-DriveReady` itself now gives a clear "output path is empty" message when handed a null/empty path, instead of the misleading `Could not determine drive letter from path:` with nothing after the colon
+- `continue-rip.ps1`'s "To pick up from here" resume hint suggested `-FromStep 4` after a **Step 2** failure, which would have skipped the encode and organize steps entirely
+  - Root cause: `Sort-Object Number` silently sorts **descending** on Windows PowerShell 5.1 when the pipeline objects are `[hashtable]` (as `$script:AllSteps` entries are) rather than `[PSCustomObject]` — the bare property-name binder doesn't resolve through the same adapter that dot-notation member access uses, so it fell back to a different (and here, reversed) ordering
+  - Fixed by sorting on a script block (`Sort-Object { $_.Number }`) instead, which reads the value directly and sorts correctly regardless of object type
+  - `rip-disc.ps1` does not have this defect — it has no resume-hint feature to begin with (`-FromStep` only exists in `continue-rip.ps1`)
+
+### Added
+- `tests/Test-ContinuePathAndResume.ps1` — 27 tests covering both fixes above: the `$finalOutputDir` validation condition (extracted from the real source text) against the exact failure shapes seen in this incident plus several adjacent malformed-path cases, `Test-DriveReady`'s new empty-input handling in both scripts, and the resume-hint regression (asserted against the real `Show-StepsSummary`/`Get-RemainingSteps`/`Get-Step` function bodies)
+
 ## 2026-08-17
 
 ### Added
