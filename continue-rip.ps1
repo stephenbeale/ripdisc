@@ -1396,8 +1396,8 @@ if ($StartFromStepNumber -le 3) {
             $finalName = [System.IO.Path]::GetFileName($uniquePath)
             Write-Host "  $($file.Name) -> $finalName" -ForegroundColor Gray
 
-            $maxRetries = 5
-            $retryDelay = 3
+            $maxRetries = 10
+            $retryDelay = 5
             for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                 try {
                     Move-Item -LiteralPath $file.FullName -Destination $uniquePath -ErrorAction Stop
@@ -1446,8 +1446,8 @@ if ($StartFromStepNumber -le 3) {
         foreach ($file in $episodeFiles) {
             $newName = "$prefix-$($file.Name)"
             Write-Host "  $($file.Name) -> $newName" -ForegroundColor Gray
-            $maxRetries = 5
-            $retryDelay = 3
+            $maxRetries = 10
+            $retryDelay = 5
             for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                 try {
                     Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
@@ -1485,8 +1485,8 @@ if ($StartFromStepNumber -le 3) {
                     } else {
                         $newName = $dirName + "-" + $file.Name
                     }
-                    $maxRetries = 5
-                    $retryDelay = 3
+                    $maxRetries = 10
+                    $retryDelay = 5
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
                             Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
@@ -1521,8 +1521,8 @@ if ($StartFromStepNumber -le 3) {
                         $newName = "$title-" + $file.Name
                     }
                     Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
-                    $maxRetries = 5
-                    $retryDelay = 3
+                    $maxRetries = 10
+                    $retryDelay = 5
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
                             Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
@@ -1558,8 +1558,8 @@ if ($StartFromStepNumber -le 3) {
                         $newName = $dirName + "-Special Features-" + $file.Name
                     }
                     Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
-                    $maxRetries = 5
-                    $retryDelay = 3
+                    $maxRetries = 10
+                    $retryDelay = 5
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
                             Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
@@ -1592,8 +1592,8 @@ if ($StartFromStepNumber -le 3) {
                     Write-Host "Largest file: $($largestFile.Name) ($([math]::Round($largestFile.Length/1GB, 2)) GB)" -ForegroundColor White
                     $newName = $largestFile.Directory.Name + "-Feature" + $largestFile.Extension
                     Write-Host "Renaming to: $newName" -ForegroundColor Yellow
-                    $maxRetries = 5
-                    $retryDelay = 3
+                    $maxRetries = 10
+                    $retryDelay = 5
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
                             Rename-Item -LiteralPath $largestFile.FullName -NewName $newName -ErrorAction Stop
