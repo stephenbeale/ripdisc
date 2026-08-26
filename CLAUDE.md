@@ -1473,3 +1473,45 @@ Three outstanding items from the review were picked up together:
 - Investigate `H:`'s flakiness directly if it keeps happening - cable/port/hub swap, or consider it may need replacing if the pattern continues across sessions
 - Real-world validation still pending for `-NoSound`/`-NoEject`/the retry-hint suggestion/the live disc-label fix/PR #119's fixes - the two attempts this session both failed at Step 1, so none of steps 2-4 (where most of that recent work lives) got exercised yet
 - Port missing features to C# implementation (see Feature Parity table in README)
+
+---
+
+### 2026-08-26 (same day, continued yet again) - The Hang Root-Caused and Fixed (PRs #124-#126); Session Closure
+
+**Same incident as the entry immediately above, continued.** While troubleshooting the device-disconnect message fix (#123), the user hit a second, separate live problem: the script hanging at `Looking up drive H in MakeMKV...` with no way out except Ctrl+C.
+
+**PR #124 (`43901a4`) - two fixes found live, neither the actual cause:**
+1. `Get-DiscVolumeLabel`'s `Get-CimInstance Win32_CDROMDrive` call had no timeout - a drive in a bad reconnect state could stall this for minutes even when targeting a different, healthy drive (it enumerates every CD-ROM drive on the system). Added `-OperationTimeoutSec 5`.
+2. A reconnecting drive could appear twice in MakeMKV's own `disc:9999` drive list under the same index (once by drive letter, once by raw device path), garbling the "MakeMKV drives:" display and marking two drives with `<--` at once. Matching now also requires the drive letter, not just the index.
+
+Both real bugs, both shipped - but the hang kept happening after this PR merged, because neither was the actual root cause.
+
+**PR #125 (`2e2ab37`) - the actual root cause:** `& $makemkvconPath -r info disc:9999` itself had no timeout mechanism at all. This call runs *before* either #124 fix, so neither could ever have helped - confirmed live at 5+ minutes and counting. Replaced the bare `&` invocation with a real `System.Diagnostics.Process`, polled with a hard timeout; on timeout the process is killed and a clear error shown instead of hanging forever.
+
+**PR #126 (`3a7b26e`) - the timeout itself needed tuning:** user reported the 30s timeout from #125 firing but felt the failure message was inadequate ("where's the log info, or retry options"). Live investigation found two things: (1) 30s was too short - a legitimately slow-spinning-up drive was observed taking ~30-35s to succeed on its own, so 30s was killing good queries; raised to 60s. (2) A genuine leftover `makemkvcon64.exe` from an earlier Ctrl+C'd run was found still holding a drive exclusively. The timeout error message now explains why no log file exists yet at this failure point, detects and reports leftover MakeMKV processes by PID, and lists 3 concrete numbered retry options.
+
+**User confirmed working:** a rip attempted after #126 shipped succeeded ("it seems to be working"). This is one successful run after three same-session fix iterations (#124, #125, #126) against hardware that was independently flaky earlier the same session (the H: drive disconnect that prompted #123) - encouraging, but not proof the hang, the 60s value, or the drive's underlying flakiness are fully resolved. See Outstanding Work below.
+
+**Doc/consistency audit performed at session close (this pass) - gaps found and fixed:**
+- `CLAUDE.md` (this file) had a session note for #123 but none for #124/#125/#126 until this entry - now caught up.
+- `CHANGELOG.md` carried the #124-#126 entries under a `## [Unreleased]` header, breaking with every other entry in the file (all dated). Renamed to `## 2026-08-26 (continued) - Drive-Query Hang: Root Cause, Timeout, and Diagnostics` and added a testing-status note about tonight's one confirmed rip.
+- `README.md` had **not** been touched by any of #123-#126 despite all four changing user-visible behaviour (a new failure message, a new 60s wait with diagnostics on timeout). Added two rows to the Feature Parity table (`Bounded drive-query timeout (60s) with leftover-process diagnostics`, `Device-disconnect vs. no-disc error classification`) and two paragraphs to the Error Handling section describing the drive-lookup timeout/diagnostics behaviour and the disconnect-vs-no-disc classification.
+- No test file covers any of the #124-#126 code (the WMI timeout, the duplicate-index dedup, the `Process`-based timeout-and-kill, the leftover-process detection, or the retry-diagnostics message) - unlike most other recent features, none of this went through the repo's AST-extraction test pattern (`tests/Test-*.ps1`). Understandable given this was live incident response under time pressure, but a real gap.
+- `continue-rip.ps1` was checked and confirmed **not** to need any of this - it never calls the MakeMKV drive-query (`disc:9999`) or `Get-DiscVolumeLabel` at all (it resumes after the rip step and never reads the disc), so there's no missing port there despite the feature-parity instinct to check. Confirmed by grep: no `disc:9999` match in `continue-rip.ps1`.
+- C# implementation (`RipDisc/*.cs`) genuinely has no equivalent timeout on its own drive-query call (`GetDriveIndexDescription`/drive enumeration in `RipDiscApplication.cs`) - this is a real, unaddressed gap, now reflected in the README Feature Parity table rows added above. Consistent with the C# port backlog carried since 2026-02-16.
+
+**Files changed this pass (docs only, no code):**
+- `CLAUDE.md` - this entry
+- `CHANGELOG.md` - `[Unreleased]` renamed to a dated section, testing-status note added
+- `README.md` - Error Handling section, Feature Parity table (2 new rows)
+
+**Work In Progress:**
+- None - working tree clean, all PRs (#119-#126, plus the `claude-conventions` repo's PR #1) merged, nothing unpushed.
+
+**Outstanding Work for Future Sessions:**
+- **The whole #123-#126 incident chain deserves a "did this actually fully resolve it" follow-up, not a close-out.** Tonight's confirmation was one successful rip after three back-to-back fix iterations against hardware (`H:`) that was independently flaky earlier the same session. Watch the next several rips on `H:` (and other drives) specifically for: the drive-query hang recurring even at 60s, the 60s wait itself becoming a new annoyance if it turns out most real hangs exceed even that, and the leftover-process detection actually firing/being useful when it happens for real.
+- No automated test coverage for any of #124-#126 (WMI timeout, duplicate-index dedup, `Process`-based drive-query timeout-and-kill, leftover-process detection, retry-diagnostics message). Worth a `tests/Test-DriveQueryTimeout.ps1` or similar following the existing AST-extraction pattern, once the dust settles.
+- `-DriveIndex`-related timeout/diagnostics work has not been ported to the C# implementation - `RipDiscApplication.cs`'s own drive-query/enumeration path still has no timeout mechanism at all. (`continue-rip.ps1` was checked and does not need this port - it never reads the disc, confirmed by grep.)
+- `H:`'s underlying hardware flakiness (loose USB cable/port, hub power, or Windows USB selective suspend - noted two entries above) is still just a hypothesis, not investigated or resolved.
+- Real-world validation still pending for everything added 2026-08-25/26 that predates tonight's incident (`-NoSound`, `-NoEject`, the retry-hint suggestion, the live disc-label fix, PR #119's `$finalOutputDir` validation) - tonight's two real rips both centred on the drive-lookup/error-message path, not these.
+- Port missing features to C# implementation generally (see Feature Parity table in README) - carried since 2026-02-16, now six months+, still not formally resolved as "abandon" or "keep porting."

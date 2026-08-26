@@ -421,6 +421,10 @@ If an error occurs:
 - Relevant directory is opened for inspection
 - Log file location is provided
 
+**Drive lookup (`rip-disc.ps1` only):** before ripping starts, the script queries MakeMKV directly (`Looking up drive X in MakeMKV...`) to map your drive letter to its internal index. This query is bounded by a 60-second timeout — a malfunctioning or slow-to-spin-up drive can legitimately take 30+ seconds here, so this isn't necessarily a hang. If it does time out, the error explains why no log file exists yet at this point, checks for and reports any leftover `makemkvcon`/`makemkvcon64` process from a previous Ctrl+C'd run (which can hold the drive exclusively), and lists concrete retry options, including `-DriveIndex` to skip the lookup entirely.
+
+**Failure classification:** a MakeMKV run that reads the disc successfully but then fails to save any titles (e.g. the drive disconnects mid-rip) is reported as a drive disconnect, not as "no disc detected" — the two are distinguished by the specific Windows error text rather than a generic "0 titles" match, so a real hardware disconnect isn't confused with an empty/unreadable drive.
+
 ## Feature Parity
 
 The PowerShell scripts are the primary implementation. The C# version covers core functionality but is missing some newer features:
@@ -450,6 +454,8 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | `-NoSound` / `-NoEject` flags | Yes | No |
 | Suggested `continue-rip.ps1` retry command on failure | Yes | No |
 | Live disc-label lookup for the target drive (avoids stale cached name) | Yes | No |
+| Bounded drive-query timeout (60s) with leftover-process diagnostics | Yes | No |
+| Device-disconnect vs. no-disc error classification | Yes | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## 2026-08-26 (continued) - Drive-Query Hang: Root Cause, Timeout, and Diagnostics
 
 ### Fixed
 - `Get-DiscVolumeLabel`'s `Get-CimInstance Win32_CDROMDrive` call in `rip-disc.ps1` could hang for minutes (found live: a USB DVD drive that had started disconnecting mid-rip made WMI's drive enumeration stall) even when the run targeted a completely different, healthy drive - this call enumerates every CD-ROM drive on the system, not just the target one. Added `-OperationTimeoutSec 5`, bounding it to a few seconds; the existing `catch` already treats a failed lookup as non-fatal (episode-naming convenience only), so a timeout now degrades gracefully instead of hanging the whole script
@@ -12,6 +12,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - The real cause of the live hang the two fixes above were chasing: `& $makemkvconPath -r info disc:9999 2>&1` had no timeout mechanism at all. MakeMKV's own drive-enumeration query can hang indefinitely when a physical drive is malfunctioning (confirmed live: 5+ minutes and counting on a USB DVD drive that had started dropping connection) - this happens *before* either of the fixes above ever run, so neither could help. Replaced the bare `&` call with a real `System.Diagnostics.Process`, polled with a hard timeout; on timeout the process is killed and a clear error is shown instead of hanging forever. Verified both the timeout-and-kill path and the normal-output path against synthetic child processes before shipping
   - Follow-up, same day: the initial 30s timeout was too short - live evidence showed a legitimate (not stuck) query on a USB drive spinning up from idle taking ~30-35s to succeed on its own, so a 30s cutoff was killing queries that would otherwise have worked. Raised to 60s
   - The timeout error message was also too thin (no log file exists yet at this point in the script - logging only starts once a drive is identified - and no retry guidance was given). It now explicitly says why there's no log for this failure, checks for and reports any *other* `makemkvcon`/`makemkvcon64` process still running (a Ctrl+C'd earlier rip does not kill its own MakeMKV child process, which can then hold the drive exclusively and cause this exact symptom on the next attempt), and lists concrete retry options (`Stop-Process` the leftover, just retry, or use `-DriveIndex` to skip the lookup entirely)
+
+**Testing status:** a subsequent rip attempt against the same drive completed successfully after the 60s/diagnostics change (#126) shipped - the hang did not recur. That is one successful run after several same-session fix iterations on live, flaky hardware; treat as encouraging, not as confirmation the hang is fully resolved. See `CLAUDE.md` session notes for the full incident chain and what still needs follow-up.
 
 ## 2026-08-26
 
