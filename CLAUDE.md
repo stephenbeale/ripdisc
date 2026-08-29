@@ -1720,3 +1720,34 @@ of either signature.
    Blu-ray-specific diagnostics on a single occurrence.
 3. Everything carried from the eBay entry above still stands - none of it touched by
    this fix.
+
+---
+
+### 2026-08-29 (continued again) - Show Disc Type in the Drive Listing
+
+**Trigger:** direct user follow-up to the CSS-misdiagnosis entry above, after they
+clarified the Batman Forever disc really was an audio CD put in by mistake: "please
+put on the end of the drive look up what the disc inside is always - audio cd, dvd,
+blu-ray, cd-rom, whatever it is".
+
+**Change:** new `Get-DiscTypeLabel` helper (next to `Get-DiscVolumeLabel`) classifies
+what's in a drive - `Audio CD` (reuses `Get-DiscVolumeLabel`'s bounded WMI query and
+its generic-literal-label signal), `Blu-ray` (`BDMV` folder present), `DVD-Video`
+(`VIDEO_TS` folder present), or a data disc with a capacity-based CD/DVD/BD-ROM size
+guess. Wired into the `MakeMKV drives:` listing so every non-busy drive shows its type
+before a rip even starts - not just after a failure. Also refactored the audio-CD
+suggestion added in the CSS-misdiagnosis fix to reuse this same helper instead of its
+own inline check, so there's one shared classifier instead of two.
+
+**Files changed:** `rip-disc.ps1`, `README.md`, `CHANGELOG.md`, `CLAUDE.md` (this entry)
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact;
+added lines ASCII-only. **Not exercised against real drives with a mix of disc types**
+- the BDMV/VIDEO_TS checks and the capacity-based data-disc guess are reasoned from
+known disc-format conventions, not verified against actual Blu-ray/DVD-Video/data
+discs in a drive.
+
+**Priority for Next Session:**
+1. Load a few different disc types (audio CD, DVD, Blu-ray, a data disc) across the
+   available drives and confirm the listing labels each one correctly.
+2. Everything carried from the two entries above this one still stands.
