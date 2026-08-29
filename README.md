@@ -37,6 +37,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Automatic disc ejection** after successful rip, optional via `-NoEject`
 - **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
 - **eBay sold-price check** — prints a clickable eBay UK sold-listings search URL for the ripped title, optional via `-CheckEbayPrice`
+- **Disc type shown per drive** in the drive listing (Audio CD, Blu-ray, DVD-Video, or a size-based guess for a data disc) — a quick check to catch the wrong disc before a rip even starts
 
 ## Auto-Discovery
 
@@ -435,6 +436,8 @@ If an error occurs:
 
 **Drive lookup (`rip-disc.ps1` only):** before ripping starts, the script queries MakeMKV directly (`Looking up drive X in MakeMKV...`) to map your drive letter to its internal index. This query is bounded by a 60-second timeout — a malfunctioning or slow-to-spin-up drive can legitimately take 30+ seconds here, so this isn't necessarily a hang. If it does time out, the error explains why no log file exists yet at this point, checks for and reports any leftover `makemkvcon`/`makemkvcon64` process from a previous Ctrl+C'd run (which can hold the drive exclusively), and lists concrete retry options, including `-DriveIndex` to skip the lookup entirely.
 
+**Disc type shown in the drive listing:** every non-busy drive in the `MakeMKV drives:` listing shows what's actually in it — `Audio CD`, `Blu-ray`, `DVD-Video`, or a size-based guess for a plain data disc (`Data disc (CD-ROM-sized)` etc.) — worked out independently of MakeMKV (volume label, `BDMV`/`VIDEO_TS` folder presence, disc capacity). This is a quick visual check to catch the wrong disc in the drive (e.g. a music CD instead of the movie DVD) before a rip even starts, not just after MakeMKV fails on it — if `rip-disc.ps1` does fail with a SCSI `ILLEGAL MODE FOR THIS TRACK` error and the disc turns out to be an audio CD, the error message says so directly and points at `ripaudio`'s `rip-audio.ps1` instead.
+
 **Failure classification:** a MakeMKV run that reads the disc successfully but then fails to save any titles (e.g. the drive disconnects mid-rip) is reported as a drive disconnect, not as "no disc detected" — the two are distinguished by the specific Windows error text rather than a generic "0 titles" match, so a real hardware disconnect isn't confused with an empty/unreadable drive.
 
 ## Feature Parity
@@ -469,6 +472,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Bounded drive-query timeout (60s) with leftover-process diagnostics | Yes | No |
 | MakeMKV rip process hang safety net (kills a stuck/unresponsive process rather than blocking forever) | Yes (stuck-sector detection) | Yes (flat 4h timeout) |
 | `-CheckEbayPrice` (eBay UK sold-listings search URL in the FILE SUMMARY) | Yes (`rip-disc.ps1` only) | No |
+| Disc type shown per-drive in the drive listing (Audio CD/Blu-ray/DVD-Video/data disc) | Yes (`rip-disc.ps1` only) | No |
 | Device-disconnect vs. no-disc error classification | Yes | Yes |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |

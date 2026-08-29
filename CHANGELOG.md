@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-29 (continued again) - Show Disc Type in the Drive Listing
+
+### Added
+- **Every non-busy drive in `rip-disc.ps1`'s `MakeMKV drives:` listing now shows what's actually in it** - `Audio CD`, `Blu-ray`, `DVD-Video`, or a capacity-based guess for a plain data disc (`Data disc (CD-ROM-sized)` etc.) - determined independently of MakeMKV. Direct follow-up to the SCSI-misdiagnosis fix above: that fix explains a *failure* honestly after the fact, this shows the disc type *before* a rip starts, so a wrong disc (the exact "audio CD instead of the movie DVD" mix-up from the Batman Forever incident) is visible at a glance rather than only discovered after MakeMKV fails on it.
+- New `Get-DiscTypeLabel` helper: Audio CD via the generic literal volume label Windows always reports for CDDA (reuses `Get-DiscVolumeLabel`'s existing bounded WMI query rather than repeating it); Blu-ray via a `BDMV` folder at the disc root; DVD-Video via a `VIDEO_TS` folder; otherwise a data disc, with a rough CD/DVD/BD-ROM size guess from `[System.IO.DriveInfo].TotalSize` - explicitly labelled as a guess, not a guarantee, since a near-empty or multi-session disc can mislead a capacity-only heuristic.
+- Skipped for busy drives (never query one mid-rip, consistent with existing drive-listing behaviour elsewhere in the same loop).
+- The `ILLEGAL MODE FOR THIS TRACK` message added in the fix above now reuses this same helper instead of its own inline `Get-Volume` check, so there's one shared place that knows how to tell an audio CD apart from a video disc.
+- README.md: new Features bullet, a new paragraph under "Error Handling", and a Feature Parity table row (PowerShell only, not ported to C#).
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact on raw bytes; added lines confirmed ASCII-only. Not exercised against real drives with a mix of disc types in them - the BDMV/VIDEO_TS folder checks and the capacity-based data-disc guess have not been verified against actual Blu-ray, DVD-Video, or data discs, only reasoned about from known disc-format conventions.
+
 ## 2026-08-29 (continued) - Stop Misdiagnosing Every SCSI Read Failure as CSS
 
 ### Fixed

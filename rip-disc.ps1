@@ -525,6 +525,49 @@ function Get-DiscVolumeLabel {
     return ""
 }
 
+# Determines what kind of disc is in a drive - Audio CD, Blu-ray, DVD-Video, or a data
+# disc (CD-ROM/DVD-ROM/BD-ROM, sized by capacity as a rough hint) - independent of
+# MakeMKV, so it can be shown for every drive in the listing below, not just the one
+# about to be ripped. Best-effort only, like Get-DiscVolumeLabel above: never throws,
+# and a failure/no-media case just returns "" so callers show nothing rather than guess.
+function Get-DiscTypeLabel {
+    param([string]$DriveLetter)
+
+    if (-not $DriveLetter) { return "" }
+    $letter = $DriveLetter.TrimEnd(':', '\')
+    if ($letter.Length -ne 1) { return "" }
+
+    # Audio CD has no real filesystem - Windows always reports the generic literal
+    # volume label "Audio CD" for one, which Get-DiscVolumeLabel above already surfaces
+    # via its own bounded WMI query, so this reuses that instead of repeating it.
+    $volName = Get-DiscVolumeLabel -DriveLetter $letter
+    if ($volName -eq 'Audio CD') { return "Audio CD" }
+
+    $root = "${letter}:\"
+    try {
+        if (-not (Test-Path $root -ErrorAction Stop)) { return "" }
+    } catch {
+        return ""
+    }
+    if (Test-Path (Join-Path $root "BDMV") -ErrorAction SilentlyContinue) { return "Blu-ray" }
+    if (Test-Path (Join-Path $root "VIDEO_TS") -ErrorAction SilentlyContinue) { return "DVD-Video" }
+
+    # Readable filesystem, no video-disc folder structure - a data disc. Capacity is a
+    # rough hint at the physical format (CD/DVD/BD-sized), not a guarantee - a
+    # near-empty or multi-session disc can mislead this, so it's labelled accordingly
+    # rather than stated as fact.
+    try {
+        $driveInfo = [System.IO.DriveInfo]::new($root)
+        if ($driveInfo.IsReady) {
+            $sizeGB = $driveInfo.TotalSize / 1GB
+            if ($sizeGB -lt 1) { return "Data disc (CD-ROM-sized)" }
+            elseif ($sizeGB -lt 10) { return "Data disc (DVD-ROM-sized)" }
+            else { return "Data disc (BD-ROM-sized)" }
+        }
+    } catch { }
+    return "Data disc"
+}
+
 # Works out the episode title for each file on a genre-series disc.
 # Precedence: explicit -EpisodeNames, then the cleaned disc label (only when the disc
 # yielded exactly one episode - one label cannot name several files), then nothing.
@@ -830,8 +873,17 @@ if ($DriveIndex -ge 0) {
             $marker = if ($d.Index -eq $matchedIndex -and $d.Letter -eq $driveLetter) { " <--" } else { "" }
             $busyTag = if ($d.Busy) { " (busy)" } else { "" }
             $discLabel = if ($d.DiscName) { " [$($d.DiscName)]" } else { "" }
+            # Shown for every drive, not just the one about to be ripped - a quick visual
+            # check to catch e.g. an audio CD sitting in the drive by mistake before a rip
+            # even starts, not just after MakeMKV fails on it. Skipped for a busy drive -
+            # never query one mid-rip.
+            $discTypeTag = ""
+            if (-not $d.Busy) {
+                $discType = Get-DiscTypeLabel -DriveLetter $d.Letter
+                if ($discType) { $discTypeTag = " ($discType)" }
+            }
             $color = if ($d.Busy) { "DarkYellow" } else { "Gray" }
-            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$busyTag$marker" -ForegroundColor $color
+            Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$discTypeTag$busyTag$marker" -ForegroundColor $color
         }
     }
     if ($matchedIndex -ge 0) {
@@ -1712,7 +1764,23 @@ if ($makemkvExitCode -ne 0) {
             $errorMessage = "Disc copy protection (CSS) prevented reading - the drive was found but MakeMKV could not authenticate the disc. Try reinserting the disc or check that MakeMKV has a valid licence key"
             Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
         } elseif ($makemkvOutputText -match "ILLEGAL MODE FOR THIS TRACK") {
-            $errorMessage = "The drive rejected a read command for this disc (SCSI: ILLEGAL MODE FOR THIS TRACK) - the drive was found but could not read the disc. This can mean copy protection (CSS on DVD, AACS/BD+ on Blu-ray), a dirty or damaged disc, or an incompatible disc/drive combination - not necessarily CSS specifically. Try cleaning the disc, trying a different drive, or checking that MakeMKV has a valid licence key."
+            # This exact SCSI error is also what happens when a DVD-formatted read command
+            # hits a disc that isn't DVD/BD structured at all - most commonly a plain audio
+            # CD (CDDA) put in for ripping with this script by mistake instead of ripaudio's
+            # rip-audio.ps1. Confirmed live: a "Batman Forever" attempt that hit this error
+            # turned out to be the soundtrack CD, not the movie DVD. Reuses the same
+            # Get-DiscTypeLabel helper the drive listing above uses, so there is only one
+            # place that knows how to tell an audio CD apart from a video disc.
+            # Only attempted when a real drive letter is known: in -DriveIndex mode,
+            # $driveLetter is just $Drive's unrelated default ("D:" unless overridden) and
+            # may not be the physical drive MakeMKV actually read from, so the check would
+            # be unreliable there.
+            $looksLikeAudioCd = ($DriveIndex -lt 0) -and ((Get-DiscTypeLabel -DriveLetter $driveLetter) -eq 'Audio CD')
+            if ($looksLikeAudioCd) {
+                $errorMessage = "This looks like an audio CD, not a DVD/Blu-ray - MakeMKV rips video discs, not music CDs. If this is a music CD, use the ripaudio project's rip-audio.ps1 instead (e.g. .\rip-audio.ps1 -Drive $driveLetter)."
+            } else {
+                $errorMessage = "The drive rejected a read command for this disc (SCSI: ILLEGAL MODE FOR THIS TRACK) - the drive was found but could not read the disc. This can mean copy protection (CSS on DVD, AACS/BD+ on Blu-ray), a dirty or damaged disc, or an incompatible disc/drive combination - not necessarily CSS specifically. Try cleaning the disc, trying a different drive, or checking that MakeMKV has a valid licence key."
+            }
             Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
         } elseif ($makemkvOutputText -match "IFO|BUP|VOB|VTS") {
             $errorMessage = "Disc is corrupt or unreadable - MakeMKV found the drive but could not read the disc structure"
