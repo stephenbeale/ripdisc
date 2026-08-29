@@ -36,6 +36,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Console close button protection** prevents accidental window closure
 - **Automatic disc ejection** after successful rip, optional via `-NoEject`
 - **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
+- **eBay sold-price check** — prints a clickable eBay UK sold-listings search URL for the ripped title, optional via `-CheckEbayPrice`
 
 ## Auto-Discovery
 
@@ -154,6 +155,10 @@ Both versions use the same command-line parameters:
 -noEject                Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only —
                         continue-rip.ps1 accepts it for command-line compatibility but
                         ignores it, since it never runs the rip/eject step)
+-checkEbayPrice         Print a clickable eBay UK sold-listings search URL for the title in
+                        the FILE SUMMARY (Buy It Now, Very Good+ condition, UK only, sold
+                        listings) — a convenience for checking what the physical disc might
+                        be worth, not part of the rip itself
 ```
 
 ### Documentary / genre series (multi-disc box sets)
@@ -273,6 +278,13 @@ RipDisc -processQueue                                             # After all ri
 **Rip quietly overnight, leave the disc in the drive:**
 ```powershell
 .\rip-disc.ps1 -title "The Matrix" -noSound -noEject
+```
+
+**Check what the physical disc might be worth after ripping:**
+```powershell
+.\rip-disc.ps1 -title "Inception" -bluray -checkEbayPrice
+# FILE SUMMARY includes a clickable eBay UK sold-listings search URL
+# (Buy It Now, Very Good+ condition, sold listings only)
 ```
 
 ## Directory Structure
@@ -456,6 +468,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Live disc-label lookup for the target drive (avoids stale cached name) | Yes | No |
 | Bounded drive-query timeout (60s) with leftover-process diagnostics | Yes | No |
 | MakeMKV rip process hang safety net (kills a stuck/unresponsive process rather than blocking forever) | Yes (stuck-sector detection) | Yes (flat 4h timeout) |
+| `-CheckEbayPrice` (eBay UK sold-listings search URL in the FILE SUMMARY) | Yes (`rip-disc.ps1` only) | No |
 | Device-disconnect vs. no-disc error classification | Yes | Yes |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
