@@ -1693,8 +1693,26 @@ if ($makemkvExitCode -ne 0) {
     # If MakeMKV output mentions disc structure (IFO/BUP/VOB/VTS), the drive was found
     # but the disc itself is corrupt or unreadable
     elseif ($makemkvOutputText -match "Failed to open disc") {
-        if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS TRACK|Scsi error") {
+        # Was previously "SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS
+        # TRACK|Scsi error" - bare "Scsi error" is not CSS-specific at all, it's the prefix
+        # MakeMKV puts on essentially every SCSI-level read failure (dirty disc, damaged
+        # media, wrong disc type, drive firmware quirk, genuine protection, anything), so
+        # this branch was firing - and confidently telling the user it's a CSS licence-key
+        # problem - for almost any hardware-level failure. Live incident: a Blu-ray drive
+        # reported "Scsi error - ILLEGAL REQUEST:ILLEGAL MODE FOR THIS TRACK" and got told
+        # "Disc copy protection (CSS)" - CSS is a DVD-only scheme and doesn't even apply to
+        # Blu-ray (which uses AACS/BD+), so the diagnosis couldn't have been right regardless
+        # of the real cause. "SCRAMBLED SECTOR WITHOUT AUTHENTICATION" is the one signature
+        # that's genuinely CSS-specific (same text the standalone branch above already keys
+        # on). "ILLEGAL MODE FOR THIS TRACK" is a generic SCSI ILLEGAL REQUEST that can mean
+        # copy protection (CSS on DVD, AACS/BD+ on Blu-ray) OR a dirty/damaged disc OR an
+        # incompatible disc/drive combination - named honestly as "could mean any of these"
+        # instead of asserted as CSS. Bare "Scsi error" is no longer matched here at all.
+        if ($makemkvOutputText -match "SCRAMBLED SECTOR WITHOUT AUTHENTICATION") {
             $errorMessage = "Disc copy protection (CSS) prevented reading - the drive was found but MakeMKV could not authenticate the disc. Try reinserting the disc or check that MakeMKV has a valid licence key"
+            Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
+        } elseif ($makemkvOutputText -match "ILLEGAL MODE FOR THIS TRACK") {
+            $errorMessage = "The drive rejected a read command for this disc (SCSI: ILLEGAL MODE FOR THIS TRACK) - the drive was found but could not read the disc. This can mean copy protection (CSS on DVD, AACS/BD+ on Blu-ray), a dirty or damaged disc, or an incompatible disc/drive combination - not necessarily CSS specifically. Try cleaning the disc, trying a different drive, or checking that MakeMKV has a valid licence key."
             Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
         } elseif ($makemkvOutputText -match "IFO|BUP|VOB|VTS") {
             $errorMessage = "Disc is corrupt or unreadable - MakeMKV found the drive but could not read the disc structure"

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-29 (continued) - Stop Misdiagnosing Every SCSI Read Failure as CSS
+
+### Fixed
+- Live incident: ripping "Batman Forever" off a Blu-ray drive failed at Step 1 with `Scsi error - ILLEGAL REQUEST:ILLEGAL MODE FOR THIS TRACK`, and the script reported `Disc copy protection (CSS) prevented reading ... check that MakeMKV has a valid licence key`. That diagnosis can't have been right regardless of the real cause - CSS is a DVD-only encryption scheme and doesn't apply to Blu-ray at all (which uses AACS/BD+ instead).
+- Root cause: the `Failed to open disc` branch's CSS check matched `"SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS TRACK|Scsi error"`. Bare `Scsi error` is not CSS-specific - it's the prefix MakeMKV puts on essentially every SCSI-level read failure (dirty disc, damaged media, wrong disc type, drive firmware quirk, or genuine protection), so this branch fired - and confidently told the user it was a CSS licence-key problem - for almost any hardware-level failure that reached "Failed to open disc".
+- Fix: `Scsi error` removed from the match entirely. `SCRAMBLED SECTOR WITHOUT AUTHENTICATION` remains the one signature treated as genuinely CSS-specific (same text the separate standalone CSS branch above it already keys on). `ILLEGAL MODE FOR THIS TRACK` gets its own branch now, worded honestly as "can mean copy protection (CSS on DVD, AACS/BD+ on Blu-ray), a dirty or damaged disc, or an incompatible disc/drive combination" instead of asserted as CSS specifically.
+- Scoped to `rip-disc.ps1` only - `continue-rip.ps1` never calls MakeMKV or reads a disc, so it never had this code path; the C# implementation's equivalent error analysis has no matching CSS/ILLEGAL-MODE branch at all, so there's nothing to port there either.
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact on raw bytes; added lines confirmed ASCII-only. Not re-tested against the actual Batman Forever disc or any other real failure - the fix changes only the diagnostic message shown, not any control flow, so it will first prove itself wording-wise on the next real occurrence of either signature.
+
 ## 2026-08-29 - eBay Sold-Price Check
 
 ### Added
