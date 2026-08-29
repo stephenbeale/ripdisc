@@ -1663,3 +1663,60 @@ than silently skipping.
    a manual follow-up run).
 3. Everything carried from the 2026-08-26 entries above still stands - none of it
    touched by this addition.
+
+---
+
+### 2026-08-29 (continued) - Stop Misdiagnosing Every SCSI Read Failure as CSS
+
+**Trigger:** live incident, interrupting the eBay work above mid-session. Ripping
+"Batman Forever" off a Blu-ray drive failed with `Scsi error - ILLEGAL REQUEST:ILLEGAL
+MODE FOR THIS TRACK`, and the script told the user `Disc copy protection (CSS)
+prevented reading ... check that MakeMKV has a valid licence key`. User's reaction:
+"this should not happen - why quit?" - the diagnosis was suspect on its face, since
+CSS is a DVD-only scheme and Blu-ray uses AACS/BD+ instead, so it couldn't have been
+right regardless of what actually went wrong with the disc.
+
+**Root cause found:** the `Failed to open disc` branch's CSS check matched
+`"SCRAMBLED SECTOR WITHOUT AUTHENTICATION|ILLEGAL MODE FOR THIS TRACK|Scsi error"`.
+Bare `Scsi error` is the prefix MakeMKV puts on essentially *every* SCSI-level read
+failure - not just CSS - so this branch fired, and confidently reported CSS, for
+almost any hardware-level failure that reached "Failed to open disc": a dirty disc, a
+damaged disc, a wrong-format disc, a drive firmware quirk, or genuine protection, all
+looked identical to the script.
+
+**Fix:** removed bare `Scsi error` from the match entirely.
+`SCRAMBLED SECTOR WITHOUT AUTHENTICATION` remains the one signature treated as
+genuinely CSS-specific (matches the separate standalone CSS branch already above it).
+`ILLEGAL MODE FOR THIS TRACK` gets its own branch, worded honestly - "can mean copy
+protection (CSS on DVD, AACS/BD+ on Blu-ray), a dirty or damaged disc, or an
+incompatible disc/drive combination" - instead of asserted as CSS.
+
+**Scope:** `rip-disc.ps1` only. `continue-rip.ps1` never calls MakeMKV or reads a disc,
+so it never had this code path. The C# implementation's error analysis has no matching
+CSS/ILLEGAL-MODE branch at all (confirmed by grep) - nothing to port there.
+
+**What this fix does NOT do:** it does not identify the actual root cause of the
+Batman Forever failure. `ILLEGAL MODE FOR THIS TRACK` still covers several distinct
+possibilities (protection, dirty disc, damaged disc, drive/disc incompatibility) - the
+fix stops the script from confidently guessing wrong, it doesn't diagnose which one
+this particular disc hit. That's still unknown.
+
+**Files changed:** `rip-disc.ps1`, `CHANGELOG.md`, `CLAUDE.md` (this entry)
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact on
+raw bytes; added lines confirmed ASCII-only. Not re-tested against the actual Batman
+Forever disc or any other real failure - this changes only the diagnostic message
+shown, not control flow, so it proves itself wording-wise on the next real occurrence
+of either signature.
+
+**Priority for Next Session:**
+1. Try the Batman Forever disc again (clean it first) and see which message now
+   appears - that will narrow down whether it was actually protection-related,
+   dirty-disc, or something else, which the old code could never have told apart.
+2. If `ILLEGAL MODE FOR THIS TRACK` keeps recurring on Blu-ray specifically, consider
+   whether a distinct, Blu-ray-aware message (mentioning AACS/BD+ instead of generic
+   "copy protection") would be worth the added complexity - held off on that here
+   since the immediate goal was stopping the false CSS claim, not building out full
+   Blu-ray-specific diagnostics on a single occurrence.
+3. Everything carried from the eBay entry above still stands - none of it touched by
+   this fix.
