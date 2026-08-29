@@ -1751,3 +1751,38 @@ discs in a drive.
 1. Load a few different disc types (audio CD, DVD, Blu-ray, a data disc) across the
    available drives and confirm the listing labels each one correctly.
 2. Everything carried from the two entries above this one still stands.
+
+---
+
+### 2026-08-29 (session close) - Verification Pass: PRs #133-#135
+
+**Trigger:** end-of-session close-out spanning this repo and the sibling `ripaudio`
+repo, after the user confirmed a real `ripaudio` rip succeeded.
+
+**Not something to chase, for context only:** the Batman Forever Blu-ray disc that
+started tonight's `ripdisc` thread (leading to the CSS-misdiagnosis fix two entries
+above) was never itself successfully ripped - it turned out to be a misread, a
+separate issue from what got fixed. Not implying it's resolved.
+
+**git-manager spend limit, informational only:** same note as in `ripaudio`'s
+close-out - for roughly the back half of tonight's combined session, git workflow
+was done directly via `gh`/`git` rather than through `git-manager`, because it hit
+the account's monthly spend limit mid-task. It failed cleanly on one PR in this
+repo, which was recovered and completed manually with no work lost (PR #135, the
+disc-type-listing PR above). Worth checking whether the limit has reset by next
+session so `git-manager` can resume being the default.
+
+**Session Verified Clean:**
+- `main`, up to date with `origin/main`, working tree clean, no stashes
+- `git fetch --prune` removed one stale remote-tracking ref
+  (`origin/feature/disc-type-in-drive-listing`, deleted after PR #135 merged)
+- One stale local branch found: `feature/disc-type-in-drive-listing`. Confirmed
+  its diff against `main` was empty (squash-merged as PR #135, so `git branch
+  --merged` didn't recognize it) and force-deleted it.
+- `gh pr list --state open`: none - PRs #133, #134, #135 all merged this session
+- Local branches: `main` only
+
+**Priority for Next Session:**
+1. Nothing new opened by this close-out. Carried from the two entries above:
+   load a few different disc types across the available drives and confirm the
+   drive-listing type labels each one correctly.
