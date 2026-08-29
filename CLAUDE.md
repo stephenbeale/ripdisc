@@ -1614,3 +1614,52 @@ Both PRs were verified by `[System.Management.Automation.Language.Parser]::Parse
 1. Watch the next AV-scanner-contended rename and the next slash-containing (or otherwise filesystem-illegal-character) disc title - both fixes are reasoned widenings/fixes, not measured/reproduced worst cases, and neither has been hardware-validated yet.
 2. Consider extracting the 12-way duplicated rename/move retry logic into a shared helper (explicitly deferred by PR #130) - the duplication makes future retry-tuning error-prone.
 3. Everything carried from the prior entry (watch `H:` drive-query timeout/hang behaviour over more rips, investigate `H:`'s underlying hardware flakiness, `feat/` vs `feature/` branch-naming convention decision) still stands - none of it touched by tonight's two incidents.
+
+---
+
+### 2026-08-29 - eBay Sold-Price Check (ported from ripaudio)
+
+**Trigger:** direct user request, made while working the same feature into the sibling
+`ripaudio` project the same day ("can you do the ebay url for ripdisc too").
+
+**Change:** new `-CheckEbayPrice` switch on `rip-disc.ps1` (default off). When passed, the
+FILE SUMMARY at the end of a run prints a clickable eBay UK sold-listings search URL for
+the ripped title - a convenience for checking what a physical disc might be worth, not
+part of the rip pipeline itself.
+
+- New `Get-EbaySoldListingsUrl` helper (placed near `Show-CoffeeBadge`) builds
+  `https://www.ebay.co.uk/sch/i.html?_nkw=<title> <DVD|Blu-ray>[ Season N]&_sacat=0&_from=R40&LH_BIN=1&LH_ItemCondition=4&LH_PrefLoc=1&rt=nc&LH_Sold=1`
+  - Format word follows `-Bluray` (`Blu-ray` vs `DVD`); `-Series -Season N` appends
+    `Season N` to the query.
+  - Same four filters as `ripaudio`'s version, copied verbatim: Buy It Now only, Very
+    Good+ condition, UK only, sold listings only.
+  - `Add-Type -AssemblyName System.Web` newly added near the config-load section -
+    this repo had no prior use of `HttpUtility` for URL encoding.
+- Wired into the main completion path's FILE SUMMARY only - not the `-Queue` "job
+  queued" summary (nothing has been ripped yet at that point, there's no disc value
+  to check), and not `continue-rip.ps1` (skipped in this pass, not carried over).
+- README.md: new Features bullet, `-checkEbayPrice` usage-block entry + example, and a
+  Feature Parity table row (PowerShell only, not ported to C# - consistent with how
+  every other recent PowerShell-only feature is tracked there).
+
+**Files changed:** `rip-disc.ps1`, `README.md`, `CHANGELOG.md`, `CLAUDE.md` (this entry)
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact on
+`rip-disc.ps1` (raw byte inspection, not just re-decoding); all added lines confirmed
+ASCII-only. URL-construction logic verified standalone against three cases (Blu-ray
+movie, series with season, plain DVD movie) - correct `+`-encoded query strings in all
+three. **Not exercised through an actual `rip-disc.ps1` run** - nobody has seen the FILE
+SUMMARY line render or opened the resulting URL in a browser to confirm eBay honours all
+four filters. The existing 95-test suite was not re-run for this change (it's additive
+and doesn't touch any function the suite covers), which is itself worth flagging rather
+than silently skipping.
+
+**Priority for Next Session:**
+1. Live-verify `-CheckEbayPrice` on a real rip and open the resulting URL to confirm
+   eBay renders the intended filtered search (Buy It Now, Very Good+, UK, sold).
+2. Consider porting to `continue-rip.ps1` for parity, if it turns out to matter in
+   practice (a completed-but-interrupted rip resumed via `continue-rip.ps1` currently
+   has no way to get the eBay link without also having `-CheckEbayPrice` on hand for
+   a manual follow-up run).
+3. Everything carried from the 2026-08-26 entries above still stands - none of it
+   touched by this addition.

@@ -59,12 +59,21 @@
 
     # Skip ejecting the disc after the MakeMKV rip completes.
     [Parameter()]
-    [switch]$NoEject
+    [switch]$NoEject,
+
+    # Prints a clickable eBay UK sold-listings search URL for the ripped title at the
+    # end of the FILE SUMMARY - not run automatically, since it's a convenience for
+    # deciding what a physical disc might be worth, not part of the rip itself.
+    [Parameter()]
+    [switch]$CheckEbayPrice
 )
 
 # ========== LOAD CONFIG ==========
 . (Join-Path $PSScriptRoot "Load-Config.ps1")
 $makemkvconPath = $script:Config_MakeMkvPath
+
+# Load System.Web for URL encoding (used to build the -CheckEbayPrice search URL)
+Add-Type -AssemblyName System.Web
 
 # Apply config defaults to parameters that weren't explicitly passed
 # Captured before the defaulting below overwrites it - Stop-WithError uses this later to
@@ -153,6 +162,20 @@ function Show-StepsSummary {
             }
         }
     }
+}
+
+# Builds an eBay UK sold-listings search URL for the ripped title, so a -CheckEbayPrice
+# rip can print a link the user clicks to see what copies of the physical disc have
+# actually sold for. Buy It Now only, "Very Good" condition or better (LH_ItemCondition=4),
+# UK sellers/location only (LH_PrefLoc=1), sold listings only (LH_Sold=1) - matches the
+# exact filter combination used for the same feature in the ripaudio project.
+function Get-EbaySoldListingsUrl {
+    param([string]$Title, [switch]$Bluray, [switch]$Series, [int]$Season = 0)
+    $formatWord = if ($Bluray) { "Blu-ray" } else { "DVD" }
+    $query = "$Title $formatWord"
+    if ($Series -and $Season -gt 0) { $query += " Season $Season" }
+    $encodedQuery = [System.Web.HttpUtility]::UrlEncode($query)
+    return "https://www.ebay.co.uk/sch/i.html?_nkw=$encodedQuery&_sacat=0&_from=R40&LH_BIN=1&LH_ItemCondition=4&LH_PrefLoc=1&rt=nc&LH_Sold=1"
 }
 
 function Show-CoffeeBadge {
@@ -2688,6 +2711,11 @@ if ($script:EncodedFilesTooSmall) {
     Write-Host "  Total files: $($finalFiles.Count)" -ForegroundColor White
     Write-Host "  Total size: $totalSize GB" -ForegroundColor White
     Write-Host "  Log file: $($script:LogFile)" -ForegroundColor White
+}
+if ($CheckEbayPrice) {
+    $ebayUrl = Get-EbaySoldListingsUrl -Title $title -Bluray:$Bluray -Series:$Series -Season $Season
+    Write-Host "  eBay sold prices (UK, BIN, Very Good+): $ebayUrl" -ForegroundColor White
+    Write-Log "eBay sold-listings URL: $ebayUrl"
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Show-CoffeeBadge

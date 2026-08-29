@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-29 - eBay Sold-Price Check
+
+### Added
+- New `-CheckEbayPrice` switch on `rip-disc.ps1` - prints a clickable eBay UK sold-listings search URL for the ripped title in the FILE SUMMARY, so you can check what the physical disc might be worth. Direct user request, ported straight over from the same feature added to the sibling `ripaudio` project earlier the same day.
+- New `Get-EbaySoldListingsUrl` helper builds `https://www.ebay.co.uk/sch/i.html` with `_nkw=<title> <DVD|Blu-ray>[ Season N]` (URL-encoded via `[System.Web.HttpUtility]::UrlEncode`, newly loaded for this), `_sacat=0`, `_from=R40`, `LH_BIN=1` (Buy It Now only), `LH_ItemCondition=4` (Very Good or better), `LH_PrefLoc=1` (UK only), `rt=nc`, `LH_Sold=1` (sold listings only) - the same filter combination as `ripaudio`'s version. The format word (`DVD` vs `Blu-ray`) follows `-Bluray`; `-Series -Season N` appends `Season N` to the query.
+- Off by default - a convenience for deciding what to do with a physical disc after ripping it, not part of the rip pipeline itself. Only wired into `rip-disc.ps1`'s main completion path, not the `-Queue` "job queued" summary (nothing has been ripped yet at that point) and not `continue-rip.ps1` (not carried over in this pass).
+- README.md: new Features bullet, `-checkEbayPrice` usage-block entry and example, and a Feature Parity table row (PowerShell only - not ported to C#).
+
+**Testing status:** `Parser::ParseFile` reports 0 errors; UTF-8 BOM confirmed intact by inspecting raw file bytes; all added lines confirmed ASCII-only. The URL-construction logic was verified standalone against three cases (a Blu-ray movie, a series with a season number, a plain DVD movie), producing correctly `+`-encoded query strings matching the `ripaudio` version's format. **Not exercised through an actual `rip-disc.ps1` run** - nobody has seen the FILE SUMMARY line render or opened the resulting URL in a browser to confirm eBay honours all four filters.
+
 ## 2026-08-26 (yet again, once more) - Sanitize Title Before Building Any Path
 
 ### Fixed
