@@ -2059,3 +2059,64 @@ when the referenced file doesn't exist.
   which was a real live failure) - this was a proactive fix from a user report, not a
   post-incident one
 - Everything carried from the 2026-08-29 session-close entry above still stands
+
+---
+
+### 2026-08-31 (continued) - Series/Extras Prefixes Now Read From Disk, Not From `$safeTitle` Text
+
+**Trigger:** direct user follow-up after PR #138 merged - asked to close the whole bug
+class rather than the one character (trailing dot/space) that fix covered, since Movie
+mode already had a self-correcting pattern that Series and Extras never adopted.
+
+**What was still wrong:** even with `Get-SafeTitle` trimming trailing dots/spaces,
+Series-mode's prefix (`"$safeTitle-$seasonTag-$discTag"`) and Extras-mode's prefix
+(matched/built against `"$safeTitle-*"` directly) both still assumed `$safeTitle` text
+equals the real on-disk directory name. Movie mode's two prefix branches never made that
+assumption - they call `(Get-Item $finalOutputDir).Name` to read the real name back
+(pattern already in place since before this session; see 2026-08-24 notes). Series and
+Extras just hadn't been brought in line with it.
+
+**Fix:** Series mode now uses `(Get-Item $seriesBaseDir).Name` (`$seriesBaseDir` is the
+title-level folder its Season/Disc subfolders sit under - already a script-scoped
+variable from where `$finalOutputDir` gets built, still in scope at Step 3 since this is
+a flat script, not a function). Extras mode now uses
+`(Get-Item $finalOutputDir).Parent.Name`, since `$finalOutputDir` there already *is*
+`<title>\extras` - its parent is the title folder. Applied identically to both scripts.
+
+**A real risk investigated and ruled out before shipping:** the fix's premise - "read
+the real name back instead of trusting text" - could have gone wrong if Windows only
+auto-trims a trailing dot/space on the *final* segment of a path being resolved, not an
+*intermediate* one (e.g. resolving `.../Title. /extras` in one call, where `Title. ` is
+mid-path). Checked live on this Windows machine: confirmed true - `Get-Item -LiteralPath`
+on an untrimmed intermediate segment fails to resolve at all, while the same untrimmed
+*final* segment resolves fine and returns the trimmed name. This does **not** affect the
+shipped fix: `Get-SafeTitle` already trims `$safeTitle` before `$finalOutputDir` (or any
+other path) is ever built from it, so production never constructs an untrimmed
+intermediate segment in the first place - the `Get-Item`-based fix here is a hardening
+against *other* possible `$safeTitle`-vs-disk mismatches, not a fix for a live
+intermediate-segment failure. Worth remembering if this pattern is ever extended
+somewhere `$safeTitle` isn't pre-trimmed.
+
+**Files changed:**
+- `rip-disc.ps1` - Series-mode `$prefix` and Extras-mode `$dirName`/match logic switched
+  to `Get-Item`-derived values
+- `continue-rip.ps1` - identical changes
+- `tests/Test-PrefixDerivedFromDisk.ps1` - new, 15 tests: a live filesystem test (not
+  just AST-extracted logic) proving on this actual Windows machine that a directory
+  requested as `"W."` is created as `"W"` and `Get-Item`/`.Parent.Name` reads it back
+  correctly, plus a source-inspection regression guard confirming both prefix blocks in
+  both scripts now read from disk rather than interpolating `$safeTitle`
+- `CHANGELOG.md` - 2026-08-31 (continued) entry
+
+**Testing status:** `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM
+confirmed intact. Full suite now 149 tests across 7 files, all passing, no regressions.
+**Not exercised against a real rip** - same caveat as the entry above.
+
+**Work In Progress:**
+- None - implementation complete, going through the standard `git-manager`
+  branch/commit/push/PR/merge workflow at the user's explicit request.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: rip a Series or Extras disc with a title that needs
+  sanitizing and confirm the prefix matches the real on-disk folder name
+- Everything carried from the entry above still stands
