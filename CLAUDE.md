@@ -1834,27 +1834,55 @@ with that precedent.
 **Files changed:** `rip-disc.ps1`, `continue-rip.ps1`, `tests/Test-TitleSanitization.ps1`,
 `CHANGELOG.md`, `CLAUDE.md` (this entry)
 
-**Testing status - IMPORTANT:** No `pwsh`/PowerShell available in this session's
-environment, so `Parser::ParseFile` was **not** run and `tests/` was **not** run - both
-firsts for this repo's session notes, which have otherwise always at least parse-checked
-before claiming a fix works. UTF-8 BOM confirmed intact on both scripts via raw byte
-inspection (`\xef\xbb\xbf`). The fix itself is reasoned from documented Windows
-path-normalization behavior (Win32 file APIs drop a trailing `.`/space from a path
-component unless `\\?\` is used), not reproduced against a real Windows rip. **Before
-trusting this**, run `tests/Test-TitleSanitization.ps1` and the rest of the `tests/`
-suite on a Windows box, parse-check both scripts, and ideally re-rip "W." (or another
-trailing-period/trailing-space title) end to end.
+**Follow-up: `pwsh` installed and the fix actually verified.** After the diagnosis and
+fix above, the user asked for `pwsh` to be installed so this could be tested rather than
+just reasoned about. PowerShell 7.4.6 (portable Linux-x64 tarball from the official
+GitHub release, extracted to `/opt/microsoft/powershell/7`, symlinked to
+`/usr/local/bin/pwsh` - no `apt`/package-manager repo needed) was installed into this
+session. Results:
+- `Parser::ParseFile` - 0 errors on both scripts.
+- UTF-8 BOM - confirmed intact on both (raw byte inspection).
+- Full `tests/` suite - **90/90 passing** across all 6 files: `Test-ContinuePathAndResume`
+  27/27, `Test-ContinueRipCommand` 11/11, `Test-EpisodeNaming` 25/25,
+  `Test-LogFileReminder` 16/16, the new `Test-TitleSanitization` 11/11, plus
+  `Test-DriveQueryTimeout`'s `Select-MatchedDrive` cases (8/8, no process spawning
+  needed). `Test-DriveQueryTimeout`'s `Wait-ProcessWithTimeout` cases fail here because
+  they spawn `powershell.exe` to test real process timeout/kill behavior, and this is a
+  Linux sandbox with no Windows PowerShell binary - confirmed via `git stash` that this
+  same failure exists identically on `main`, unrelated to this fix. This is an
+  environment gap, not a code regression.
+- **A real bug in the new test itself, caught by actually running it:** `$distinct =
+  $allExprs | Select-Object -Unique` collapsed to a bare string rather than a 1-element
+  array (only one unique value ever comes back across all four `$safeTitle`
+  occurrences), so `$distinct[0]` indexed into the *string's characters* instead of the
+  array - `Invoke-Expression` was handed a single `"("` and threw a parse error. Fixed
+  with `@(...)`. This is the exact same PowerShell array-unwrapping class of bug as
+  `Resolve-EpisodeNames` in the 2026-08-24 entry above (a 1-element result unwrapping to
+  a scalar on return) - caught here specifically *because* the test was run for real
+  rather than only reasoned about, which is the whole point of installing `pwsh`.
+- Still not exercised against a real Windows rip - the underlying fix is reasoned from
+  documented Windows path-normalization behavior (trailing dots/spaces dropped from path
+  components by Win32 file APIs unless `\\?\` is used); Linux's filesystem doesn't
+  reproduce that quirk, so nothing in this sandbox can prove the *original* bug
+  mechanism, only that the sanitizer expression itself now produces the right string and
+  that all existing logic tests still pass.
 
 **Work In Progress:**
-- PR open for `fix/trailing-dot-title-sanitize` - awaiting the user's review/merge and,
-  ideally, the Windows-side verification above.
+- PR open for `fix/trailing-dot-title-sanitize`, now with the `pwsh`-verified test run
+  pushed - awaiting the user's review/merge.
 
 **Outstanding Work for Future Sessions:**
-- Runtime-verify this fix on Windows: parse-check, run the full `tests/` suite
-  (now 6 files), and re-rip a trailing-period title end to end.
+- Real-Windows confirmation still the one gap this session couldn't close: re-rip "W."
+  (or another trailing-period/trailing-space title) end to end and confirm the output
+  folder and filenames come out right.
 - Consider whether the Extras-disc and Series-mode prefix blocks should be hardened
   further to re-derive their expected prefix from the real on-disk directory name
   (like the movie-mode branches already do) rather than trusting `$safeTitle` as text at
   all - would close this whole class of bug rather than patching one more character.
+- `pwsh` is now installed in this session's container, but that container is ephemeral -
+  a future session in a fresh container will need to reinstall it (same tarball
+  approach) if PowerShell execution is needed again; it does not persist automatically.
+- `Test-DriveQueryTimeout.ps1`'s `Wait-ProcessWithTimeout` cases cannot run on Linux at
+  all (they need `powershell.exe`) - true on any non-Windows session, not just this one.
 - Everything carried from the 2026-08-29 entries above still stands - none of it
   touched by this fix.

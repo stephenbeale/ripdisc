@@ -79,7 +79,7 @@ function Assert-True {
 
 Assert-True ($allExprs.Count -eq 4) "expected 4 `$safeTitle assignments total (2 per script), found $($allExprs.Count)"
 
-$distinct = $allExprs | Select-Object -Unique
+$distinct = @($allExprs | Select-Object -Unique)
 Assert-True ($distinct.Count -eq 1) "all `$safeTitle expressions should be identical across both scripts; found $($distinct.Count) distinct variant(s): $($distinct -join ' | ')"
 
 # ---------- evaluate the real expression against sample titles ----------
