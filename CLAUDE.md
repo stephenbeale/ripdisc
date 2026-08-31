@@ -1958,3 +1958,79 @@ whoever works the backlog next) to pick up as separate PRs.
 - Real-Windows validation of PR #136 (the "W." fix itself) is in progress by the user
   locally - still the one open item from that entry.
 - Everything else carried from the entries above still stands.
+### 2026-08-31 - Trailing-Dot Title Sanitization and Drive-Colon Normalization
+
+**Trigger:** direct user report - "it should have a sanitisation for films like 'W.' by
+Oliver Stone, plus others for colons in output and input drives" - flagged as two bugs,
+found not to be on the existing backlog (checked via `project-manager` first), then
+fixed the same session.
+
+**Bug 1 - trailing dot/space in a title:**
+`$safeTitle` already stripped filesystem-illegal characters (`\/:*?"<>|`) but did
+nothing about a trailing dot or space. Windows silently strips a trailing dot/space from
+the final path component when a directory/file is actually created - so a title like
+"W." (the 2008 Oliver Stone film) would produce `$safeTitle = "W."` while the real
+directory on disk became `W`. Any later exact-path comparison built from the untrimmed
+`$safeTitle` - the Step 3 working-directory guard added in PR #107/#109 is the clearest
+example - would then see a mismatch against a rip that had actually completed correctly.
+
+**Bug 2 - `-Drive`/`-OutputDrive` colon normalization:**
+The existing `-match ':$'` check only recognized an already-correct `"F:"` and appended
+a colon unconditionally otherwise - so `"F:\"`, `"F::"`, or a value with stray
+whitespace produced a malformed drive letter (`"F:\:"`, `"F:::"`) rather than being
+cleaned up. Present at all three normalization sites (`-Drive` and `-OutputDrive` in
+`rip-disc.ps1`, `-OutputDrive` in `continue-rip.ps1`).
+
+**Fix:** both sanitization rules were previously duplicated inline - 4 copies of the
+`$safeTitle` line (2 per script: the main computation and a second recomputation for the
+recovery-script filename) and 3 copies of the drive-colon check. Rather than patch each
+copy separately, extracted two shared functions - `Get-SafeTitle` (adds a `TrimEnd(' ',
+'.')` after the existing illegal-character replace, with an `IsNullOrWhiteSpace`
+fallback for the theoretical all-illegal/dots title) and `Get-NormalizedDriveLetter`
+(trims whitespace/trailing backslash, strips any existing trailing colon(s), appends
+exactly one) - and replaced every call site in both scripts with a call to them, so a
+future fix to either can't silently apply to only some sites.
+
+**Also changed, direct follow-up to a user question ("does it prompt users with the
+sanitised file name before continuing to check? it should"):** `rip-disc.ps1` computed
+`$safeTitle` in the CONFIGURATION section, which runs *after* the "Press Enter to
+continue" confirmation prompt - so a bad sanitization was never visible before the rip
+started. Moved the computation to just before the "Ready to rip" display and added a
+`Folder/file name will be sanitized to: "..."` line, shown only when the sanitized name
+actually differs from the raw title. `continue-rip.ps1` already computed `$safeTitle`
+ahead of its own confirmation prompt (no reordering needed there) but had no equivalent
+visible notice - added the same line.
+
+**Files changed:**
+- `rip-disc.ps1` - `Get-SafeTitle`/`Get-NormalizedDriveLetter` added; all 4 inline
+  `$safeTitle` sites and 2 inline drive-colon sites replaced with calls to them;
+  `$safeTitle` computation moved earlier; sanitization notice line added
+- `continue-rip.ps1` - same two functions added; both `$safeTitle` sites and the
+  `-OutputDrive` site replaced with calls to them; sanitization notice line added
+- `tests/Test-TitleAndDriveSanitization.ps1` - new, 39 tests, same AST-extraction
+  pattern as the rest of `tests/` (real function bodies lifted out of both scripts, not
+  reimplemented) - illegal-character replacement, the trailing-dot/space case
+  specifically (including "W." itself), degenerate all-illegal input, and every
+  drive-letter normalization edge case identified above
+- `CHANGELOG.md` - 2026-08-31 entry
+
+**Testing status:** `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM
+confirmed intact on raw bytes. Full suite now 134 tests across 6 files (95 pre-existing
++ 39 new), all passing, no regressions from the refactor. **Not exercised against a real
+rip or a real disc titled "W."** - verified at the function-logic level only, same
+caveat as most sanitization/edge-case fixes in this repo's history.
+
+**Work In Progress:**
+- None - implementation complete, on a feature branch, going through the standard
+  `git-manager` branch/commit/push/PR/merge workflow at the user's explicit request.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation: confirm a title ending in a dot (or the actual "W." disc, if
+  the user has it) produces a clean rip with no working-directory-guard false failure,
+  and confirm a deliberately malformed `-OutputDrive`/`-Drive` value (trailing
+  backslash, doubled colon) now normalizes instead of producing a broken path
+- Neither fix's trigger condition has been confirmed to have actually occurred yet
+  in this repo's incident history (unlike e.g. the PR #131 slash-in-title incident,
+  which was a real live failure) - this was a proactive fix from a user report, not a
+  post-incident one
+- Everything carried from the 2026-08-29 session-close entry above still stands

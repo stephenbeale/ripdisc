@@ -551,6 +551,46 @@ function Get-UniqueFilePath {
     return $targetPath
 }
 
+function Get-SafeTitle {
+    # Filesystem-illegal characters in the title (e.g. a "/" in "05/06 Highlight Reel")
+    # get interpreted by Windows as a path separator wherever $title is used to build a
+    # path or filename - silently splitting one intended folder into two nested ones, or
+    # breaking log-file creation outright ("Could not find a part of the path").
+    #
+    # Windows also silently drops trailing dots and trailing spaces from the final
+    # component of a path when the directory/file actually gets created (e.g. "W." by
+    # Oliver Stone would be created on disk as "W", not "W."). Without TrimEnd here, a
+    # sanitized title would keep the dot while the real directory on disk doesn't - later
+    # exact-path comparisons (e.g. the Step 3 working-directory guard) then see a
+    # mismatch and fail a run that actually succeeded. TrimEnd handles any run of
+    # trailing dots/spaces in either order; the IsNullOrWhiteSpace fallback guards the
+    # theoretical case of a title that is nothing but illegal characters/dots/spaces
+    # once sanitized.
+    #
+    # Callers should build paths/filenames from this; $title itself is left untouched
+    # for display text (console output, log message content, window title) so the user
+    # always sees their real title, not the sanitized one.
+    param([string]$Title)
+
+    $safe = ($Title -replace '[\\/:*?"<>|]', '_').TrimEnd(' ', '.')
+    if ([string]::IsNullOrWhiteSpace($safe)) {
+        $safe = $Title -replace '[\\/:*?"<>|]', '_'
+    }
+    return $safe
+}
+
+function Get-NormalizedDriveLetter {
+    # Normalizes a -Drive/-OutputDrive value to exactly one trailing colon. A bare
+    # "-match ':$'" only recognizes an already-correct "F:" and otherwise appends a
+    # colon unconditionally - "F:\", "F::" or a stray trailing space (e.g. pasted from
+    # elsewhere) would produce a malformed "F:\:" / "F:::" instead of being cleaned up.
+    # Trim whitespace/backslash, strip any existing trailing colon(s), then append
+    # exactly one.
+    param([string]$DriveValue)
+
+    return ($DriveValue.Trim().TrimEnd('\')).TrimEnd(':') + ':'
+}
+
 function Test-DriveReady {
     param([string]$Path)
 
@@ -632,15 +672,12 @@ $tempRoot = $script:Config_TempRoot
 # Filesystem-illegal characters in the title (e.g. a "/" in "05/06 Highlight Reel") get
 # interpreted by Windows as a path separator wherever $title is used to build a path or
 # filename - silently splitting one intended folder into two nested ones, or breaking
-# log-file creation outright ("Could not find a part of the path"). $safeTitle is what
-# every path/filename built below uses instead; $title itself is left untouched for
-# display text (console output, log message content, window title) so the user always
-# sees their real title, not the sanitized one.
-# A trailing "." or space (e.g. -title "W.") is dropped silently by Windows when the
-# directory/file is actually created - the folder on disk ends up named "W", not "W.".
-# Trimmed here too, or every downstream comparison that trusts $safeTitle as literal
-# text (not re-read from disk) mismatches the real on-disk name and mis-renames files.
-$safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
+# log-file creation outright ("Could not find a part of the path"). See Get-SafeTitle for
+# the full rationale (including the trailing-dot/space case, e.g. "W." by Oliver Stone).
+# $safeTitle is what every path/filename built below uses instead; $title itself is left
+# untouched for display text (console output, log message content, window title) so the
+# user always sees their real title, not the sanitized one.
+$safeTitle = Get-SafeTitle $title
 
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
@@ -652,7 +689,7 @@ if ($Extras) {
 }
 
 # Normalize output drive letter
-$outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
+$outputDriveLetter = Get-NormalizedDriveLetter $OutputDrive
 
 # Build final output directory path
 if ($script:IsGenreSeries) {
@@ -959,6 +996,9 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host " CONTINUE RIP" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host (" Title         : {0}" -f $title) -ForegroundColor White
+if ($safeTitle -ne $title) {
+    Write-Host (" Folder/file name will be sanitized to: `"{0}`"" -f $safeTitle) -ForegroundColor Yellow
+}
 Write-Host (" Type          : {0}" -f $contentType) -ForegroundColor White
 if ($Series) {
     if ($Season -gt 0) {
@@ -1167,7 +1207,7 @@ if ($StartFromStepNumber -le 2) {
     # ========== GENERATE RECOVERY SCRIPT ==========
     $recoveryScriptPath = $null
     if ($filesToEncode.Count -gt 0) {
-        $safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
+        $safeTitle = Get-SafeTitle $title
         $dateStamp = Get-Date -Format "yyyy-MM-dd"
         $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
         $recoveryLines = @(
