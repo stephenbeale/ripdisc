@@ -1886,3 +1886,75 @@ session. Results:
   all (they need `powershell.exe`) - true on any non-Windows session, not just this one.
 - Everything carried from the 2026-08-29 entries above still stands - none of it
   touched by this fix.
+
+---
+
+### 2026-08-31 (continued) - Two Backlog Items from the "W." Fix Review
+
+**Trigger:** user is testing the merged trailing-dot fix (PR #136) locally before it sees
+real use ("only one user other than me anyway"), and raised two related but separate
+bugs while reviewing it. Recorded here, not implemented this session.
+
+**1. Drive-letter parameters should normalize more than just a missing trailing colon.**
+
+`-OutputDrive` and `-Drive` both build their drive-letter string the same fragile way:
+
+```powershell
+$outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
+$driveLetter        = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
+```
+
+(`rip-disc.ps1:1167` and `:706`; `continue-rip.ps1` has its own `-Drive`/`-OutputDrive`
+handling with the same shape.)
+
+This only covers "does the string already end in `:`" - it correctly turns `"C"` into
+`"C:"` and leaves `"C:"` alone, but anything else in the input breaks it: a trailing
+backslash (`-OutputDrive "F:\"` -> `-match ':$'` is false -> `"F:\:"`), trailing
+whitespace (`-OutputDrive "F "` -> `"F :"`), or a stray double colon, all produce a
+malformed drive string instead of being cleaned up. The user's ask: `"C"` and `"C:"`
+(and reasonably, `"C:\"`, `" C "`, etc.) should all normalize to the same thing, with
+any unwanted characters trimmed rather than concatenated onto.
+
+The fix pattern already exists elsewhere in both scripts and just needs reusing here -
+`$ejectRoot = ($driveLetter.TrimEnd('\').TrimEnd(':')) + ":"` (`rip-disc.ps1:1966`) does
+exactly this normalization for the eject path. The `-match ':$'` construction at the
+four sites above should be replaced with the same
+`.TrimEnd('\').TrimEnd(':').Trim() + ":"` shape (trim whitespace first, since a
+trailing space would otherwise survive the backslash/colon trims and end up baked into
+the drive string).
+
+**2. Warn-and-confirm before ripping if the title will actually be sanitized.**
+
+The existing "misplaced metadata" warning block (`rip-disc.ps1:1055-1086`) already
+established the right UX for this: detect a problem with `-title`, print what's wrong,
+show the user what to do instead, and `Read-Host "Continue with this title? (y/N)"`
+before proceeding - same pattern used for `-Series` titles that look like they contain
+`"Series N"`/`"Season N"`/`"Disc N"`/an episode code.
+
+The ask is to add an equivalent check for sanitization: whenever `$safeTitle -ne
+$title` (illegal characters replaced, or - after PR #136 - a trailing dot/space
+trimmed), tell the user up front what the actual output folder/filename will be
+(`$safeTitle`) before the rip starts, with the same y/N gate, rather than silently
+sanitizing and only revealing the result after Step 3 has already renamed everything.
+
+**Design note for whoever picks this up:** the existing warning block runs *before*
+`$safeTitle` is computed (`$safeTitle` isn't built until the `CONFIGURATION` section at
+line 1151, well after this warning block). Either move the `$safeTitle` computation
+earlier so this check can sit in the same block as the existing title warnings, or add
+a second, separate warn-and-confirm block right after `$safeTitle` is computed - the
+existing block's structure (build a `$titleWarnings`-style list, print it, gate on
+`Read-Host`) is directly reusable either way. Needs the same treatment in both
+`rip-disc.ps1` and `continue-rip.ps1` (`continue-rip.ps1` also computes `$safeTitle` -
+see the 2026-08-31 entry above).
+
+**Not implemented this session** - both are recorded here for a future session (or for
+whoever works the backlog next) to pick up as separate PRs.
+
+**Outstanding Work for Future Sessions:**
+- Implement backlog item 1: normalize `-OutputDrive`/`-Drive` the same way
+  `$ejectRoot` already does, in both scripts (4 sites total).
+- Implement backlog item 2: warn-and-confirm the sanitized title/output name before
+  ripping, in both scripts.
+- Real-Windows validation of PR #136 (the "W." fix itself) is in progress by the user
+  locally - still the one open item from that entry.
+- Everything else carried from the entries above still stands.
