@@ -1958,7 +1958,10 @@ whoever works the backlog next) to pick up as separate PRs.
 - Real-Windows validation of PR #136 (the "W." fix itself) is in progress by the user
   locally - still the one open item from that entry.
 - Everything else carried from the entries above still stands.
-### 2026-08-31 - Trailing-Dot Title Sanitization and Drive-Colon Normalization
+
+---
+
+### 2026-08-31 (continued again) - Backlog Items 1 & 2 Implemented (PR #138)
 
 **Trigger:** direct user report - "it should have a sanitisation for films like 'W.' by
 Oliver Stone, plus others for colons in output and input drives" - flagged as two bugs,
@@ -2020,9 +2023,31 @@ confirmed intact on raw bytes. Full suite now 134 tests across 6 files (95 pre-e
 rip or a real disc titled "W."** - verified at the function-logic level only, same
 caveat as most sanitization/edge-case fixes in this repo's history.
 
+**Merged as PR #138** (squash commit `d568886`). This entry closes out the two backlog
+items recorded in the entry immediately above (drive-letter normalization, and the
+sanitized-name notice before the confirmation prompt).
+
+**Branch was authored before PRs #136/#137 landed, and had to be rebased onto them.**
+The work started from `337f7ad`; by push time `main` had moved two commits ahead, and
+both overlapped. #136's inline `.TrimEnd('.', ' ')` at the four `$safeTitle` sites is
+**superseded, not reverted** - identical behaviour, now inside `Get-SafeTitle`, plus the
+empty-title fallback #136 deliberately skipped. The rebase conflicted in all four files;
+the two script conflicts were resolved in favour of the shared-function version (#136
+touched only the sites the functions replace, so nothing was lost), and both doc files
+kept **both** sides.
+
+**One casualty, resolved:** `tests/Test-TitleSanitization.ps1` (added by #136) had to be
+deleted. It scrapes the `$safeTitle = ...` expression text out of both scripts and
+evaluates it with `Invoke-Expression`, inside a local helper it *also* names
+`Get-SafeTitle` - so once the scraped text became literally `Get-SafeTitle $title`, the
+helper recursed into itself with an empty `$Expression` and the file threw. A
+scrape-and-eval test cannot survive the logic moving into a function. Its cases are all
+covered by `tests/Test-TitleAndDriveSanitization.ps1` via AST extraction, so no coverage
+was lost; a note was added under #136's CHANGELOG entry so a future reader isn't confused
+when the referenced file doesn't exist.
+
 **Work In Progress:**
-- None - implementation complete, on a feature branch, going through the standard
-  `git-manager` branch/commit/push/PR/merge workflow at the user's explicit request.
+- None - PR #138 merged and branch deleted, `main` clean and up to date.
 
 **Outstanding Work for Future Sessions:**
 - Real-world validation: confirm a title ending in a dot (or the actual "W." disc, if
