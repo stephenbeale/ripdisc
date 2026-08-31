@@ -254,6 +254,46 @@ function Get-UniqueFilePath {
     return $targetPath
 }
 
+function Get-SafeTitle {
+    # Filesystem-illegal characters in the title (e.g. a "/" in "05/06 Highlight Reel")
+    # get interpreted by Windows as a path separator wherever $title is used to build a
+    # path or filename - silently splitting one intended folder into two nested ones, or
+    # breaking log-file creation outright ("Could not find a part of the path").
+    #
+    # Windows also silently drops trailing dots and trailing spaces from the final
+    # component of a path when the directory/file actually gets created (e.g. "W." by
+    # Oliver Stone would be created on disk as "W", not "W."). Without TrimEnd here, a
+    # sanitized title would keep the dot while the real directory on disk doesn't - later
+    # exact-path comparisons (e.g. the Step 3 working-directory guard) then see a
+    # mismatch and fail a rip that actually succeeded. TrimEnd handles any run of
+    # trailing dots/spaces in either order; the IsNullOrWhiteSpace fallback guards the
+    # theoretical case of a title that is nothing but illegal characters/dots/spaces
+    # once sanitized.
+    #
+    # Callers should build paths/filenames from this; $title itself is left untouched
+    # for display text (console output, log message content, window title, TMDb
+    # lookups) so the user always sees their real title, not the sanitized one.
+    param([string]$Title)
+
+    $safe = ($Title -replace '[\\/:*?"<>|]', '_').TrimEnd(' ', '.')
+    if ([string]::IsNullOrWhiteSpace($safe)) {
+        $safe = $Title -replace '[\\/:*?"<>|]', '_'
+    }
+    return $safe
+}
+
+function Get-NormalizedDriveLetter {
+    # Normalizes a -Drive/-OutputDrive value to exactly one trailing colon. A bare
+    # "-match ':$'" only recognizes an already-correct "F:" and otherwise appends a
+    # colon unconditionally - "F:\", "F::" or a stray trailing space (e.g. pasted from
+    # elsewhere) would produce a malformed "F:\:" / "F:::" instead of being cleaned up.
+    # Trim whitespace/backslash, strip any existing trailing colon(s), then append
+    # exactly one.
+    param([string]$DriveValue)
+
+    return ($DriveValue.Trim().TrimEnd('\')).TrimEnd(':') + ':'
+}
+
 function Test-DriveReady {
     param([string]$Path)
 
@@ -703,7 +743,7 @@ function Search-TMDb {
 
 # ========== DRIVE CONFIRMATION ==========
 # Show which drive will be used and confirm before proceeding
-$driveLetter = if ($Drive -match ':$') { $Drive } else { "${Drive}:" }
+$driveLetter = Get-NormalizedDriveLetter $Drive
 $driveDescription = if ($DriveIndex -ge 0) {
     $hint = if ($script:Config_DriveLabels.ContainsKey("$DriveIndex")) { $script:Config_DriveLabels["$DriveIndex"] } else { "unknown drive" }
     "Drive Index $DriveIndex ($hint)"
@@ -1085,8 +1125,17 @@ if ($titleWarnings.Count -gt 0) {
     }
 }
 
+# Computed here (before the confirmation prompt, not after it) so the user can see and
+# abort on a bad sanitization before anything is created on disk - filesystem-illegal
+# characters and Windows' silent trailing-dot/space stripping (see Get-SafeTitle) both
+# mean the folder/filenames actually written can differ from $title.
+$safeTitle = Get-SafeTitle $title
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
+if ($safeTitle -ne $title) {
+    Write-Host "Folder/file name will be sanitized to: `"$safeTitle`"" -ForegroundColor Yellow
+}
 if ($script:IsGenreSeries) {
     if ($Season -gt 0) {
         $seasonTagPreview = "S{0:D2}" -f $Season
@@ -1141,18 +1190,11 @@ $host.UI.RawUI.WindowTitle = $windowTitle
 # ========== CONFIGURATION ==========
 $tempRoot = $script:Config_TempRoot
 
-# Filesystem-illegal characters in the title (e.g. a "/" in "05/06 Highlight Reel") get
-# interpreted by Windows as a path separator wherever $title is used to build a path or
-# filename - silently splitting one intended folder into two nested ones, or breaking
-# log-file creation outright ("Could not find a part of the path"). $safeTitle is what
-# every path/filename built below uses instead; $title itself is left untouched for
-# display text (console output, log message content, window title, TMDb lookups) so the
-# user always sees their real title, not the sanitized one.
-# A trailing "." or space (e.g. -title "W.") is dropped silently by Windows when the
-# directory/file is actually created - the folder on disk ends up named "W", not "W.".
-# Trimmed here too, or every downstream comparison that trusts $safeTitle as literal
-# text (not re-read from disk) mismatches the real on-disk name and mis-renames files.
-$safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
+# $safeTitle was already computed above, before the confirmation prompt, so the user
+# gets to see and abort on a bad sanitization before anything is written to disk. Every
+# path/filename built below uses it instead of $title; $title itself is left untouched
+# for display text (console output, log message content, window title, TMDb lookups) so
+# the user always sees their real title, not the sanitized one.
 
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
@@ -1164,7 +1206,7 @@ if ($Extras) {
 }
 
 # Normalize output drive letter (add colon if missing)
-$outputDriveLetter = if ($OutputDrive -match ':$') { $OutputDrive } else { "${OutputDrive}:" }
+$outputDriveLetter = Get-NormalizedDriveLetter $OutputDrive
 
 # Genre types: organize into named folders (Documentaries, Tutorials, Fitness, Music)
 # Genre Series: same named folder as the genre, but with per-disc isolation like Series
@@ -2205,7 +2247,7 @@ if ($Series -and $mkvFiles.Count -ge 3) {
 # ========== GENERATE RECOVERY SCRIPT ==========
 # Create a recovery .ps1 with HandBrakeCLI commands for each MKV file.
 # If encoding fails, the user can run this script to resume encoding manually.
-$safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
+$safeTitle = Get-SafeTitle $title
 $dateStamp = Get-Date -Format "yyyy-MM-dd"
 $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
 $recoveryLines = @(
