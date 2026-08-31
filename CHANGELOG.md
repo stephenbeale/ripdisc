@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-31 (continued) - Derive Series/Extras File Prefixes From the Real On-Disk Directory Name
+
+### Fixed
+- **Series-mode and Extras-mode file prefixing still built the prefix by interpolating `$safeTitle` as text**, even after the entry above taught `Get-SafeTitle` to trim trailing dots/spaces - so any *other* difference between `$safeTitle` and the real on-disk directory name (not just the specific case that fix covers) would still desync the prefix, the same bug class as "W." by Oliver Stone one level deeper. Movie mode's two prefix branches already avoided this - they read the real name back via `(Get-Item $finalOutputDir).Name` instead of reconstructing it from `$title`/`$safeTitle` (see the 2026-08-24 CLAUDE.md session notes) - Series and Extras just hadn't followed the same pattern.
+- Series mode now derives its prefix from `(Get-Item $seriesBaseDir).Name` (the title-level folder `$finalOutputDir`'s Season/Disc subfolders sit under) instead of `"$safeTitle-$seasonTag-$discTag"`. Extras mode now derives it from `(Get-Item $finalOutputDir).Parent.Name` (the extras folder's own parent, since `$finalOutputDir` there already *is* `<title>\extras`) instead of matching/prefixing against `"$safeTitle-*"` directly.
+- Verified this doesn't rely on Windows auto-trimming an *intermediate* path segment (a live check found that behaviour is unreliable - trailing-dot/space trimming only applies to a path's final segment during resolution): `Get-SafeTitle` already trims `$safeTitle` before any path is ever built from it, so an untrimmed intermediate segment is never actually constructed in the first place. The fix here is a hardening against other possible mismatches, not a fix for a live intermediate-segment failure.
+
+**Testing status:** `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM confirmed intact. New `tests/Test-PrefixDerivedFromDisk.ps1` (15 tests) - a live filesystem test (not just text/logic) confirming on this actual Windows machine that a directory requested as `"W."` really is created as `"W"` and that `Get-Item`/`.Parent.Name` correctly reads it back, plus a source-inspection regression guard confirming both prefix blocks in both scripts now read from disk rather than interpolating `$safeTitle`. Full suite now 149 tests across 7 files, all passing, no regressions. **Not exercised against a real rip.**
+
 ## 2026-08-31 - Trailing-Dot Title Sanitization and Robust Drive-Letter Normalization
 
 ### Fixed

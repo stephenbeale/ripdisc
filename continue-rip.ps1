@@ -1489,9 +1489,17 @@ if ($StartFromStepNumber -le 3) {
         # ========== SERIES MODE: Prefix files with title + season-disc tag ==========
         # Keeps original MakeMKV filenames (t00, t01...) for episode ordering
         Write-Host "`nPrefixing series files..." -ForegroundColor Yellow
+        # Read the title-folder name back from disk rather than trusting $safeTitle as text.
+        # $seriesBaseDir (set above where $finalOutputDir was built) IS that folder. Matches
+        # the pattern Movie mode already uses below ((Get-Item $finalOutputDir).Name) and
+        # closes the whole bug class - not just the specific trailing-dot/space case
+        # Get-SafeTitle now handles - since any other Windows path normalization $safeTitle
+        # doesn't happen to replicate would otherwise silently desync the prefix from the
+        # real on-disk name the same way "W." by Oliver Stone did.
+        $dirName = (Get-Item $seriesBaseDir).Name
         $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
         $discTag = "D$Disc"
-        $prefix = "$safeTitle-$seasonTag-$discTag"
+        $prefix = "$dirName-$seasonTag-$discTag"
 
         $episodeFiles = Get-ChildItem -File | Where-Object {
             $_.Extension -match '\.(mp4|mkv)$'
@@ -1564,15 +1572,19 @@ if ($StartFromStepNumber -le 3) {
         } elseif ($Extras) {
             # Extras disc: prefix with title only (no "-extras" or "-Special Features" in name)
             Write-Host "`nPrefixing extras files with title..." -ForegroundColor Yellow
-            $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$safeTitle-*") }
+            # Read the title-folder name back from disk (the extras folder's own parent,
+            # since $finalOutputDir here IS "<title>\extras") rather than trusting $safeTitle
+            # as text - same self-correcting pattern as the Movie-mode branches above/below.
+            $dirName = (Get-Item $finalOutputDir).Parent.Name
+            $filesToPrefix = Get-ChildItem -File | Where-Object { $_.Name -notlike ("$dirName-*") }
             if ($filesToPrefix) {
                 Write-Host "Files to prefix: $($filesToPrefix.Count)" -ForegroundColor White
                 $filesToPrefix | ForEach-Object {
                     $file = $_
-                    if ($file.Name -like ("$safeTitle" + "_*")) {
-                        $newName = "$safeTitle-" + $file.Name.Substring($safeTitle.Length + 1)
+                    if ($file.Name -like ("$dirName" + "_*")) {
+                        $newName = "$dirName-" + $file.Name.Substring($dirName.Length + 1)
                     } else {
-                        $newName = "$safeTitle-" + $file.Name
+                        $newName = "$dirName-" + $file.Name
                     }
                     Write-Host "  - $($file.Name) -> $newName" -ForegroundColor Gray
                     $maxRetries = 10
