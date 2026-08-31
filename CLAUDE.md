@@ -1786,3 +1786,75 @@ session so `git-manager` can resume being the default.
 1. Nothing new opened by this close-out. Carried from the two entries above:
    load a few different disc types across the available drives and confirm the
    drive-listing type labels each one correctly.
+
+---
+
+### 2026-08-31 - Renaming Bug for Titles Ending in a Period (e.g. "W.")
+
+**Trigger:** user report - a friend ripped "W." (Oliver Stone's 2008 film) and hit a
+renaming issue affecting many files in the output directory. Diagnosed and fixed on a
+remote (non-Windows) session, so nothing here was runtime-verified - see Testing status
+below.
+
+**Root cause:** `$safeTitle = $title -replace '[\\/:*?"<>|]', '_'` strips
+filesystem-illegal characters but never trims a trailing `.` or space. Windows silently
+drops a trailing period/space from the last path component when a directory or file is
+actually created (`New-Item`, `Directory.CreateDirectory`, etc. all go through Win32 path
+normalization that does this unless `\\?\` is used) - so `-title "W."` produces a folder
+on disk literally named `W`, while `$safeTitle`, `$finalOutputDir`, `$makemkvOutputDir`,
+and the recovery-script path all still hold the string `"W."`.
+
+Most of the script is insulated from this because it re-reads the real on-disk name via
+`Get-Item` before comparing (e.g. the movie-mode Feature/Special-Features prefix logic
+uses `(Get-Item $finalOutputDir).Name`, which correctly comes back as `W`). The two spots
+that instead trust `$safeTitle` as literal text - the Extras-disc prefixing block and the
+Series-mode prefix, both in `rip-disc.ps1`/`continue-rip.ps1` - don't: the
+underscore-to-hyphen double-prefix guard added in PR #70/#71 checks
+`$file.Name -like ("$safeTitle" + "_*")`, i.e. `"W._*"`, which never matches an on-disk
+file actually named `W_t00.mp4`. Every file then falls through to the unguarded branch
+and gets double-prefixed (`W.-W_t00.mp4`) - reintroducing the exact bug PR #70/#71 fixed,
+for the same reason PR #131's slash-in-title fix was needed: a filesystem-significant
+character in the raw title, unaccounted for by `$safeTitle`.
+
+**Fix (`fix/trailing-dot-title-sanitize`):**
+- `$safeTitle` now also `.TrimEnd('.', ' ')`s, in all four occurrences: `rip-disc.ps1`
+  (the main config-section definition and the recovery-script definition) and
+  `continue-rip.ps1` (same two spots).
+- New `tests/Test-TitleSanitization.ps1` - extracts the real `$safeTitle` expression
+  from both scripts via `Select-String` (asserts all four occurrences are identical,
+  same cross-script-consistency pattern as `Test-EpisodeNaming.ps1`), then evaluates it
+  against sample titles: `"W."`, `"W.."`, a trailing space, and the existing PR #131
+  slash/colon/asterisk cases (to guard against a regression there).
+
+**Deliberately not done:** no guard against `$safeTitle` becoming empty (a title that is
+*only* dots/spaces/illegal characters) - an extreme edge case, and PR #131 didn't handle
+the equivalent "title is only illegal characters" case either. Not fixed here, consistent
+with that precedent.
+
+**Files changed:** `rip-disc.ps1`, `continue-rip.ps1`, `tests/Test-TitleSanitization.ps1`,
+`CHANGELOG.md`, `CLAUDE.md` (this entry)
+
+**Testing status - IMPORTANT:** No `pwsh`/PowerShell available in this session's
+environment, so `Parser::ParseFile` was **not** run and `tests/` was **not** run - both
+firsts for this repo's session notes, which have otherwise always at least parse-checked
+before claiming a fix works. UTF-8 BOM confirmed intact on both scripts via raw byte
+inspection (`\xef\xbb\xbf`). The fix itself is reasoned from documented Windows
+path-normalization behavior (Win32 file APIs drop a trailing `.`/space from a path
+component unless `\\?\` is used), not reproduced against a real Windows rip. **Before
+trusting this**, run `tests/Test-TitleSanitization.ps1` and the rest of the `tests/`
+suite on a Windows box, parse-check both scripts, and ideally re-rip "W." (or another
+trailing-period/trailing-space title) end to end.
+
+**Work In Progress:**
+- PR open for `fix/trailing-dot-title-sanitize` - awaiting the user's review/merge and,
+  ideally, the Windows-side verification above.
+
+**Outstanding Work for Future Sessions:**
+- Runtime-verify this fix on Windows: parse-check, run the full `tests/` suite
+  (now 6 files), and re-rip a trailing-period title end to end.
+- Consider whether the Extras-disc and Series-mode prefix blocks should be hardened
+  further to re-derive their expected prefix from the real on-disk directory name
+  (like the movie-mode branches already do) rather than trusting `$safeTitle` as text at
+  all - would close this whole class of bug rather than patching one more character.
+- Everything carried from the 2026-08-29 entries above still stands - none of it
+  touched by this fix.

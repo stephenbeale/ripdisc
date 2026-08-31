@@ -636,7 +636,11 @@ $tempRoot = $script:Config_TempRoot
 # every path/filename built below uses instead; $title itself is left untouched for
 # display text (console output, log message content, window title) so the user always
 # sees their real title, not the sanitized one.
-$safeTitle = $title -replace '[\\/:*?"<>|]', '_'
+# A trailing "." or space (e.g. -title "W.") is dropped silently by Windows when the
+# directory/file is actually created - the folder on disk ends up named "W", not "W.".
+# Trimmed here too, or every downstream comparison that trusts $safeTitle as literal
+# text (not re-read from disk) mismatches the real on-disk name and mis-renames files.
+$safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
 
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
@@ -1163,7 +1167,7 @@ if ($StartFromStepNumber -le 2) {
     # ========== GENERATE RECOVERY SCRIPT ==========
     $recoveryScriptPath = $null
     if ($filesToEncode.Count -gt 0) {
-        $safeTitle = $title -replace '[\\/:*?"<>|]', '_'
+        $safeTitle = ($title -replace '[\\/:*?"<>|]', '_').TrimEnd('.', ' ')
         $dateStamp = Get-Date -Format "yyyy-MM-dd"
         $recoveryScriptPath = Join-Path $tempRoot "recovery_${safeTitle}_${dateStamp}.ps1"
         $recoveryLines = @(

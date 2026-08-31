@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-31 - Fix Renaming for Titles Ending in a Period (e.g. "W.")
+
+### Fixed
+- Reported bug: ripping "W." (Oliver Stone's 2008 film) caused a renaming issue affecting many files in the output directory.
+- Root cause: `$safeTitle` (`rip-disc.ps1`, `continue-rip.ps1`) sanitized filesystem-illegal characters (`\/:*?"<>|`) but never stripped a trailing `.` or space. Windows silently drops a trailing period/space from the last component of a path when the directory/file is actually created (`New-Item`, `.NET`'s `Directory.CreateDirectory`, etc. all normalize this away) - so `-title "W."` produces a folder literally named `W` on disk, while every script variable built from `$safeTitle` still holds `"W."` with the dot.
+- That mismatch only bites the code paths that compare/build filenames from the literal `$safeTitle` string instead of reading the real on-disk name back with `Get-Item` - notably the Extras-disc prefixing block and the Series-mode prefix in both scripts. There, the existing underscore-to-hyphen double-prefix guard (added in PR #70/#71) stopped matching (`"W._*"` never matches an on-disk file named `W_t00.mp4`), so every file fell through to the un-guarded branch and got double-prefixed (e.g. `W.-W_t00.mp4`) - the exact bug class PR #70/#71 was written to prevent, reintroduced by the extra dot. Same root cause as PR #131's slash-in-title fix, for a different character.
+- Fix: `$safeTitle` now also `.TrimEnd('.', ' ')`s the sanitized title, in all four occurrences (`rip-disc.ps1:1151`, `:2204`; `continue-rip.ps1:639`, `:1166`).
+- New `tests/Test-TitleSanitization.ps1` - extracts the real `$safeTitle` expression from both scripts (asserts all four occurrences stay identical) and evaluates it against sample titles, including `"W."`, `"W.."`, a trailing space, and the existing slash/colon/asterisk cases from PR #131.
+
+**Testing status:** Not runtime-verified in this environment - no `pwsh`/PowerShell available to run `Parser::ParseFile` or the test suite here. UTF-8 BOM confirmed intact on both scripts via raw byte inspection. Not exercised against a real rip - the fix is reasoned from documented Windows path-normalization behavior (trailing dots/spaces are dropped from path components by the Win32 file APIs unless the `\\?\` prefix is used), not reproduced on real hardware. Please re-run the full `tests/` suite (and re-rip "W." or another trailing-period title) on a Windows box before relying on this.
+
 ## 2026-08-29 (continued again) - Show Disc Type in the Drive Listing
 
 ### Added
