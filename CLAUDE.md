@@ -2112,11 +2112,54 @@ somewhere `$safeTitle` isn't pre-trimmed.
 confirmed intact. Full suite now 149 tests across 7 files, all passing, no regressions.
 **Not exercised against a real rip** - same caveat as the entry above.
 
+**Merged as PR #139** (squash commit `55da999`). No drift this time - `git fetch` before
+branching found `main` still exactly where PR #138 left it (`a9943a7`), so no rebase was
+needed and the merge was drama-free, unlike #138's overlap with #136/#137.
+
 **Work In Progress:**
-- None - implementation complete, going through the standard `git-manager`
-  branch/commit/push/PR/merge workflow at the user's explicit request.
+- None - PR #139 merged and branch deleted, `main` clean and up to date.
 
 **Outstanding Work for Future Sessions:**
 - Real-world validation: rip a Series or Extras disc with a title that needs
   sanitizing and confirm the prefix matches the real on-disk folder name
 - Everything carried from the entry above still stands
+
+---
+
+### 2026-08-31 (session close) - Branch Cleanup, Auth Check, Final Verification
+
+**Trigger:** user asked to close out the remaining items from the PR #139 report (stale
+branches, `gh` auth) and then hand off to `session-closer`.
+
+**Stale remote branches deleted:** `claude/film-rip-renaming-bug-1t0ryq` and
+`docs/backlog-drive-and-sanitize-prompt`, both flagged as leftovers in the PR #138
+close-out. Verified via content diff (not just commit log, which is misleading across a
+squash merge) that both contained only strictly older, superseded work - the old inline
+`.TrimEnd('.', ' ')` fix and the now-deleted `tests/Test-TitleSanitization.ps1`, with
+none of the shared-function refactor or the `Get-Item`-based prefix fix from #138/#139.
+Nothing unique to either branch; both deleted from `origin` with no local branches to
+match (already never checked out locally).
+
+**`gh` auth - already resolved, not actually broken:** the keyring-token warning
+`git-manager` flagged after PR #138 no longer reproduces - `gh auth status` now reports
+a clean login (`stephenbeale`, active, valid token, correct scopes) with no warning.
+Likely transient (a stale keyring read at the time) rather than something this session
+fixed. The GitHub MCP server (`plugin:github:github`) connection was not independently
+retested - `gh auth status` and this session's own `gh`/`git push` calls are a separate
+code path from the MCP server's connection, so a clean `gh auth status` doesn't
+guarantee the MCP server itself would connect. Worth a real check next session if the
+MCP tools are needed - the `CONNECT_TIMEOUT` seen at session start may or may not still
+recur.
+
+**Final state verified:** `git fetch --prune` clean, `main` at `55da999`, in sync with
+`origin/main`, working tree clean, no stashes, no open PRs. Remote branches: `main`
+only.
+
+**Work In Progress:**
+- None - session closing out via `session-closer`.
+
+**Outstanding Work for Future Sessions:**
+- Real-world validation still pending for both #138 and #139 (see their entries above) -
+  nothing this pass touched that
+- Confirm the GitHub MCP server actually connects next session, if its tools are needed
+- Everything carried from the two entries above still stands
