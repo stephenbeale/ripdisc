@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-31 - Fix Renaming for Titles Ending in a Period (e.g. "W.")
+
+### Fixed
+- Reported bug: ripping "W." (Oliver Stone's 2008 film) caused a renaming issue affecting many files in the output directory.
+- Root cause: `$safeTitle` (`rip-disc.ps1`, `continue-rip.ps1`) sanitized filesystem-illegal characters (`\/:*?"<>|`) but never stripped a trailing `.` or space. Windows silently drops a trailing period/space from the last component of a path when the directory/file is actually created (`New-Item`, `.NET`'s `Directory.CreateDirectory`, etc. all normalize this away) - so `-title "W."` produces a folder literally named `W` on disk, while every script variable built from `$safeTitle` still holds `"W."` with the dot.
+- That mismatch only bites the code paths that compare/build filenames from the literal `$safeTitle` string instead of reading the real on-disk name back with `Get-Item` - notably the Extras-disc prefixing block and the Series-mode prefix in both scripts. There, the existing underscore-to-hyphen double-prefix guard (added in PR #70/#71) stopped matching (`"W._*"` never matches an on-disk file named `W_t00.mp4`), so every file fell through to the un-guarded branch and got double-prefixed (e.g. `W.-W_t00.mp4`) - the exact bug class PR #70/#71 was written to prevent, reintroduced by the extra dot. Same root cause as PR #131's slash-in-title fix, for a different character.
+- Fix: `$safeTitle` now also `.TrimEnd('.', ' ')`s the sanitized title, in all four occurrences (`rip-disc.ps1:1151`, `:2204`; `continue-rip.ps1:639`, `:1166`).
+- New `tests/Test-TitleSanitization.ps1` - extracts the real `$safeTitle` expression from both scripts (asserts all four occurrences stay identical) and evaluates it against sample titles, including `"W."`, `"W.."`, a trailing space, and the existing slash/colon/asterisk cases from PR #131.
+
+**Testing status:** `pwsh` (PowerShell 7.4.6) installed into this session specifically to verify this fix - the first time this repo's tests have actually been executed rather than just parse-checked from a non-Windows environment. `Parser::ParseFile` reports 0 errors on both scripts; UTF-8 BOM confirmed intact. Full `tests/` suite run: 90/90 passing across all 6 files (27 + 11 + 25 + 16 + 11, plus `Test-DriveQueryTimeout.ps1`'s `Select-MatchedDrive` cases), including the new `Test-TitleSanitization.ps1` (11/11). `Test-DriveQueryTimeout.ps1`'s `Wait-ProcessWithTimeout` cases fail in this Linux sandbox because they spawn `powershell.exe` (Windows-only) - confirmed this failure is pre-existing on `main`, unrelated to this change. One bug caught by this run before it shipped: the test's own `$distinct = $allExprs | Select-Object -Unique` collapsed to a bare string (not a 1-element array) since only one unique value ever comes back, so `$distinct[0]` was indexing into the string's *characters* instead of the array - fixed with `@(...)`. Not exercised against a real Windows rip - the fix is reasoned from documented Windows path-normalization behavior (trailing dots/spaces are dropped from path components by the Win32 file APIs unless the `\\?\` prefix is used), and Linux's filesystem does not reproduce that quirk, so an actual "W." disc rip on Windows is still the real-world confirmation this needs.
+
 ## 2026-08-29 (continued again) - Show Disc Type in the Drive Listing
 
 ### Added
