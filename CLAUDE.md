@@ -2225,3 +2225,33 @@ Valley S2 D2 DVD in E: hashed in 267 ms (27 VIDEO_TS files) and fell back cleanl
 has no Silicon Valley entries at all, so a real-disc hash MATCH is still unconfirmed (only the
 independent Python implementation agrees). TheDiscDB coverage is mostly Blu-ray; expect DVD misses.
 **Not exercised in a real rip.**
+
+### 2026-10-04 (continued) - C# Core Extraction (step 1 towards a WinForms app)
+
+**Decision (user, this session):** build the WinForms app as a new project inside this repo
+(`RipDisc.WinForms`, not yet created), on a shared `RipDisc.Core` library, rather than in a new
+repo or by wrapping the PowerShell. Still open: whether the PowerShell scripts get frozen once the
+C# side catches up, or both stay maintained (every fix twice).
+
+**What changed:** `RipDisc/` is now `RipDisc.sln` with `RipDisc.Core`, `RipDisc.Cli` (still
+`RipDisc.exe`) and `RipDisc.Tests` (xUnit, 62 tests - the first C# tests here). The pipeline
+(`RipPipeline`, ex-`RipDiscApplication`) talks only to `IRipUI`; `IProcessRunner` and
+`IRipEnvironment` (eject, open folder, drive-ready check, handle wait) are seams so tests run the
+whole pipeline against fakes in a temp folder. Config now comes from `ripdisc-config.json`.
+Details in CHANGELOG.
+
+**Found and fixed:** `-processQueue` merged the just-finished job back in from the queue file
+(see CHANGELOG). Long-standing, only in the C# path.
+
+**Worktree:** built in `C:\Users\sjbeale\source\repos\ripdisc-core-extraction` because another
+session switched the main checkout to `fix/series-extras-subfolder` mid-task.
+
+**Testing status:** 62/62 tests; CLI smoke-tested (bad-argument usage, closed-stdin abort).
+**Not run against a disc.**
+
+**Next for the WinForms track:**
+1. `makemkvcon -r` robot-mode spike on a spare disc (progress `PRGV`/`PRGC`/`PRGT`, `MSG` codes,
+   licence-expiry text) - feeds a progress bar and better error analysis
+2. `RipDisc.WinForms` project: a `WinFormsRipUI` that marshals `IRipUI` calls to the UI thread,
+   running `RipPipeline.Run` on a background task with a Cancel button wired to the token
+3. Port PowerShell-only behaviour the GUI needs most (see README Feature Parity table)

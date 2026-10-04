@@ -1,4 +1,4 @@
-namespace RipDisc;
+namespace RipDisc.Core;
 
 public static class FileHelper
 {

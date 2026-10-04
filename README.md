@@ -109,7 +109,7 @@ Run `.\setup.ps1` directly instead of the bat file. Or skip setup entirely — t
 ### C# Version
 
 ```bash
-cd RipDisc\RipDisc\bin\Release\net8.0-windows
+cd RipDisc\RipDisc.Cli\bin\Release\net8.0-windows
 .\RipDisc.exe -title "The Matrix"
 ```
 
@@ -694,17 +694,12 @@ ripdisc/
 ├── README.md              # This file
 └── RipDisc/               # C# implementation
     ├── README.md          # C# specific documentation
+    ├── RipDisc.sln        # Solution (Core, Cli, Tests)
     ├── build.bat          # Build script
     ├── publish.bat        # Publish script
-    └── RipDisc/           # C# project
-        ├── Program.cs
-        ├── RipDiscApplication.cs
-        ├── CommandLineOptions.cs
-        ├── ConsoleHelper.cs
-        ├── FileHelper.cs
-        ├── Logger.cs
-        ├── StepTracker.cs
-        └── RipDisc.csproj
+    ├── RipDisc.Core/      # Pipeline, config, queue - no console code (IRipUI seam)
+    ├── RipDisc.Cli/       # Console app, builds RipDisc.exe
+    └── RipDisc.Tests/     # xUnit tests (dotnet test RipDisc.sln)
 ```
 
 ## Contributing

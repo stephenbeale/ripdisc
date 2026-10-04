@@ -1,16 +1,15 @@
-namespace RipDisc;
+namespace RipDisc.Core;
 
 public class Logger
 {
     private readonly string _logFilePath;
 
-    public Logger(string title, int disc)
+    public Logger(string logDirectory, string title, int disc)
     {
-        var logDir = @"C:\Video\logs";
-        Directory.CreateDirectory(logDir);
+        Directory.CreateDirectory(logDirectory);
 
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        _logFilePath = Path.Combine(logDir, $"{title}_disc{disc}_{timestamp}.log");
+        _logFilePath = Path.Combine(logDirectory, $"{title}_disc{disc}_{timestamp}.log");
     }
 
     public string LogFilePath => _logFilePath;

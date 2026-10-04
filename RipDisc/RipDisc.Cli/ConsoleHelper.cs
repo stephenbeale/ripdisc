@@ -49,12 +49,6 @@ public static class ConsoleHelper
         WriteHeader("========================================");
     }
 
-    public static string ReadInput(string prompt)
-    {
-        Console.Write(prompt);
-        return Console.ReadLine() ?? string.Empty;
-    }
-
     public static void SetWindowTitle(string title)
     {
         try
