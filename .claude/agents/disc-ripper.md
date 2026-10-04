@@ -41,6 +41,7 @@ The script is located at: `.\rip-disc.ps1`
 - `-OutputDrive` (string, default "E:"): Drive letter for output directories (accepts "E" or "E:" format)
 - `-NoSound` (switch): Skip the completion fanfare beep melody
 - `-NoEject` (switch): Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only; continue-rip.ps1 accepts it for compatibility but ignores it)
+- `-NoDiscDb` (switch): Skip the TheDiscDB lookup that maps plain `-Series` disc titles to episodes/named extras. Note the lookup needs the disc's drive letter: with `-DriveIndex` alone it is skipped, so pass `-Drive X:` as well for series rips. `continue-rip.ps1` takes the hash as `-DiscDbHash` (printed in the retry command and the log)
 
 Note: this parameter list predates several script features (`-Extras`, `-Queue`, `-Bluray`, genre flags like `-Documentary`/`-Music`, `-EpisodeNames`) — see `README.md` for the full, current parameter reference.
 

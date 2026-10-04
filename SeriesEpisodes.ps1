@@ -29,17 +29,41 @@ function Get-SeriesEpisodeFileName {
 }
 
 function Get-SeriesExtraFileName {
-    param([string]$Title, [int]$Season, [int]$Extra, [string]$Extension)
-    return "{0}-{1}-Extra{2:D2}{3}" -f $Title, (Get-SeriesSeasonTag $Season), $Extra, $Extension
+    param([string]$Title, [int]$Season, [int]$Extra, [string]$Extension, [string]$Label = "")
+    # -Label is TheDiscDB's published name for the extra (already made filename-safe by
+    # Get-SeriesExtraLabel). It goes AFTER the number, so sorting and uniqueness are
+    # still decided by Extra## alone: <Title>-S02-Extra01-Making Of.mkv
+    $suffix = if ($Label) { "-$Label" } else { "" }
+    return "{0}-{1}-Extra{2:D2}{3}{4}" -f $Title, (Get-SeriesSeasonTag $Season), $Extra, $suffix, $Extension
+}
+
+# Turns a published extra name into something safe to put in a filename: characters
+# Windows forbids (\ / : * ? " < > |) and control characters become spaces, runs of
+# whitespace collapse, leading/trailing spaces, dots and hyphens go (Windows silently
+# strips trailing dots/spaces), and the result is capped at -MaxLength characters,
+# cut at a word boundary where possible. Returns "" when nothing usable is left.
+function Get-SeriesExtraLabel {
+    param([string]$Name, [int]$MaxLength = 50)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return "" }
+    $label = $Name -replace '[\\/:*?"<>|\x00-\x1F\x7F]', ' '
+    $label = ($label -replace '\s+', ' ').Trim(' ', '.', '-')
+    if ($label.Length -gt $MaxLength) {
+        $cut = $label.Substring(0, $MaxLength)
+        $lastSpace = $cut.LastIndexOf(' ')
+        if ($lastSpace -ge [int]($MaxLength / 2)) { $cut = $cut.Substring(0, $lastSpace) }
+        $label = $cut.Trim(' ', '.', '-')
+    }
+    return $label
 }
 
 # Regex matching a file already in the final shape for this title and season. Used to
 # leave already-renamed files alone (e.g. re-running organize after a failure part-way
-# through) and to reserve their numbers so nothing is ever numbered twice.
+# through) and to reserve their numbers so nothing is ever numbered twice. Extras may
+# carry a TheDiscDB name after the number (-Extra01-Making Of).
 function Get-SeriesNamePattern {
     param([string]$Title, [int]$Season)
     $tag = Get-SeriesSeasonTag $Season
-    return '^' + [regex]::Escape($Title) + '-' + $tag + '-(?:E(?<ep>\d+)|Extra(?<extra>\d+))\.(?:mp4|mkv)$'
+    return '^' + [regex]::Escape($Title) + '-' + $tag + '-(?:E(?<ep>\d+)|Extra(?<extra>\d+)(?:-[^\\/]+)?)\.(?:mp4|mkv)$'
 }
 
 # ---------------------------------------------------------------------------
@@ -194,6 +218,12 @@ function Get-Median {
 #      episode: the median heuristic - under 60% of the median title length is an extra.
 #   4. A title with no readable duration stays an episode, flagged.
 #
+# TheDiscDB comes before all of that: -DiscDbMap (OriginalName -> TheDiscDB title, from
+# Get-DiscDbTitleMatches) gives a file its published episode number, or marks it as a
+# named extra. Its episode numbers are reserved up front so the sequential numbering of
+# any file TheDiscDB does not cover skips them. A TheDiscDB episode number that is
+# already taken falls back to the steps above instead of being used twice.
+#
 # -Overrides (OriginalName -> 'Episode'|'Extra') comes from the confirmation prompt's
 # edit option and always wins. Numbers in -TakenEpisodes / -TakenExtras (files already
 # renamed in this folder) are skipped so nothing is numbered twice.
@@ -207,10 +237,16 @@ function Get-SeriesTitleClassification {
         [int[]]$TakenExtras = @(),
         [hashtable]$Overrides = @{},
         [switch]$AllExtras,
+        [hashtable]$DiscDbMap = @{},
+        # The season the files are being named for - a TheDiscDB title from a different
+        # season is still used, but flagged for checking.
+        [int]$Season = 0,
         [double]$ShortRatio = 0.6,
         [double]$TolerancePct = 0.15,
         [double]$ToleranceMinSec = 180
     )
+    if (-not $DiscDbMap) { $DiscDbMap = @{} }
+    if (-not $Overrides) { $Overrides = @{} }
 
     $items = @(foreach ($t in $Titles) {
         $d = if ($null -ne $t.DurationSec -and [double]$t.DurationSec -gt 0) { [double]$t.DurationSec } else { $null }
@@ -223,6 +259,12 @@ function Get-SeriesTitleClassification {
             ExpectedSec   = $null
             Note          = ""
             Mismatch      = $false
+            # Where the episode/extra decision came from: TheDiscDB, TMDb, Length
+            # (median / play-all heuristics), You (edited at the prompt), -Extras, or
+            # '-' (no duration to go on).
+            Source        = ""
+            # TheDiscDB's published name for an extra, filename-safe; "" otherwise.
+            Label         = ""
         }
     })
 
@@ -250,23 +292,61 @@ function Get-SeriesTitleClassification {
     $takenEp = @{}; foreach ($n in $TakenEpisodes) { $takenEp[[int]$n] = $true }
     $takenEx = @{}; foreach ($n in $TakenExtras) { $takenEx[[int]$n] = $true }
 
+    # --- 0. TheDiscDB episode numbers, reserved before any sequential numbering ---
+    $discDbEpisode = @{}
+    if ($DiscDbMap.Count -gt 0 -and -not $AllExtras) {
+        $reserved = @{}
+        foreach ($item in $items) {
+            if ($Overrides.ContainsKey($item.Name)) { continue }
+            $dd = $DiscDbMap[$item.Name]
+            if (-not $dd -or $dd.ItemType -ne 'Episode' -or $null -eq $dd.Episode -or [int]$dd.Episode -lt 1) { continue }
+            $n = [int]$dd.Episode
+            if ($takenEp.ContainsKey($n) -or $reserved.ContainsKey($n)) { continue }
+            $discDbEpisode[$item.Name] = $n
+            $reserved[$n] = $true
+        }
+        foreach ($n in $reserved.Keys) { $takenEp[$n] = $true }
+    }
+
     foreach ($item in $items) {
         while ($takenEp.ContainsKey($nextEpisode)) { $nextEpisode++ }
         $expected = if ($runtimeByEpisode.ContainsKey($nextEpisode)) { $runtimeByEpisode[$nextEpisode] } else { $null }
+        $dd = $DiscDbMap[$item.Name]
+        $ddExtraLabel = if ($dd -and $dd.ItemType -and $dd.ItemType -ne 'Episode') { Get-SeriesExtraLabel $dd.Name } else { "" }
 
-        if ($Overrides -and $Overrides.ContainsKey($item.Name)) {
+        if ($Overrides.ContainsKey($item.Name)) {
             $item.Kind = $Overrides[$item.Name]
             $item.Note = 'set by you'
+            $item.Source = 'You'
+            if ($item.Kind -eq 'Extra') { $item.Label = $ddExtraLabel }
         } elseif ($AllExtras) {
             $item.Kind = 'Extra'
             $item.Note = '-Extras disc'
+            $item.Source = '-Extras'
+            $item.Label = $ddExtraLabel
+        } elseif ($discDbEpisode.ContainsKey($item.Name)) {
+            $item.Kind = 'Episode'
+            $item.Source = 'TheDiscDB'
+            $item.Note = if ($dd.Name) { "TheDiscDB: $($dd.Name)" } else { 'TheDiscDB' }
+            if ($Season -gt 0 -and $null -ne $dd.Season -and [int]$dd.Season -ne $Season) {
+                $item.Note = "TheDiscDB lists this as S{0:D2}E{1:D2} - check" -f [int]$dd.Season, [int]$dd.Episode
+                $item.Mismatch = $true
+            }
+        } elseif ($dd -and $dd.ItemType -and $dd.ItemType -ne 'Episode') {
+            $item.Kind = 'Extra'
+            $item.Source = 'TheDiscDB'
+            $item.Label = $ddExtraLabel
+            $item.Note = "TheDiscDB: $($dd.ItemType)"
         } elseif ($item.Kind -eq 'Extra') {
             # composite, already decided
+            $item.Source = 'Length'
         } elseif ($null -eq $item.DurationSec) {
             $item.Kind = 'Episode'
             $item.Note = 'duration unknown - check'
             $item.Mismatch = $true
+            $item.Source = '-'
         } elseif ($null -ne $expected) {
+            $item.Source = 'TMDb'
             $tolerance = [math]::Max($expected * $TolerancePct, $ToleranceMinSec)
             if ([math]::Abs($item.DurationSec - $expected) -le $tolerance) {
                 $item.Kind = 'Episode'
@@ -280,6 +360,7 @@ function Get-SeriesTitleClassification {
                 $item.Mismatch = $true
             }
         } else {
+            $item.Source = 'Length'
             if ($null -ne $medianSec -and $item.DurationSec -lt ($medianSec * $ShortRatio)) {
                 $item.Kind = 'Extra'
                 $item.Note = "short (under 60% of typical {0})" -f (Format-SeriesDuration $medianSec)
@@ -292,11 +373,23 @@ function Get-SeriesTitleClassification {
             }
         }
 
-        if ($item.Kind -eq 'Episode') {
+        # The disc WAS found in TheDiscDB but this episode-length file matched none of
+        # its titles - the sequential number it gets is a guess, so say so.
+        if ($DiscDbMap.Count -gt 0 -and $item.Kind -eq 'Episode' -and $item.Source -in @('TMDb', 'Length') -and -not $item.Mismatch) {
+            $item.Note = (@($item.Note, 'not matched in TheDiscDB - check') | Where-Object { $_ }) -join '; '
+            $item.Mismatch = $true
+        }
+
+        if ($item.Kind -eq 'Episode' -and $item.Source -eq 'TheDiscDB') {
+            # Published number - does not use up the sequential counter.
+            $item.EpisodeNumber = $discDbEpisode[$item.Name]
+            $item.ExpectedSec = $dd.DurationSec
+        } elseif ($item.Kind -eq 'Episode') {
             $item.EpisodeNumber = $nextEpisode
             $item.ExpectedSec = $expected
             $nextEpisode++
         } else {
+            if ($item.Source -eq 'TheDiscDB') { $item.ExpectedSec = $dd.DurationSec }
             while ($takenEx.ContainsKey($nextExtra)) { $nextExtra++ }
             $item.ExtraNumber = $nextExtra
             $nextExtra++
@@ -317,11 +410,14 @@ function Get-SeriesTitleClassification {
         $warnings += "$($mismatches.Count) title(s) flagged for checking - see the Note column."
     }
 
+    $discDbCount = @($items | Where-Object { $_.Source -eq 'TheDiscDB' }).Count
     return [pscustomobject]@{
-        Items     = $items
-        Warnings  = $warnings
-        Method    = $method
-        MedianSec = $medianSec
+        Items        = $items
+        Warnings     = $warnings
+        # The fallback used for files TheDiscDB does not cover (TMDb / Median / None).
+        Method       = $method
+        MedianSec    = $medianSec
+        DiscDbCount  = $discDbCount
     }
 }
 
@@ -335,7 +431,7 @@ function New-SeriesRenamePlan {
         $newName = if ($item.Kind -eq 'Episode') {
             Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
         } else {
-            Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext
+            Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label
         }
         $newPath = Join-Path $Directory $newName
         $skip = Test-Path -LiteralPath $newPath
@@ -343,6 +439,7 @@ function New-SeriesRenamePlan {
             OriginalName = $item.Name
             NewName      = $newName
             Kind         = $item.Kind
+            Source       = $item.Source
             DurationSec  = $item.DurationSec
             ExpectedSec  = $item.ExpectedSec
             Note         = if ($skip) { "TARGET EXISTS - will not overwrite" } else { $item.Note }
@@ -355,22 +452,28 @@ function New-SeriesRenamePlan {
 }
 
 function Show-SeriesRenamePlan {
-    param([object[]]$Plan, [object]$Classification, [object]$TmdbSeason = $null)
+    param([object[]]$Plan, [object]$Classification, [object]$TmdbSeason = $null, [object]$DiscDbDisc = $null)
 
     $methodText = switch ($Classification.Method) {
         'TMDb'   { "TMDb runtimes$(if ($TmdbSeason -and $TmdbSeason.ShowName) { " for $($TmdbSeason.ShowName)" })" }
         'Median' { "median title length ($(Format-SeriesDuration $Classification.MedianSec)) - no TMDb data" }
         default  { "no durations available" }
     }
+    if ($Classification.DiscDbCount -gt 0) {
+        $discText = if ($DiscDbDisc -and $DiscDbDisc.Description) { " ($($DiscDbDisc.Description))" } else { "" }
+        $rest = $Plan.Count - $Classification.DiscDbCount
+        $methodText = "TheDiscDB$discText for $($Classification.DiscDbCount) of $($Plan.Count) title(s)$(if ($rest -gt 0) { "; the rest by $methodText" })"
+    }
     Write-Host "`nPlanned names (episodes vs extras by $methodText):" -ForegroundColor Cyan
     $nameWidth = [math]::Max(8, (($Plan | ForEach-Object { $_.OriginalName.Length } | Measure-Object -Maximum).Maximum))
     $newWidth = [math]::Max(8, (($Plan | ForEach-Object { $_.NewName.Length } | Measure-Object -Maximum).Maximum))
-    Write-Host ("  {0,-3} {1} {2,8} {3,8}  {4,-7} {5} {6}" -f '#', 'Original'.PadRight($nameWidth), 'Actual', 'Expected', 'Kind', 'New name'.PadRight($newWidth), 'Note') -ForegroundColor Gray
+    $row = "  {0,-3} {1} {2,8} {3,8}  {4,-7} {5,-9} {6} {7}"
+    Write-Host ($row -f '#', 'Original'.PadRight($nameWidth), 'Actual', 'Expected', 'Kind', 'Source', 'New name'.PadRight($newWidth), 'Note') -ForegroundColor Gray
     for ($i = 0; $i -lt $Plan.Count; $i++) {
         $p = $Plan[$i]
         $expected = if ($p.ExpectedSec) { Format-SeriesDuration $p.ExpectedSec } else { '-' }
         $color = if ($p.Skip) { 'Red' } elseif ($p.Kind -eq 'Extra') { 'DarkYellow' } elseif ($p.Note -match 'check') { 'Yellow' } else { 'White' }
-        Write-Host ("  {0,-3} {1} {2,8} {3,8}  {4,-7} {5} {6}" -f ($i + 1), $p.OriginalName.PadRight($nameWidth), (Format-SeriesDuration $p.DurationSec), $expected, $p.Kind, $p.NewName.PadRight($newWidth), $p.Note) -ForegroundColor $color
+        Write-Host ($row -f ($i + 1), $p.OriginalName.PadRight($nameWidth), (Format-SeriesDuration $p.DurationSec), $expected, $p.Kind, $p.Source, $p.NewName.PadRight($newWidth), $p.Note) -ForegroundColor $color
     }
     foreach ($w in $Classification.Warnings) {
         Write-Host "  WARNING: $w" -ForegroundColor Yellow
@@ -387,6 +490,7 @@ function Confirm-SeriesRenamePlan {
         [int]$Season,
         [string]$Directory,
         [object]$TmdbSeason = $null,
+        [object]$DiscDbDisc = $null,
         [scriptblock]$ReadInput = { param($p) Read-Host $p }
     )
 
@@ -394,7 +498,7 @@ function Confirm-SeriesRenamePlan {
     for ($round = 1; $round -le 50; $round++) {
         $classification = Get-SeriesTitleClassification @ClassifyArgs -Overrides $overrides
         $plan = New-SeriesRenamePlan -Classification $classification -Title $Title -Season $Season -Directory $Directory
-        Show-SeriesRenamePlan -Plan $plan -Classification $classification -TmdbSeason $TmdbSeason
+        Show-SeriesRenamePlan -Plan $plan -Classification $classification -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc
 
         $answer = & $ReadInput "Accept these names? [Y]es (default) / [n]o, leave files as they are / [e]dit"
         # No input available (redirected/non-interactive): take the default, accept.
@@ -497,6 +601,9 @@ function Invoke-SeriesEpisodeRename {
         [int]$Season,
         [int]$StartEpisode = 1,
         [object]$TmdbSeason = $null,
+        # TheDiscDB disc record from Get-SeriesDiscDbLookup (captured while the disc was
+        # still in the drive). $null = not found / offline / -NoDiscDb.
+        [object]$DiscDbDisc = $null,
         [switch]$AllExtras,
         [string]$UndoScriptSource = "",
         [string]$HandBrakePath = "",
@@ -534,6 +641,23 @@ function Invoke-SeriesEpisodeRename {
         [pscustomobject]@{ Name = $f.Name; DurationSec = $d }
     })
 
+    # TheDiscDB first: line the files up with the disc's published titles. Any problem
+    # here just means no TheDiscDB rows - classification carries on with TMDb / median.
+    $discDbMap = @{}
+    if ($DiscDbDisc) {
+        try {
+            $discDbMap = Get-DiscDbTitleMatches -Titles $titles -DiscDbDisc $DiscDbDisc
+        } catch {
+            $discDbMap = @{}
+            Write-Host "  TheDiscDB matching failed ($($_.Exception.Message)) - using TMDb / title lengths" -ForegroundColor DarkGray
+        }
+        $identified = @($discDbMap.Values | Where-Object { $_.ItemType }).Count
+        Write-Log "TheDiscDB: $($discDbMap.Count) of $($titles.Count) file(s) lined up with $($DiscDbDisc.Description) ($identified identified)"
+        if ($discDbMap.Count -eq 0) {
+            Write-Host "  TheDiscDB: no file matched the disc's published title lengths - using TMDb / title lengths" -ForegroundColor DarkGray
+        }
+    }
+
     $classifyArgs = @{
         Titles           = $titles
         StartEpisode     = $StartEpisode
@@ -542,8 +666,10 @@ function Invoke-SeriesEpisodeRename {
         TakenEpisodes    = $takenEpisodes
         TakenExtras      = $takenExtras
         AllExtras        = [bool]$AllExtras
+        DiscDbMap        = $discDbMap
+        Season           = $Season
     }
-    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -ReadInput $ReadInput
+    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput
     if (-not $result) {
         Write-Host "  Rename declined - files keep their current names. Re-run later with: continue-rip.ps1 ... -FromStep organize" -ForegroundColor Yellow
         Write-Log "Series rename: declined at the confirmation prompt - files left unchanged"
@@ -551,7 +677,7 @@ function Invoke-SeriesEpisodeRename {
     }
 
     $plan = @($result.Plan)
-    Write-Log "Series rename: classification by $($result.Classification.Method); start episode $StartEpisode"
+    Write-Log "Series rename: classification by $(if ($result.Classification.DiscDbCount -gt 0) { "TheDiscDB ($($result.Classification.DiscDbCount) title(s)), then " })$($result.Classification.Method); start episode $StartEpisode"
     foreach ($w in $result.Classification.Warnings) { Write-Log "Series rename WARNING: $w" }
 
     $manifestPath = Join-Path $Directory 'rename-manifest.csv'
@@ -668,4 +794,302 @@ function Get-SeriesTmdbSeason {
         Write-Host "TMDb season lookup failed ($($_.Exception.Message)) - using title lengths only" -ForegroundColor DarkGray
         return $null
     }
+}
+
+# ---------------------------------------------------------------------------
+# TheDiscDB disc lookup (optional, fail-soft) - https://thediscdb.com
+# ---------------------------------------------------------------------------
+#
+# TheDiscDB maps each MakeMKV title on a known disc to an episode (season/episode) or a
+# named extra. It is keyed by a "content hash" of the disc's file sizes, so the disc is
+# identified exactly - not by guessing from its name - and no API key is needed.
+#
+# Content hash (TheDiscDb/web: DiscScanner.cs + HashingExtensions.cs):
+#   Blu-ray / UHD: every *.m2ts directly inside BDMV\STREAM
+#   DVD:           every file directly inside VIDEO_TS
+#   files ordered by name; MD5 over each file's size as a little-endian Int64;
+#   uppercase hex with no separators (32 characters).
+# Only the directory listing is read - no file contents - so it is quick, but it needs
+# the disc in the drive. rip-disc.ps1 therefore computes it BEFORE the rip (the disc is
+# ejected after Step 1) and hands the hash to continue-rip.ps1 as -DiscDbHash.
+
+$script:DiscDbEndpoint = 'https://thediscdb.com/graphql'
+
+# Pure hash over a list of sizes, already in TheDiscDB's order. Separate from the disc
+# reading so it can be tested against known values.
+function Get-DiscDbContentHashFromSizes {
+    param([long[]]$Sizes)
+    $bytes = New-Object System.Collections.Generic.List[byte]
+    foreach ($s in $Sizes) { $bytes.AddRange([BitConverter]::GetBytes([long]$s)) }
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    try {
+        $digest = $md5.ComputeHash($bytes.ToArray())
+    } finally {
+        $md5.Dispose()
+    }
+    return ([BitConverter]::ToString($digest) -replace '-', '')
+}
+
+# Reads the disc's file listing and returns @{ Hash; Format; FileCount }, or $null when
+# the drive has no BDMV\STREAM or VIDEO_TS (not a video disc, or not readable).
+function Get-DiscDbContentHash {
+    param([string]$DriveRoot)
+    if ([string]::IsNullOrWhiteSpace($DriveRoot)) { return $null }
+    $root = $DriveRoot.TrimEnd('\') + '\'
+
+    $files = @()
+    $format = $null
+    $stream = Join-Path $root 'BDMV\STREAM'
+    if (Test-Path -LiteralPath $stream -PathType Container) {
+        $files = @(Get-ChildItem -LiteralPath $stream -File -Force -ErrorAction Stop | Where-Object { $_.Extension -eq '.m2ts' })
+        $format = 'Blu-ray'
+    }
+    if ($files.Count -eq 0) {
+        # TheDiscDB does not fall back to VIDEO_TS on a disc that has BDMV or AACS.
+        if ((Test-Path -LiteralPath (Join-Path $root 'BDMV')) -or (Test-Path -LiteralPath (Join-Path $root 'AACS'))) { return $null }
+        $videoTs = Join-Path $root 'VIDEO_TS'
+        if (Test-Path -LiteralPath $videoTs -PathType Container) {
+            $files = @(Get-ChildItem -LiteralPath $videoTs -File -Force -ErrorAction Stop)
+            $format = 'DVD'
+        }
+    }
+    if ($files.Count -eq 0) { return $null }
+
+    # TheDiscDB sorts with .NET's default (culture-aware) string comparer; on-disc names
+    # (00001.m2ts, VTS_01_1.VOB) sort the same under any culture, invariant used here.
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($f in $files) { $list.Add($f) }
+    $list.Sort([System.Comparison[object]] { param($a, $b) [string]::Compare($a.Name, $b.Name, [System.StringComparison]::InvariantCulture) })
+
+    return [pscustomobject]@{
+        Hash      = Get-DiscDbContentHashFromSizes -Sizes @($list | ForEach-Object { [long]$_.Length })
+        Format    = $format
+        FileCount = $list.Count
+    }
+}
+
+# Single seam for every TheDiscDB HTTP call - tests replace this function with a mock.
+# Short timeout: the lookup happens before the rip starts and must never hold it up.
+function Invoke-DiscDbRequest {
+    param([string]$Body)
+    return Invoke-RestMethod -Uri $script:DiscDbEndpoint -Method Post -ContentType 'application/json' -Body $Body -TimeoutSec 8
+}
+
+# "0:21:35" -> 1295. $null for anything unparseable.
+function ConvertFrom-DiscDbDuration {
+    param([string]$Text)
+    if ("$Text" -match '^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*$') {
+        $h = if ($Matches[1]) { [int]$Matches[1] } else { 0 }
+        return ($h * 3600) + ([int]$Matches[2] * 60) + [int]$Matches[3]
+    }
+    return $null
+}
+
+function ConvertTo-DiscDbInt {
+    param($Value)
+    if ("$Value" -match '^\s*(\d+)\s*$') { return [int]$Matches[1] }
+    return $null
+}
+
+# Looks the content hash up. Returns the disc record, or $null when TheDiscDB has no
+# disc with that hash. Throws on transport errors and GraphQL errors - the caller
+# (Get-SeriesDiscDbLookup) turns those into a silent fallback.
+function Find-DiscDbDisc {
+    param([string]$ContentHash)
+
+    # Filters at every level, so only the one matching disc (with its titles) comes
+    # back - about 3 KB instead of every disc of a complete-series box set.
+    $query = 'query($hash: String!) { mediaItems(where: { releases: { some: { discs: { some: { contentHash: { eq: $hash } } } } } }) { nodes { title type year releases(where: { discs: { some: { contentHash: { eq: $hash } } } }) { slug title discs(where: { contentHash: { eq: $hash } }) { index name format contentHash titles { index sourceFile duration size itemType season episode item { title type season episode } } } } } } }'
+    $body = @{ query = $query; variables = @{ hash = $ContentHash } } | ConvertTo-Json -Depth 5 -Compress
+    $response = Invoke-DiscDbRequest -Body $body
+
+    if ($null -eq $response) { throw "empty response" }
+    if ($response.errors) { throw "TheDiscDB error: $(@($response.errors)[0].message)" }
+
+    $found = @()
+    foreach ($media in @($response.data.mediaItems.nodes)) {
+        if ($null -eq $media) { continue }
+        foreach ($release in @($media.releases)) {
+            if ($null -eq $release) { continue }
+            foreach ($disc in @($release.discs)) {
+                if ($disc -and "$($disc.contentHash)" -ieq $ContentHash) {
+                    $found += [pscustomobject]@{ Media = $media; Release = $release; Disc = $disc }
+                }
+            }
+        }
+    }
+    if ($found.Count -eq 0) { return $null }
+
+    # The same pressing can sit in several releases (e.g. a season set and a complete
+    # set); the title mapping is per disc, so the first is as good as any.
+    $pick = $found[0]
+    $titles = @(foreach ($t in @($pick.Disc.titles)) {
+        if ($null -eq $t) { continue }
+        $item = $t.item
+        $itemType = if ($item -and $item.type) { "$($item.type)" } elseif ($item -and $t.itemType) { "$($t.itemType)" } else { $null }
+        $seasonText = if ($item -and $item.season) { $item.season } else { $t.season }
+        $episodeText = if ($item -and $item.episode) { $item.episode } else { $t.episode }
+        [pscustomobject]@{
+            Index       = [int]$t.index
+            SourceFile  = $t.sourceFile
+            DurationSec = ConvertFrom-DiscDbDuration $t.duration
+            Size        = $t.size
+            # $null = TheDiscDB lists the title but has not identified it (play-all,
+            # menu loop, warning screen...). Such a title still takes part in lining
+            # files up, but never decides what a file is.
+            ItemType    = $itemType
+            Season      = if ($item) { ConvertTo-DiscDbInt $seasonText } else { $null }
+            Episode     = if ($item) { ConvertTo-DiscDbInt $episodeText } else { $null }
+            Name        = if ($item) { "$($item.title)" } else { "" }
+        }
+    })
+
+    $mediaText = "$($pick.Media.title)$(if ($pick.Media.year) { " ($($pick.Media.year))" })"
+    $releaseText = if ($pick.Release.title) { " - $($pick.Release.title)" } else { "" }
+    $discText = if ($pick.Disc.name) { ", $($pick.Disc.name)" } else { ", disc $($pick.Disc.index)" }
+    return [pscustomobject]@{
+        ContentHash  = $ContentHash
+        MediaTitle   = $pick.Media.title
+        MediaType    = $pick.Media.type
+        Year         = $pick.Media.year
+        ReleaseTitle = $pick.Release.title
+        ReleaseSlug  = $pick.Release.slug
+        DiscIndex    = [int]$pick.Disc.index
+        DiscName     = $pick.Disc.name
+        Format       = $pick.Disc.format
+        Description  = "$mediaText$releaseText$discText"
+        MatchCount   = $found.Count
+        Titles       = $titles
+    }
+}
+
+# Fail-soft wrapper used by both scripts. ALWAYS returns an object:
+#   ContentHash - the disc's hash ("" if it could not be read), kept even when the
+#                 lookup fails so a continue-rip.ps1 run can try again later
+#   Disc        - the Find-DiscDbDisc record, or $null
+#   Message     - one line describing the outcome, for the session log
+# Pass -ContentHash when it is already known (continue-rip.ps1), otherwise -DriveRoot.
+# Nothing here throws; every failure falls back to TMDb / median with one line shown.
+function Get-SeriesDiscDbLookup {
+    param([string]$DriveRoot = "", [string]$ContentHash = "", [switch]$Disabled, [string]$NoDriveReason = "")
+
+    $result = [pscustomobject]@{ ContentHash = "$ContentHash".Trim().ToUpper(); Disc = $null; Message = "" }
+
+    if ($Disabled) {
+        $result.Message = "TheDiscDB: lookup off (-NoDiscDb) - episode/extra detection uses TMDb / title lengths"
+    } else {
+        try {
+            if (-not $result.ContentHash) {
+                if (-not $DriveRoot) {
+                    $reason = if ($NoDriveReason) { $NoDriveReason } else { 'no disc hash available' }
+                    $result.Message = "TheDiscDB: $reason - using TMDb / title lengths"
+                } else {
+                    $hashInfo = Get-DiscDbContentHash -DriveRoot $DriveRoot
+                    if ($hashInfo) {
+                        $result.ContentHash = $hashInfo.Hash
+                    } else {
+                        $result.Message = "TheDiscDB: no BDMV\STREAM or VIDEO_TS readable on $DriveRoot - using TMDb / title lengths"
+                    }
+                }
+            } elseif ($result.ContentHash -notmatch '^[0-9A-F]{32}$') {
+                $result.Message = "TheDiscDB: '$ContentHash' is not a valid disc hash (32 hex characters) - using TMDb / title lengths"
+                $result.ContentHash = ""
+            }
+
+            if (-not $result.Message) {
+                $disc = Find-DiscDbDisc -ContentHash $result.ContentHash
+                if ($disc) {
+                    $identified = @($disc.Titles | Where-Object { $_.ItemType }).Count
+                    $result.Disc = $disc
+                    $result.Message = "TheDiscDB: matched $($disc.Description) [$($result.ContentHash)] - $identified of $(@($disc.Titles).Count) title(s) identified"
+                    Write-Host $result.Message -ForegroundColor Gray
+                    return $result
+                }
+                $result.Message = "TheDiscDB: disc $($result.ContentHash) is not in the database - using TMDb / title lengths"
+            }
+        } catch {
+            $result.Disc = $null
+            $result.Message = "TheDiscDB lookup failed ($($_.Exception.Message)) - using TMDb / title lengths"
+        }
+    }
+    Write-Host $result.Message -ForegroundColor DarkGray
+    return $result
+}
+
+# Lowest episode number TheDiscDB lists on this disc for -Season (any season when
+# -Season is 0). Used as the default answer at the Disc 2+ start-episode prompt.
+function Get-DiscDbFirstEpisode {
+    param([object]$DiscDbDisc, [int]$Season = 0)
+    if (-not $DiscDbDisc) { return $null }
+    $eps = @($DiscDbDisc.Titles | Where-Object {
+        $_.ItemType -eq 'Episode' -and $null -ne $_.Episode -and $_.Episode -ge 1 -and
+        ($Season -le 0 -or $null -eq $_.Season -or $_.Season -eq $Season)
+    } | ForEach-Object { $_.Episode })
+    if ($eps.Count -eq 0) { return $null }
+    return [int](($eps | Measure-Object -Minimum).Minimum)
+}
+
+# Lines the ripped files up with TheDiscDB's titles and returns
+# @{ <file name> = <TheDiscDB title> } for each file that lines up.
+#
+# TheDiscDB's title index is MakeMKV's own title number, but the numbers in our file
+# names (title_t03) can drift from it: MakeMKV's minimum-length setting drops short
+# titles (TheDiscDB lists even 9-second clips), Step 2 skips the play-all composite,
+# and MakeMKV versions differ. Durations alone are not enough either - episodes on one
+# disc are often within a second or two of each other. So this is an order-preserving
+# alignment (dynamic programming, like a diff): files and TheDiscDB titles are both in
+# MakeMKV order, a file may pair with a title only if their durations agree within
+# max(-ToleranceMinSec, -TolerancePct), and the alignment with the most pairs wins;
+# ties go to the closest durations, then to the smallest title-number drift.
+function Get-DiscDbTitleMatches {
+    param(
+        [object[]]$Titles,
+        [object]$DiscDbDisc,
+        [double]$TolerancePct = 0.01,
+        [double]$ToleranceMinSec = 5
+    )
+    $map = @{}
+    if (-not $DiscDbDisc -or -not $Titles -or $Titles.Count -eq 0) { return $map }
+    $dd = @($DiscDbDisc.Titles | Where-Object { $null -ne $_ } | Sort-Object Index)
+    if ($dd.Count -eq 0) { return $map }
+
+    $files = @($Titles)
+    $n = $files.Count
+    $m = $dd.Count
+    $fileIndex = @(for ($i = 0; $i -lt $n; $i++) {
+        if ("$($files[$i].Name)" -match '_t(\d+)\.[^.]+$') { [int]$Matches[1] } else { $i }
+    })
+
+    $score = New-Object 'double[,]' ($n + 1), ($m + 1)
+    $move = New-Object 'int[,]' ($n + 1), ($m + 1)   # 1 = skip file, 2 = skip title, 3 = pair
+    for ($i = 1; $i -le $n; $i++) { $move[$i, 0] = 1 }
+    for ($j = 1; $j -le $m; $j++) { $move[0, $j] = 2 }
+
+    for ($i = 1; $i -le $n; $i++) {
+        $fd = $files[$i - 1].DurationSec
+        for ($j = 1; $j -le $m; $j++) {
+            $best = $score[($i - 1), $j]; $mv = 1
+            if ($score[$i, ($j - 1)] -gt $best) { $best = $score[$i, ($j - 1)]; $mv = 2 }
+            $td = $dd[$j - 1].DurationSec
+            if ($null -ne $fd -and [double]$fd -gt 0 -and $null -ne $td -and $td -gt 0) {
+                $diff = [math]::Abs([double]$fd - [double]$td)
+                if ($diff -le [math]::Max($ToleranceMinSec, $td * $TolerancePct)) {
+                    $w = 10000 - ($diff * 10) - [math]::Abs($dd[$j - 1].Index - $fileIndex[$i - 1])
+                    if ($score[($i - 1), ($j - 1)] + $w -gt $best) { $best = $score[($i - 1), ($j - 1)] + $w; $mv = 3 }
+                }
+            }
+            $score[$i, $j] = $best
+            $move[$i, $j] = $mv
+        }
+    }
+
+    $i = $n; $j = $m
+    while ($i -gt 0 -and $j -gt 0) {
+        switch ($move[$i, $j]) {
+            3 { $map[$files[$i - 1].Name] = $dd[$j - 1]; $i--; $j-- }
+            2 { $j-- }
+            default { $i-- }
+        }
+    }
+    return $map
 }

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 (continued) - TheDiscDB Lookup for Series Episode/Extra Mapping
+
+### Added
+- Optional [TheDiscDB](https://thediscdb.com) lookup as the first and most authoritative source for plain `-Series` naming. Before the rip, while the disc is still in the drive, `rip-disc.ps1` computes TheDiscDB's content hash from the disc's file listing (MD5 over the sizes of `BDMV\STREAM\*.m2ts` on Blu-ray or `VIDEO_TS\*` on DVD, ordered by name, as little-endian Int64; no file contents read) and queries the public GraphQL API (`https://thediscdb.com/graphql`, no key) for that exact disc
+- When the disc is known, Step 3 lines the ripped files up with TheDiscDB's titles by duration in MakeMKV order (an order-preserving alignment, so a different MakeMKV minimum-length setting, the skipped play-all title or near-identical episode lengths don't mis-assign files) and uses the published episode numbers and extras. TheDiscDB episode numbers are reserved so any file it doesn't cover is numbered around them and flagged for checking
+- Confirmation table: new Source column (`TheDiscDB`, `TMDb`, `Length`, `You`, `-Extras`); TheDiscDB rows show the episode title in the Note column and TheDiscDB's duration as Expected
+- Named extras: extras TheDiscDB identifies keep their published name after the number, made filename-safe and capped at 50 characters: `<Title>-S##-Extra##-<Name>.ext` (e.g. `30 Rock-S01-Extra01-The C Word Deleted Scene.mp4`). Unnamed extras keep `-Extra##`. Already-renamed detection accepts the named form, so re-running organize leaves them alone
+- Disc 2+ start-episode prompt defaults to the first episode TheDiscDB lists for the disc when there is a match
+- `-NoDiscDb` switch on both scripts. The failure-time `continue-rip.ps1` command carries `-NoDiscDb`, or for series the disc's hash as `-DiscDbHash <hash>` (also written to the session log), since `continue-rip.ps1` never reads the disc. `continue-rip.ps1` accepts both and includes them in its equivalent-command line
+- `tests/Test-TheDiscDbLookup.ps1` - 78 tests: content hash (vectors computed independently in Python, Blu-ray and DVD file selection and ordering), mocked lookups (match, no match, GraphQL error, timeout, garbage response, `-NoDiscDb`, malformed hash, no drive), alignment (index drift, near-identical durations, missing durations, nothing matching), classification precedence (prompt edits, `-Extras`, season mismatch, duplicate and taken numbers, unidentified titles), fallback ordering TheDiscDB, then TMDb, then median, extra labels, an end-to-end rename, and the continue-command hand-off
+
+### Fail-soft behaviour
+- No match, offline, timeout (8 s), GraphQL error, unreadable disc, `-NoDiscDb`, or `-DriveIndex` without `-Drive` (drive letter unknown, so the wrong disc could be hashed): one line shown and logged, then TMDb runtimes, then the median heuristic, exactly as before. Nothing in the lookup can throw into the rip
+
 ## 2026-10-04 - Series Episode Naming, Extras Detection, Rename Manifest and Undo
 
 ### Changed

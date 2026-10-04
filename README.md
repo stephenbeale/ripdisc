@@ -17,7 +17,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
 - **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Music, Surf) with different organization strategies
-- **Episode naming** for series (`Title-S02-E01.mp4`), with extras told apart from episodes (TMDb runtimes or title length), a confirm/edit step, a rename manifest and a one-command undo
+- **Episode naming** for series (`Title-S02-E01.mp4`), with extras told apart from episodes (TheDiscDB disc mapping, then TMDb runtimes, then title length), a confirm/edit step, a rename manifest and a one-command undo
 - **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
 - **HandBrake queue mode** for sequential encoding after concurrent rips
@@ -154,6 +154,7 @@ Both versions use the same command-line parameters:
 -startEpisode <int>     Starting episode number for series (default: 1). For plain -series
                         Disc 2+, you are asked at the start of the run if this is omitted
 -noSound                Skip the completion fanfare (Console.Beep melody)
+-noDiscDb               Skip the TheDiscDB lookup for plain -series episode/extra naming
 -noEject                Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only —
                         continue-rip.ps1 accepts it for command-line compatibility but
                         ignores it, since it never runs the rip/eject step)
@@ -269,6 +270,19 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
   number before the rip begins, with the next number after the earlier discs' episodes pre-filled.
   Disc 1, or an explicit `-startEpisode`, never prompts. A failed run's suggested `continue-rip.ps1`
   command carries the answer, so a resumed rip doesn't ask again.
+- **TheDiscDB first** - before the rip, while the disc is still in the drive, the script reads the
+  disc's file listing and computes its [TheDiscDB](https://thediscdb.com) content hash (the same
+  size-based MD5 TheDiscDB uses: `BDMV\STREAM\*.m2ts` on Blu-ray, `VIDEO_TS\*` on DVD - no file
+  contents are read). If TheDiscDB knows the disc, its title-by-title mapping decides which file is
+  which episode (published episode numbers, e.g. `E08` on a Disc 2) and which are extras, and the
+  confirmation table shows `TheDiscDB` in its Source column. Files are lined up with TheDiscDB's
+  titles by duration *in MakeMKV order*, so a different MakeMKV minimum-length setting (which shifts
+  the `_tNN` numbers) or the skipped play-all title doesn't throw it off. No API key is needed.
+  Extras TheDiscDB names keep that name after the number:
+  `30 Rock-S01-Extra01-The C Word Deleted Scene.mp4`.
+  No match, offline, or any error: one line is shown and logged, and naming falls back to TMDb and
+  the median heuristic below - the lookup never stops a rip (8-second timeout). Turn it off with
+  `-noDiscDb`. With `-driveIndex` but no `-drive`, the drive letter isn't known, so it is skipped.
 - **Extras vs episodes** - extras get `Extra##` names and no episode number. With a TMDb key, the
   season's published per-episode runtimes are used: each title is compared with the runtime of the
   episode it would become (within 15% or 3 minutes). A title under 60% of that runtime is an extra;
@@ -276,7 +290,8 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
   offline) titles under 60% of the median title length are extras. A "play all" title (about the sum
   of the others) is always an extra. You're warned if numbering would run past the season's last
   episode on TMDb.
-- **Confirm before renaming** - the planned names are shown with actual and expected durations.
+- **Confirm before renaming** - the planned names are shown with actual and expected durations
+  and where each decision came from (`TheDiscDB`, `TMDb`, `Length`, or `You` after an edit).
   Enter accepts, `n` leaves every file as it is, `e` lets you switch rows between episode and extra.
 - **Manifest and undo** - `rename-manifest.csv` (`OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp`)
   is written in the Disc folder *before* anything is renamed, and `undo-rename.ps1` is copied next to it.
@@ -479,7 +494,7 @@ If an error occurs:
 - Window title shows `-ERROR` suffix
 - Completed steps are displayed in green
 - Remaining steps are listed with manual instructions
-- **If the MakeMKV rip itself already completed**, a ready-to-paste `continue-rip.ps1` command is printed under `--- RETRY WITH continue-rip.ps1 ---`, built from this run's own inputs (title, series/season/disc, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`) with `-FromStep` set to whichever step failed (`handbrake`, `organize`, or `open`) — copy it as-is to resume without re-ripping the disc
+- **If the MakeMKV rip itself already completed**, a ready-to-paste `continue-rip.ps1` command is printed under `--- RETRY WITH continue-rip.ps1 ---`, built from this run's own inputs (title, series/season/disc, genre flags, `-StartEpisode`, `-EpisodeNames`, `-NoSound`, and for series the TheDiscDB disc hash as `-DiscDbHash` or `-NoDiscDb`) with `-FromStep` set to whichever step failed (`handbrake`, `organize`, or `open`) — copy it as-is to resume without re-ripping the disc
   - Not shown when Step 1 (the rip) itself failed — `continue-rip.ps1` has no ripped MKV files to resume from in that case, so re-running `rip-disc.ps1` is the only option
 - Relevant directory is opened for inspection
 - Log file location is provided
@@ -510,6 +525,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
 | Episode naming (`S02-E01`), extras detection, rename manifest + undo | Yes | No |
+| TheDiscDB disc lookup for series naming (`-NoDiscDb`) | Yes | No |
 | Composite mega-file detection | Yes | No |
 | Disc 1 temp dir isolation (`Disc1/`) | Yes | No |
 | Series per-disc encoding isolation | Yes | No |
@@ -606,6 +622,10 @@ All other parameters work the same as `rip-disc.ps1`:
 ```powershell
 # Resume a TV series rip
 .\continue-rip.ps1 -title "Breaking Bad" -Series -Season 1 -FromStep organize
+
+# ...with the TheDiscDB hash from the original rip's retry command or log, so episodes
+# and extras are still named from TheDiscDB (this script never reads the disc itself)
+.\continue-rip.ps1 -title "30 Rock" -Series -Season 1 -Disc 2 -FromStep organize -DiscDbHash 16E974A41F04B04E0FC0F7B27EA29758
 
 # Resume a Blu-ray rip
 .\continue-rip.ps1 -title "Inception" -Bluray -FromStep handbrake
