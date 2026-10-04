@@ -43,3 +43,15 @@ here only.
 history rather than conventions. Worth trimming down to conventions-only, with the history moved to
 a separate file (e.g. `docs/session-history.md` or similar). Not done in this pass - logged only, at
 the user's request, so it can be planned deliberately rather than rushed alongside a docs cleanup.
+
+### Series flow: episode titles in names (idea, 2026-10-04)
+Series renames currently produce `S##-E##` names only. Consider pulling episode titles (TheTVDB DVD
+order, or TheDiscDB where it has them) into the name, e.g. `Show - S03E01 - Title.mp4`. Found while
+hand-renaming Silicon Valley S03 Disc1. PAL rips run ~4% shorter than listed runtimes, so any
+duration-based matching needs a 25fps tolerance.
+
+### Series flow: retro-rename an already-ripped DiscN folder (idea, 2026-10-04)
+Allow an existing `DiscN` folder (raw MakeMKV names) to be run through the Series naming flow after
+the fact, writing the usual `rename-manifest.csv` and `undo-rename.ps1`. Motivation: Silicon Valley
+S01 Disc2 and S03 Disc2 were ripped before the series flow existed, and one earlier rename left no
+manifest, so the original disc names were lost.
