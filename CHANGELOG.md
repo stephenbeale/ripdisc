@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 (continued again) - Series Extras Subfolder and Non-Interactive Series Naming
+
+### Changed
+- Plain `-Series` extras now move into `DiscN\extras\` instead of staying beside the episodes. It uses the same lowercase `extras` folder name movie rips use (`<title>\extras\`), placed inside the folder holding the main content. It is per disc rather than per season because Extra## numbering is per disc (a shared season folder would get two `Extra01`s), concurrent disc rips must not share a folder, and each Disc folder's manifest and undo stay self-contained. The folder is only created when there are extras. TheDiscDB extra names are kept (`extras\<Title>-S##-Extra##-<Name>.ext`)
+- `rename-manifest.csv` `NewName` is now the path relative to the Disc folder (`extras\<name>` for extras); `NewPath` is the full path. The columns are unchanged, so older manifests can still be appended to
+- `undo-rename.ps1` moves extras back out of `extras\` (Move-Item, never overwriting), removes the `extras` folder if that empties it (kept if it holds anything else), and accepts `extras\` as the only subfolder in `NewName`. Rows pointing elsewhere (`..`, other folders, rooted paths, a path in `OriginalName`) are refused
+- Re-running organize reserves the numbers of extras already in `extras\`, so a late file becomes the next `Extra##`
+
+### Added
+- `continue-rip.ps1 -Yes` no longer stops at the series prompts. On Disc 2+ it takes the suggested start episode (TheDiscDB's first episode, else the next after earlier discs, else `-StartEpisode`/1, flagged as a guess). It shows the rename table and accepts it as planned. Both choices are logged. `rip-disc.ps1` has no equivalent non-interactive flag, so nothing changed there
+- Tests: 21 new in `tests/Test-SeriesEpisodeRename.ps1` (now 109) covering the extras folder, no empty folder, manifest paths, next-disc suggestion, number reservation on re-run, undo round trip and folder clean-up, undo path safety, `-Yes` auto start episode and auto-accept. 6 existing assertions across both series test files updated for the new location
+
+### Known limitation
+- The `-Queue` / C# `-processQueue` path still has none of the series naming (no `S##-E##`, extras detection, TheDiscDB, `extras` subfolder, manifest or undo). Porting it is deferred; it is documented in README
+
 ## 2026-10-04 (continued) - TheDiscDB Lookup for Series Episode/Extra Mapping
 
 ### Added
