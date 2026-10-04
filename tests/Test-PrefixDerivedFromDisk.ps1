@@ -33,7 +33,7 @@
        class Get-SafeTitle's TrimEnd only partially covers) fails this test.
 
     Movie mode's two prefix branches already used Get-Item before this fix (see the
-    2026-08-24 CLAUDE.md session notes) and are included here only as a sanity check
+    2026-08-24 session notes in docs/session-history.md) and are included here only as a sanity check
     that the pattern they set is what Series/Extras now follow too.
 
 .EXAMPLE
