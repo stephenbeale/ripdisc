@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 (continued) - Blu-ray Feature Files Tagged `-BluRay`
+
+### Added
+- With `-Bluray`, Step 3 names the main feature `<Title>-Feature-BluRay.<ext>` instead of `<Title>-Feature.<ext>`, so Jellyfin shows which copy is the Blu-ray. Applies to `rip-disc.ps1`, `continue-rip.ps1` and the C# port. DVD rips are unchanged.
+- The "feature already exists" check and the disc 2+ "don't move the feature into extras" filter accept both names (`-Feature(-BluRay)?.<ext>`), so re-running Step 3 or ripping a later disc doesn't rename or move a tagged feature.
+
+**Testing status:** 63/63 xUnit tests (new `Bluray_FullRun_TagsFeatureAsBluRay`), all 10 PowerShell test files pass, both scripts parse clean. Not run against a real Blu-ray.
+
 ## 2026-10-04 (continued) - C# Port: Core Library Extraction and First Test Project
 
 First step towards a WinForms front end: the C# port is split so a GUI can drive the same pipeline as the console app. PowerShell scripts unchanged.

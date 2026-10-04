@@ -468,11 +468,13 @@ E:\Surf\SurfTitle\
 
 ```
 F:\Bluray\MovieName\
-├── MovieName-Feature.mp4
+├── MovieName-Feature-BluRay.mp4
 └── extras\
     ├── MovieName-t01.mp4
     └── MovieName-t02.mp4
 ```
+
+With `-Bluray`, the main feature is named `<Title>-Feature-BluRay.<ext>` so Jellyfin can tell a Blu-ray rip from a DVD of the same film.
 
 ## Processing Steps
 
