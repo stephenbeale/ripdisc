@@ -1694,12 +1694,13 @@ if ($StartFromStepNumber -le 3) {
         # Movie disc 1 only: add 'Feature' suffix to largest file
         if ($isMainFeatureDisc) {
             Write-Host "`nChecking for Feature file..." -ForegroundColor Yellow
-            $featureExists = Get-ChildItem -File | Where-Object { $_.Name -like "*-Feature.*" }
+            $featureExists = Get-ChildItem -File | Where-Object { $_.Name -match '-Feature(-BluRay)?\.[^.]+$' }
             if (!$featureExists) {
                 $largestFile = Get-ChildItem -File | Sort-Object Length -Descending | Select-Object -First 1
                 if ($largestFile) {
                     Write-Host "Largest file: $($largestFile.Name) ($([math]::Round($largestFile.Length/1GB, 2)) GB)" -ForegroundColor White
-                    $newName = $largestFile.Directory.Name + "-Feature" + $largestFile.Extension
+                    # -Bluray rips get "-Feature-BluRay" so Jellyfin can tell the Blu-ray version
+                    $newName = $largestFile.Directory.Name + "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" }) + $largestFile.Extension
                     Write-Host "Renaming to: $newName" -ForegroundColor Yellow
                     $maxRetries = 10
                     $retryDelay = 5
@@ -1774,7 +1775,7 @@ if ($StartFromStepNumber -le 3) {
                 Write-Host "Extras directory already exists" -ForegroundColor Gray
             }
 
-            $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*-Feature.*" }
+            $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notmatch '-Feature(-BluRay)?\.[^.]+$' }
             if ($videoFiles) {
                 Write-Host "Videos to move: $($videoFiles.Count)" -ForegroundColor White
                 foreach ($video in $videoFiles) {

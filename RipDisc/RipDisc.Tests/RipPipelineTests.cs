@@ -41,6 +41,22 @@ public sealed class RipPipelineTests : IDisposable
     }
 
     [Fact]
+    public void Bluray_FullRun_TagsFeatureAsBluRay()
+    {
+        _runner.MkvFiles["title_t00.mkv"] = 1;
+        _runner.MkvFiles["title_t01.mkv"] = 5;
+        var pipeline = CreatePipeline(new RipOptions { Title = "The Matrix", Bluray = true });
+
+        var result = pipeline.Run();
+
+        Assert.Equal(RipResult.Success, result);
+        var final = _temp.Combine("Out", "The Matrix");
+        Assert.Equal(5, new FileInfo(Path.Combine(final, "The Matrix-Feature-BluRay.mp4")).Length);
+        Assert.False(File.Exists(Path.Combine(final, "The Matrix-Feature.mp4")));
+        Assert.True(File.Exists(Path.Combine(final, "extras", "The Matrix-title_t00.mp4")));
+    }
+
+    [Fact]
     public void Movie_FullRun_RenamesFeatureAndMovesExtras()
     {
         _runner.MkvFiles["title_t00.mkv"] = 1;  // small extra

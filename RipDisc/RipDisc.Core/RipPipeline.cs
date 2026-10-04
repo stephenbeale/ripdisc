@@ -760,11 +760,17 @@ public class RipPipeline
         }
     }
 
+    // -Bluray rips get "-Feature-BluRay" so Jellyfin can tell the Blu-ray version apart.
+    private string FeatureSuffix => _options.Bluray ? "-Feature-BluRay" : "-Feature";
+
+    private static bool IsFeatureFile(string path) =>
+        System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(path), @"-Feature(-BluRay)?\.[^.]+$");
+
     private void RenameFeatureFile()
     {
         _ui.Write("\nChecking for Feature file...", MessageKind.Warning);
         var featureFile = Directory.GetFiles(_finalOutputDir)
-            .FirstOrDefault(f => Path.GetFileName(f).Contains("-Feature."));
+            .FirstOrDefault(IsFeatureFile);
 
         if (featureFile != null)
         {
@@ -781,7 +787,7 @@ public class RipPipeline
             return;
 
         var dirName = new DirectoryInfo(_finalOutputDir).Name;
-        var newName = $"{dirName}-Feature{largestFile.Extension}";
+        var newName = $"{dirName}{FeatureSuffix}{largestFile.Extension}";
         var newPath = Path.Combine(_finalOutputDir, newName);
 
         _ui.Write($"Largest file: {largestFile.Name} ({ToGB(largestFile.Length)} GB)");
@@ -830,7 +836,7 @@ public class RipPipeline
 
         var videoFiles = Directory.GetFiles(_finalOutputDir)
             .Where(f => VideoExtensions.Contains(Path.GetExtension(f).ToLower()) &&
-                       !Path.GetFileName(f).Contains("-Feature."))
+                       !IsFeatureFile(f))
             .ToArray();
 
         if (videoFiles.Length == 0)
@@ -1035,7 +1041,7 @@ public class RipPipeline
                     }
                     else if (_options.Disc == 1)
                     {
-                        _ui.Write($"    Format: {_options.Title}-Feature.mp4 (largest file)", MessageKind.Detail);
+                        _ui.Write($"    Format: {_options.Title}{FeatureSuffix}.mp4 (largest file)", MessageKind.Detail);
                         _ui.Write($"    Move extras to: {_extrasDir}", MessageKind.Detail);
                     }
                     else
