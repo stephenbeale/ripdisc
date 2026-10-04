@@ -635,6 +635,12 @@ fails after the rip completes, it now prints the exact command to run — see
 | `organize` | 3 | MP4 files in output directory |
 | `open` | 4 | Output directory exists |
 
+**`-Yes`** (`continue-rip.ps1` only) skips confirmation prompts for a plain `-Series` resume: the
+Disc 2+ starting-episode prompt and the pre-rename confirmation table are both answered
+automatically (suggested start episode, plan accepted as shown — see
+[TV series episode naming](#tv-series-episode-naming--series) above for exactly what each one
+defaults to). Both automatic choices are written to the log. `rip-disc.ps1` has no equivalent flag.
+
 All other parameters work the same as `rip-disc.ps1`:
 
 ```powershell
@@ -696,6 +702,8 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 
 - **series-cleanup.ps1** - Utility for cleaning up series naming
 - **continue-rip.ps1** - Resume failed rips from a specific step
+- **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
+- **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
 
 ## Project Structure
 
@@ -707,7 +715,11 @@ ripdisc/
 ├── ripdisc-config.sample.json  # Sample configuration file
 ├── rip-disc.ps1           # PowerShell implementation
 ├── continue-rip.ps1       # Resume failed rips from a specific step
+├── SeriesEpisodes.ps1     # Shared -Series naming logic (dot-sourced, not run directly)
+├── undo-rename.ps1        # Reverses a -Series rename from a rename-manifest.csv
 ├── series-cleanup.ps1     # Series cleanup utility
+├── CHANGELOG.md           # Release history
+├── Roadmap.md             # Open feature requests and backlog
 ├── CLAUDE.md              # Development notes
 ├── README.md              # This file
 └── RipDisc/               # C# implementation
