@@ -190,7 +190,7 @@ neutral to the stuck-sector watchdog (they neither reset nor trip it), and the r
 marker is narrowed to `Saving N titles|Title #`. Format strings were verified against
 `makemkvcon64.exe` v1.18.4. New tests: `tests/Test-MakeMkvProgress.ps1` (9/9 pass).
 
-**Status:** PR #141 deliberately left OPEN pending a real-disc test; **not hardware-tested**.
+**Status:** PR #141 squash-merged to main at f52eea0 on 2026-10-04 without a real-disc test; **not hardware-tested** - validate the bar/ETA and watchdog on the next rip.
 Developed in the worktree `ripdisc-makemkv-progress` (sibling of the main checkout) because
 the main checkout held another session's uncommitted `SeriesEpisodes.ps1` changes on
 `feature/thediscdb-lookup`.
