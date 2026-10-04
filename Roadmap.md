@@ -9,6 +9,49 @@ Handle all output max. char lengths so that they do not break- warn user of this
 ## Feature - tag bluray rips without affecting file naming for Jellyfin
 Blu-ray args already passed but this append -BluRay onto file name after existing 'Feature' suffix, this would then allow me to identify BR version in jellfyin
 
+## Feature - Standalone series episode rename utility (added 2026-10-04)
+A retroactive, bulk tool for series that are ALREADY ripped on disk (e.g. `F:\Series\...`), not tied
+to a live rip. The user has many series folders of episodes to rename, and it must be done safely
+while keeping the original file names.
+
+Requirements:
+- Bulk: point it at a series root (or a Season/DiscN folder) and have it walk every folder, handling
+  each DiscN folder as its own unit.
+- Dry-run/preview by default; nothing is touched without an explicit apply switch (and per-folder
+  confirmation, as in `Confirm-SeriesRenamePlan`).
+- Never overwrite: a target that already exists is skipped with a warning (same rule as
+  `Invoke-SeriesRenamePlan` and `undo-rename.ps1`). Already-renamed files are detected and left alone
+  (`Get-SeriesNamePattern`).
+- Keep original names: for EVERY folder renamed, write a ripdisc-format `rename-manifest.csv`
+  (`Write-RenameManifest`: OriginalName, NewName, Kind, OriginalPath, NewPath, Timestamp) BEFORE any
+  file is touched, and copy `undo-rename.ps1` next to it, so original disc/file names are recorded
+  and the rename is fully reversible. This is a standing convention for all media renames.
+- Reuse, do not reinvent: `SeriesEpisodes.ps1` (`Get-SeriesTitleClassification`,
+  `New-SeriesRenamePlan`, `Show-SeriesRenamePlan`, `Write-RenameManifest`, `Invoke-SeriesRenamePlan`,
+  `Invoke-SeriesEpisodeRename`) already does this for a single DiscN folder during a rip; the utility
+  is mainly a driver that runs it over many existing folders, plus TMDb/TheDiscDB lookups where
+  available.
+- Open idea (merged here, from the Silicon Valley rename work): optionally pull real episode titles
+  (TMDb) into the new names, and handle folders that were renamed earlier by hand/other tools with no
+  manifest (record a manifest from current names so a future undo is possible).
+
+## Feature - Classify extras and move them to an `extras` subfolder as part of the series rename (added 2026-10-04)
+Part of the standalone utility above: while renaming a series folder, classify each file as episode or
+extra using the criteria ALREADY in place, then move extras into the `extras` sub-dir using the
+existing move logic, so a retroactive rename ends up laid out exactly as a fresh `-Series` rip.
+
+Reuse (no new criteria):
+- Classification: `Get-SeriesTitleClassification` in `SeriesEpisodes.ps1` (play-all/composite 70-130%
+  of the sum of the others, TMDb runtime match / under 60% of expected runtime, median heuristic
+  under 60% of median, TheDiscDB map, and the `-Overrides` edit option). Naming via
+  `Get-SeriesExtraFileName` / `Get-SeriesExtraLabel`.
+- Move: `New-SeriesRenamePlan` sets extras' NewName to `extras\<name>` (`$script:SeriesExtrasFolder`
+  = `'extras'`), and `Invoke-SeriesRenamePlan` creates the folder on first use only and uses
+  `Move-Item` without `-Force` (never overwrites).
+- Reversibility: extras are recorded in the same `rename-manifest.csv` as `extras\<name>`, so
+  `undo-rename.ps1` moves them back out and removes the empty `extras` folder.
+- Files already inside an existing `extras` folder keep their numbers (as in `Invoke-SeriesEpisodeRename`).
+
 ## Backlog / Open Items (added 2026-10-04, after PRs #140/#142/#143)
 
 ### Real-disc end-to-end test of series naming (#140/#142/#143) - not yet done
