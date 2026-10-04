@@ -2194,3 +2194,34 @@ property is unverified. **Not exercised against a real rip or the live TMDb API*
 **Outstanding:** real-disc validation of a Disc 1 + Disc 2 season; check whether Jellyfin
 treats `-S02-Extra01` files as extras or ignores them (an `extras\` subfolder is the
 alternative); the C# `-processQueue` path does not get the new naming.
+
+### 2026-10-04 (continued) - TheDiscDB Lookup for Series Episode/Extra Mapping
+
+**What changed:** plain `-Series` naming now asks TheDiscDB (thediscdb.com) first, then TMDb
+runtimes, then the median heuristic. Code is in `SeriesEpisodes.ps1` (TheDiscDB section at the
+end); `-NoDiscDb` on both scripts, `-DiscDbHash` on `continue-rip.ps1`.
+
+**API facts (researched 2026-10-04):** public GraphQL at `https://thediscdb.com/graphql`, no key,
+HotChocolate filtering (`where:` on `mediaItems`, `releases`, `discs`). A disc is identified by
+`contentHash` = uppercase hex MD5 over each file's size as little-endian Int64, files ordered by
+name: Blu-ray = `BDMV/STREAM/*.m2ts` (direct children), DVD = every file directly in `VIDEO_TS`
+(source: TheDiscDb/web `DiscScanner.cs`, `HashingExtensions.cs`). Each `Title` has MakeMKV's
+`index`, `sourceFile`, `duration` (h:mm:ss), `size`, and `item { title type season episode }`
+(`type` = Episode / DeletedScene / Extra / Trailer / ...; no item = unidentified). Response is
+`charset=utf-8`. Also available but unused: `globalDiscId` (AACS/DVD disc id) and `fingerprint`.
+
+**Why matching is not by `_tNN` index:** TheDiscDB lists every MakeMKV title (even 9 s clips), so a
+user's MakeMKV minimum-length setting shifts `_tNN`; Step 2 also skips the composite. Durations
+alone are ambiguous (30 Rock S1D2 has two 0:21:35 episodes). `Get-DiscDbTitleMatches` does an
+order-preserving DP alignment on duration (5 s / 1% tolerance), most pairs first, then closest
+durations, then least index drift.
+
+**Hash timing:** computed before the rip from the drive listing (disc is ejected after Step 1).
+Skipped with `-DriveIndex` but no `-Drive`, because `$driveLetter` is then only the config default.
+
+**Testing status:** `tests/Test-TheDiscDbLookup.ps1` 78/78; full suite 315/315. Live API checked
+by hand with 30 Rock S1D2's hash (match, 2 s round trip, ~3 KB). Real-drive check: a Silicon
+Valley S2 D2 DVD in E: hashed in 267 ms (27 VIDEO_TS files) and fell back cleanly - but TheDiscDB
+has no Silicon Valley entries at all, so a real-disc hash MATCH is still unconfirmed (only the
+independent Python implementation agrees). TheDiscDB coverage is mostly Blu-ray; expect DVD misses.
+**Not exercised in a real rip.**

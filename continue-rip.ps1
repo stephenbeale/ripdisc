@@ -79,6 +79,16 @@
     [Parameter()]
     [switch]$NoEject,
 
+    # TheDiscDB content hash of the disc, as read by rip-disc.ps1 before the rip (it is in
+    # the printed retry command and the session log). This script never reads the disc,
+    # so without it the TheDiscDB lookup is skipped and naming uses TMDb / title lengths.
+    [Parameter()]
+    [string]$DiscDbHash = "",
+
+    # Skip the TheDiscDB lookup even when -DiscDbHash is given.
+    [Parameter()]
+    [switch]$NoDiscDb,
+
     [Parameter()]
     [switch]$Help
 )
@@ -281,6 +291,8 @@ function Show-Usage {
     Write-Host "  -Documentary -Tutorial -Fitness -Music -Surf   Genre folders" -ForegroundColor White
     Write-Host "  -Force              Re-encode files that already have an MP4" -ForegroundColor White
     Write-Host "                      (by default those are skipped)" -ForegroundColor Gray
+    Write-Host "  -DiscDbHash <hash>  TheDiscDB disc hash from the original rip (series naming)" -ForegroundColor White
+    Write-Host "  -NoDiscDb           Skip the TheDiscDB lookup" -ForegroundColor White
     Write-Host "  -Yes                Do not ask for confirmation before starting" -ForegroundColor White
     Write-Host "  -Help               Show this text" -ForegroundColor White
     Write-Host "  -Drive / -DriveIndex   Accepted but ignored (no disc is read)" -ForegroundColor Gray
@@ -878,6 +890,7 @@ function Get-EquivalentCommand {
     if ($Surf)        { $parts += "-Surf" }
     if ($Force)       { $parts += "-Force" }
     if ($StartEpisode -ne 1 -or $script:StartEpisodeExplicit) { $parts += "-StartEpisode $StartEpisode" }
+    if ($NoDiscDb)    { $parts += "-NoDiscDb" } elseif ($DiscDbHash) { $parts += "-DiscDbHash $DiscDbHash" }
     $parts += "-OutputDrive $($outputDriveLetter.TrimEnd(':'))"
     return ($parts -join " ")
 }
@@ -1080,12 +1093,20 @@ while ($true) {
 # Same rule as rip-disc.ps1: asked up front (before any encode), only for Disc 2+ and
 # only when -StartEpisode was not given. Skipped entirely when the run starts at step 4.
 $script:TmdbSeason = $null
+$script:DiscDbLookup = $null
 if ($Series -and -not $script:IsGenreSeries -and $StartFromStepNumber -le 3) {
+    # This script never reads the disc, so TheDiscDB needs the hash rip-disc.ps1 captured.
+    $script:DiscDbLookup = Get-SeriesDiscDbLookup -ContentHash $DiscDbHash -Disabled:$NoDiscDb `
+        -NoDriveReason "no -DiscDbHash given (continue-rip.ps1 never reads the disc; copy it from the rip's log or retry command)"
     $script:TmdbSeason = Get-SeriesTmdbSeason -Title $title -Season $Season
     if (Test-ShouldPromptStartEpisode -Series:$Series -GenreSeries:$script:IsGenreSeries -Extras:$Extras -Disc $Disc -StartEpisodeExplicit:$script:StartEpisodeExplicit) {
         $suggestedStart = Get-SuggestedStartEpisode -SeasonDir $seriesSeasonDir -Disc $Disc
+        $discDbStart = Get-DiscDbFirstEpisode -DiscDbDisc $script:DiscDbLookup.Disc -Season $Season
         Write-Host "`nDisc $Disc of a series - which episode number does this disc start at?" -ForegroundColor Cyan
-        if ($suggestedStart) {
+        if ($discDbStart) {
+            Write-Host "  TheDiscDB lists this disc's first episode as E$("{0:D2}" -f $discDbStart) - press Enter to start there." -ForegroundColor Gray
+            $suggestedStart = $discDbStart
+        } elseif ($suggestedStart) {
             Write-Host "  Earlier discs already hold episodes up to E$("{0:D2}" -f ($suggestedStart - 1)) - press Enter to start at E$("{0:D2}" -f $suggestedStart)." -ForegroundColor Gray
         } else {
             Write-Host "  No numbered episodes found on earlier discs in $seriesSeasonDir - type the number." -ForegroundColor Gray
@@ -1099,6 +1120,7 @@ if ($Series -and -not $script:IsGenreSeries -and $StartFromStepNumber -le 3) {
     } else {
         Write-Log "TMDb season: unavailable - extras detection uses the median title length"
     }
+    Write-Log $script:DiscDbLookup.Message
 }
 Disable-ConsoleClose
 
@@ -1531,6 +1553,7 @@ if ($StartFromStepNumber -le 3) {
         Write-Host "`nNaming series episodes..." -ForegroundColor Yellow
         $null = Invoke-SeriesEpisodeRename -Directory $finalOutputDir -Title $dirName -Season $Season `
             -StartEpisode $StartEpisode -TmdbSeason $script:TmdbSeason -AllExtras:$Extras `
+            -DiscDbDisc $(if ($script:DiscDbLookup) { $script:DiscDbLookup.Disc } else { $null }) `
             -UndoScriptSource (Join-Path $PSScriptRoot 'undo-rename.ps1') -HandBrakePath $handbrakePath
 
         # Keep files in disc subdirectory (Jellyfin scans recursively)

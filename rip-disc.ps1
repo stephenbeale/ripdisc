@@ -61,6 +61,12 @@
     [Parameter()]
     [switch]$NoEject,
 
+    # Skip the TheDiscDB (thediscdb.com) lookup that, for plain -Series rips, maps the
+    # disc's titles to episodes and named extras before falling back to TMDb runtimes
+    # and the median-length heuristic.
+    [Parameter()]
+    [switch]$NoDiscDb,
+
     # Prints a clickable eBay UK sold-listings search URL for the ripped title at the
     # end of the FILE SUMMARY - not run automatically, since it's a convenience for
     # deciding what a physical disc might be worth, not part of the rip itself.
@@ -1146,7 +1152,17 @@ $safeTitle = Get-SafeTitle $title
 # (optional, fail-soft) is done now too; Step 3 uses its per-episode runtimes to tell
 # episodes from extras.
 $script:TmdbSeason = $null
+# TheDiscDB lookup result (see Get-SeriesDiscDbLookup). Done here because the content
+# hash is read from the disc's file listing, and the disc is ejected after Step 1.
+$script:DiscDbLookup = $null
 if ($Series -and -not $script:IsGenreSeries) {
+    # -DriveIndex picks the drive by MakeMKV's own numbering, so $driveLetter is only the
+    # configured default and may be a different drive - hashing that would look up the
+    # wrong disc. Only trust the letter when -Drive was given or no index was used.
+    $discDbDriveRoot = if ($DriveIndex -ge 0 -and -not $PSBoundParameters.ContainsKey('Drive')) { "" } else { "$driveLetter\" }
+    $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
+        -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
+
     $knownTvId = if ($tmdbResult -and $tmdbResult.MediaType -eq 'tv' -and $tmdbResult.Id) { $tmdbResult.Id } else { $null }
     $script:TmdbSeason = Get-SeriesTmdbSeason -Title $title -Season $Season -KnownTvId $knownTvId
 
@@ -1154,8 +1170,14 @@ if ($Series -and -not $script:IsGenreSeries) {
         $previewBaseDir = "$(Get-NormalizedDriveLetter $OutputDrive)\Series\$safeTitle"
         $previewSeasonDir = if ($Season -gt 0) { Join-Path $previewBaseDir "Season $Season" } else { $previewBaseDir }
         $suggestedStart = Get-SuggestedStartEpisode -SeasonDir $previewSeasonDir -Disc $Disc
+        $discDbStart = Get-DiscDbFirstEpisode -DiscDbDisc $script:DiscDbLookup.Disc -Season $Season
         Write-Host "`nDisc $Disc of a series - which episode number does this disc start at?" -ForegroundColor Cyan
-        if ($suggestedStart) {
+        if ($discDbStart) {
+            # TheDiscDB knows exactly which episodes this disc holds - better than
+            # inferring from earlier discs' files. Only used for titles it can't match.
+            Write-Host "  TheDiscDB lists this disc's first episode as E$("{0:D2}" -f $discDbStart) - press Enter to start there." -ForegroundColor Gray
+            $suggestedStart = $discDbStart
+        } elseif ($suggestedStart) {
             Write-Host "  Earlier discs already hold episodes up to E$("{0:D2}" -f ($suggestedStart - 1)) - press Enter to start at E$("{0:D2}" -f $suggestedStart)." -ForegroundColor Gray
         } else {
             Write-Host "  No numbered episodes found on earlier discs in $previewSeasonDir - type the number." -ForegroundColor Gray
@@ -1358,6 +1380,7 @@ if ($Series -and -not $script:IsGenreSeries) {
     } else {
         Write-Log "TMDb season: unavailable - extras detection uses the median title length"
     }
+    if ($script:DiscDbLookup) { Write-Log $script:DiscDbLookup.Message }
 }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
@@ -1392,7 +1415,11 @@ function Get-ContinueRipCommand {
         # Set when -StartEpisode was given or answered at the Disc 2+ prompt. Forces
         # -StartEpisode into the command even when it is 1, so continue-rip.ps1 does
         # not ask the same question again.
-        [switch]$StartEpisodeExplicit
+        [switch]$StartEpisodeExplicit,
+        # TheDiscDB content hash read from the disc before the rip. continue-rip.ps1 never
+        # reads the disc, so this is how it gets to repeat the lookup at Step 3.
+        [string]$DiscDbHash = "",
+        [switch]$NoDiscDb
     )
 
     # Step 1 (MakeMKV rip) has no continue-rip.ps1 equivalent - only 2/3/4 can be resumed.
@@ -1426,6 +1453,11 @@ function Get-ContinueRipCommand {
         $parts.Add("-EpisodeNames $($quotedNames -join ', ')")
     }
     if ($NoSound) { $parts.Add("-NoSound") }
+    if ($NoDiscDb) {
+        $parts.Add("-NoDiscDb")
+    } elseif ($Series -and $DiscDbHash) {
+        $parts.Add("-DiscDbHash $DiscDbHash")
+    }
 
     return ".\continue-rip.ps1 " + ($parts -join " ")
 }
@@ -1513,7 +1545,8 @@ function Stop-WithError {
             -OutputDrive $(if ($script:OutputDriveExplicit) { $outputDriveLetter } else { $null }) `
             -Extras:$Extras -Bluray:$Bluray -Documentary:$Documentary -Tutorial:$Tutorial `
             -Fitness:$Fitness -Music:$Music -Surf:$Surf -StartEpisode $StartEpisode `
-            -EpisodeNames $EpisodeNames -NoSound:$NoSound -StartEpisodeExplicit:$script:StartEpisodeExplicit
+            -EpisodeNames $EpisodeNames -NoSound:$NoSound -StartEpisodeExplicit:$script:StartEpisodeExplicit `
+            -DiscDbHash $(if ($script:DiscDbLookup) { $script:DiscDbLookup.ContentHash } else { "" }) -NoDiscDb:$NoDiscDb
         if ($continueCommand) {
             Write-Host "`n--- RETRY WITH continue-rip.ps1 ---" -ForegroundColor Cyan
             Write-Host "The MakeMKV rip already completed - resume from here instead of re-ripping the disc:" -ForegroundColor Gray
@@ -2611,6 +2644,7 @@ if ($script:IsGenreSeries) {
     Write-Host "`nNaming series episodes..." -ForegroundColor Yellow
     $null = Invoke-SeriesEpisodeRename -Directory $finalOutputDir -Title $dirName -Season $Season `
         -StartEpisode $StartEpisode -TmdbSeason $script:TmdbSeason -AllExtras:$Extras `
+        -DiscDbDisc $(if ($script:DiscDbLookup) { $script:DiscDbLookup.Disc } else { $null }) `
         -UndoScriptSource (Join-Path $PSScriptRoot 'undo-rename.ps1') -HandBrakePath $handbrakePath
 
     # Keep files in disc subdirectory (Jellyfin scans recursively)
