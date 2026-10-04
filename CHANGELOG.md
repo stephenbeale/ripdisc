@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 (continued yet again) - MakeMKV Progress Bar, Milestones and ETA
+
+### Added
+- MakeMKV now runs with `--progress=-same`, so the long silence after `Saving N titles into directory ...` is replaced by:
+  - a PowerShell progress bar (`Write-Progress`) showing total %, current-title %, elapsed time and a linear ETA
+  - a timestamped console/log milestone every 10% (`[10:12:44] MakeMKV 30% complete - elapsed 12m 03s, ETA ~28m 10s`)
+  - `Current operation:` / `Current action:` lines, printed only when they change
+  - a closing `MakeMKV finished after Xm YYs` line
+- The bar, ETA and milestones restart when MakeMKV moves to a new operation (disc scan -> saving titles), since MakeMKV restarts its own total at 0
+- `tests/Test-MakeMkvProgress.ps1` covers progress-line parsing, duration formatting and ETA maths
+
+### Changed
+- Stuck-sector watchdog: progress/status lines are now neutral - they no longer reset the stuck-offset counter (they keep arriving while MakeMKV retries a bad sector, which would otherwise stop the watchdog ever firing), and `Current progress`/`Current operation` no longer mark the rip as started (they also appear while the disc is still being opened, which would disable the pre-rip authentication escape hatch). The rip-started marker is now `Saving N titles` or `Title #`.
+
+**Testing status:** parse-checked; all 9 test files pass. Progress line formats confirmed against the strings in the installed `makemkvcon64.exe` (v1.18.4). Not yet run against a real disc.
+
 ## 2026-10-04 (continued again) - Series Extras Subfolder and Non-Interactive Series Naming
 
 ### Changed

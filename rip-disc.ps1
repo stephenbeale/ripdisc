@@ -1462,6 +1462,32 @@ function Get-ContinueRipCommand {
     return ".\continue-rip.ps1 " + ($parts -join " ")
 }
 
+# Parses makemkvcon's --progress=-same output line
+#   "Current progress - 42%  , Total progress - 17% "
+# into its two percentages, or $null for any other line.
+function ConvertFrom-MakeMkvProgressLine {
+    param([string]$Line)
+    if ($Line -match 'Current progress\s*-\s*(\d+)%\s*,\s*Total progress\s*-\s*(\d+)%') {
+        return [pscustomobject]@{ Current = [int]$Matches[1]; Total = [int]$Matches[2] }
+    }
+    return $null
+}
+
+# Short human-readable duration: "45s", "12m 03s", "1h 05m"
+function Format-RipDuration {
+    param([TimeSpan]$Span)
+    if ($Span.TotalHours -ge 1) { return ("{0}h {1:00}m" -f [int][math]::Floor($Span.TotalHours), $Span.Minutes) }
+    if ($Span.TotalMinutes -ge 1) { return ("{0}m {1:00}s" -f [int][math]::Floor($Span.TotalMinutes), $Span.Seconds) }
+    return ("{0}s" -f [int][math]::Floor($Span.TotalSeconds))
+}
+
+# Linear ETA from elapsed time and overall percent. $null until there's enough to go on.
+function Get-RipEta {
+    param([TimeSpan]$Elapsed, [int]$TotalPercent)
+    if ($TotalPercent -lt 1 -or $TotalPercent -ge 100) { return $null }
+    return [TimeSpan]::FromSeconds($Elapsed.TotalSeconds * (100 - $TotalPercent) / $TotalPercent)
+}
+
 function Stop-WithError {
     param([string]$Step, [string]$Message)
 
@@ -1726,8 +1752,8 @@ if ($skipMakeMkvRip) {
 } else {
 
 Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
-Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120" -ForegroundColor Gray
-Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
+Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120 --progress=-same" -ForegroundColor Gray
+Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120 --progress=-same"
 
 # Stream MakeMKV output to console and capture for error analysis
 # Monitors for stuck retry loops (repeated errors at the same offset) and kills the process
@@ -1748,10 +1774,17 @@ $preRipErrorCount = 0
 $preRipErrorThreshold = 50
 $preRipErrorDrive = ""
 $wasKilledForAuth = $false
+# --progress=-same makes MakeMKV report progress on stdout. Those lines drive a Write-Progress bar
+# plus a console milestone every 10% instead of being printed raw (they arrive many times a second).
+$progressStartTime = $null
+$lastProgressKey = ""
+$lastMilestone = 0
+$mkvOperation = ""
+$mkvAction = ""
 
 $proc = New-Object System.Diagnostics.Process
 $proc.StartInfo.FileName = $makemkvconPath
-$proc.StartInfo.Arguments = "mkv $discSource all `"$makemkvOutputDir`" --minlength=120"
+$proc.StartInfo.Arguments = "mkv $discSource all `"$makemkvOutputDir`" --minlength=120 --progress=-same"
 $proc.StartInfo.UseShellExecute = $false
 $proc.StartInfo.RedirectStandardOutput = $true
 $proc.StartInfo.RedirectStandardError = $false
@@ -1765,8 +1798,56 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
     [void]$makemkvFullOutput.Add($line)
 
     # Detect the point where MakeMKV stops enumerating drives and starts the actual rip
-    if (-not $ripStarted -and $line -match "Saving \d+ titles|Current progress|Current operation|Title #") {
+    # (Not "Current progress/operation": with --progress=-same those also appear while MakeMKV is
+    # still opening/scanning the disc, which would disable the pre-rip auth escape hatch.)
+    if (-not $ripStarted -and $line -match "Saving \d+ titles|Title #") {
         $ripStarted = $true
+    }
+
+    # Progress/status lines are neutral to the watchdog: they keep arriving while MakeMKV is stuck
+    # retrying a bad sector, so letting them reset the stuck counter would stop it ever firing.
+    if ($line -match '^Current (operation|action):\s*(.+)$') {
+        $statusText = $Matches[2].Trim()
+        if ($Matches[1] -eq 'operation') {
+            if ($statusText -ne $mkvOperation) {
+                # New phase (e.g. disc scan -> saving titles): MakeMKV restarts Total progress at 0,
+                # so restart the elapsed/ETA clock and milestones with it.
+                $mkvOperation = $statusText
+                $mkvAction = ""
+                $progressStartTime = $null
+                $lastProgressKey = ""
+                $lastMilestone = 0
+                Write-Host "  $line" -ForegroundColor Cyan
+            }
+        } elseif ($statusText -ne $mkvAction) {
+            $mkvAction = $statusText
+            Write-Host "  $line" -ForegroundColor DarkCyan
+        }
+        continue
+    }
+    $mkvProgress = ConvertFrom-MakeMkvProgressLine -Line $line
+    if ($mkvProgress) {
+        if (-not $progressStartTime) { $progressStartTime = Get-Date }
+        $progressKey = "$($mkvProgress.Current)/$($mkvProgress.Total)"
+        if ($progressKey -ne $lastProgressKey) {
+            $lastProgressKey = $progressKey
+            $elapsed = (Get-Date) - $progressStartTime
+            $eta = Get-RipEta -Elapsed $elapsed -TotalPercent $mkvProgress.Total
+            $etaText = if ($eta) { Format-RipDuration $eta } else { "calculating..." }
+            $activity = if ($mkvOperation) { "MakeMKV - $mkvOperation" } else { "MakeMKV" }
+            Write-Progress -Id 1 -Activity $activity `
+                -Status "Total $($mkvProgress.Total)% | Elapsed $(Format-RipDuration $elapsed) | ETA $etaText" `
+                -PercentComplete ([math]::Min(100, $mkvProgress.Total)) `
+                -CurrentOperation "Current title $($mkvProgress.Current)%$(if ($mkvAction) { " - $mkvAction" })"
+            $milestone = [int]([math]::Floor($mkvProgress.Total / 10) * 10)
+            if ($milestone -gt $lastMilestone -and $milestone -lt 100) {
+                $lastMilestone = $milestone
+                $milestoneText = "MakeMKV $milestone% complete - elapsed $(Format-RipDuration $elapsed), ETA ~$etaText"
+                Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] $milestoneText" -ForegroundColor Green
+                Write-Log $milestoneText
+            }
+        }
+        continue
     }
 
     # Detect repeated errors at same offset (stuck retry loop)
@@ -1825,6 +1906,12 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
 }
 
 try { $proc.WaitForExit() } catch {}
+Write-Progress -Id 1 -Activity "MakeMKV" -Completed
+if ($progressStartTime) {
+    $mkvDuration = Format-RipDuration ((Get-Date) - $progressStartTime)
+    Write-Host "MakeMKV finished after $mkvDuration" -ForegroundColor Gray
+    Write-Log "MakeMKV rip phase took $mkvDuration"
+}
 
 # A killed process reports an unhelpful exit code, so judge it by what actually landed on disk.
 # A stuck-sector kill counts as success ONLY when titles were salvaged; a kill that produced
