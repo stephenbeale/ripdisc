@@ -2225,3 +2225,29 @@ Valley S2 D2 DVD in E: hashed in 267 ms (27 VIDEO_TS files) and fell back cleanl
 has no Silicon Valley entries at all, so a real-disc hash MATCH is still unconfirmed (only the
 independent Python implementation agrees). TheDiscDB coverage is mostly Blu-ray; expect DVD misses.
 **Not exercised in a real rip.**
+
+### 2026-10-04 (continued again) - Series Extras Subfolder; `continue-rip.ps1 -Yes` for Series Naming
+
+**Extras location:** plain `-Series` extras now move to `DiscN\extras\` (`$script:SeriesExtrasFolder`
+in `SeriesEpisodes.ps1`), matching movie mode's lowercase `Join-Path $finalOutputDir "extras"`.
+Per disc, not per season: Extra## is numbered per disc (season level would collide), concurrent
+disc rips must not share a folder (PR #41's reason for DiscN), and manifest/undo stay per folder.
+Plan rows: `NewName` = path relative to DiscN (`extras\<file>`), `FileName` = bare name. Renames
+use `Move-Item` (no `-Force`). Manifest columns deliberately unchanged - adding one would break
+`Export-Csv -Append` onto PR #140-era manifests.
+
+**Undo:** `undo-rename.ps1` whitelists exactly `^(?:extras[\\/])?[^\\/:]+$` for `NewName` (plus no
+`.`/`..`), moves files back with `Move-Item`, removes `extras\` only when empty.
+
+**`-Yes`:** `continue-rip.ps1 -Yes` -> `Get-AutoStartEpisode` (suggestion, else fallback flagged as a
+guess) and `Invoke-SeriesEpisodeRename -AutoAccept`; both logged. `rip-disc.ps1` has no `-Yes` or
+other non-interactive flag, so it was not changed (adding one would also have to cover the
+Ready-to-rip, title-warning and drive prompts - out of scope).
+
+**Known limitation (deferred by the user):** the C# `-Queue`/`-processQueue` path has none of the
+PR #140/#142/this-PR series naming; it writes series files into the Season folder with the older
+`Title-S##-` prefix (`PrefixSeriesFiles`). Documented in README.
+
+**Testing status:** `Test-SeriesEpisodeRename.ps1` 109/109 (21 new), `Test-TheDiscDbLookup.ps1` 79/79.
+**Not exercised in a real rip**; Jellyfin's handling of `DiscN\extras\` (an extras folder nested
+under a non-season folder) is unverified.

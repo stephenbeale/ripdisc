@@ -59,7 +59,9 @@
     [Parameter()]
     [int]$DriveIndex = -1,
 
-    # Skip the "press Enter to start" confirmation.
+    # Non-interactive: skip the "press Enter to start" confirmation, and for plain -Series
+    # take the suggested start episode (Disc 2+) and accept the rename table as planned.
+    # Both automatic choices are written to the log.
     [Parameter()]
     [switch]$Yes,
 
@@ -293,7 +295,8 @@ function Show-Usage {
     Write-Host "                      (by default those are skipped)" -ForegroundColor Gray
     Write-Host "  -DiscDbHash <hash>  TheDiscDB disc hash from the original rip (series naming)" -ForegroundColor White
     Write-Host "  -NoDiscDb           Skip the TheDiscDB lookup" -ForegroundColor White
-    Write-Host "  -Yes                Do not ask for confirmation before starting" -ForegroundColor White
+    Write-Host "  -Yes                Do not ask for confirmation before starting; series naming" -ForegroundColor White
+    Write-Host "                      takes the suggested start episode and accepts the table" -ForegroundColor Gray
     Write-Host "  -Help               Show this text" -ForegroundColor White
     Write-Host "  -Drive / -DriveIndex   Accepted but ignored (no disc is read)" -ForegroundColor Gray
 
@@ -1101,17 +1104,29 @@ if ($Series -and -not $script:IsGenreSeries -and $StartFromStepNumber -le 3) {
     $script:TmdbSeason = Get-SeriesTmdbSeason -Title $title -Season $Season
     if (Test-ShouldPromptStartEpisode -Series:$Series -GenreSeries:$script:IsGenreSeries -Extras:$Extras -Disc $Disc -StartEpisodeExplicit:$script:StartEpisodeExplicit) {
         $suggestedStart = Get-SuggestedStartEpisode -SeasonDir $seriesSeasonDir -Disc $Disc
+        $suggestedFrom = "next after the episodes on earlier discs"
         $discDbStart = Get-DiscDbFirstEpisode -DiscDbDisc $script:DiscDbLookup.Disc -Season $Season
-        Write-Host "`nDisc $Disc of a series - which episode number does this disc start at?" -ForegroundColor Cyan
         if ($discDbStart) {
-            Write-Host "  TheDiscDB lists this disc's first episode as E$("{0:D2}" -f $discDbStart) - press Enter to start there." -ForegroundColor Gray
             $suggestedStart = $discDbStart
-        } elseif ($suggestedStart) {
-            Write-Host "  Earlier discs already hold episodes up to E$("{0:D2}" -f ($suggestedStart - 1)) - press Enter to start at E$("{0:D2}" -f $suggestedStart)." -ForegroundColor Gray
-        } else {
-            Write-Host "  No numbered episodes found on earlier discs in $seriesSeasonDir - type the number." -ForegroundColor Gray
+            $suggestedFrom = "TheDiscDB's first episode for this disc"
         }
-        $StartEpisode = Read-StartEpisode -Disc $Disc -Suggested $suggestedStart
+        if ($Yes) {
+            # -Yes: never stop to ask - take the suggested default and say so.
+            $auto = Get-AutoStartEpisode -Suggested $suggestedStart -Fallback $StartEpisode -SuggestedFrom $suggestedFrom
+            $StartEpisode = $auto.Episode
+            Write-Host "`nDisc $Disc starting episode: E$("{0:D2}" -f $StartEpisode) - $($auto.Reason)" -ForegroundColor $(if ($auto.IsGuess) { 'Yellow' } else { 'Gray' })
+            Write-Log "Start episode chosen automatically: E$("{0:D2}" -f $StartEpisode) - $($auto.Reason)"
+        } else {
+            Write-Host "`nDisc $Disc of a series - which episode number does this disc start at?" -ForegroundColor Cyan
+            if ($discDbStart) {
+                Write-Host "  TheDiscDB lists this disc's first episode as E$("{0:D2}" -f $discDbStart) - press Enter to start there." -ForegroundColor Gray
+            } elseif ($suggestedStart) {
+                Write-Host "  Earlier discs already hold episodes up to E$("{0:D2}" -f ($suggestedStart - 1)) - press Enter to start at E$("{0:D2}" -f $suggestedStart)." -ForegroundColor Gray
+            } else {
+                Write-Host "  No numbered episodes found on earlier discs in $seriesSeasonDir - type the number." -ForegroundColor Gray
+            }
+            $StartEpisode = Read-StartEpisode -Disc $Disc -Suggested $suggestedStart
+        }
         $script:StartEpisodeExplicit = $true
     }
     Write-Log "Start episode: $StartEpisode$(if ($script:StartEpisodeExplicit) { ' (explicit/prompted)' } else { ' (default)' })"
@@ -1554,7 +1569,7 @@ if ($StartFromStepNumber -le 3) {
         $null = Invoke-SeriesEpisodeRename -Directory $finalOutputDir -Title $dirName -Season $Season `
             -StartEpisode $StartEpisode -TmdbSeason $script:TmdbSeason -AllExtras:$Extras `
             -DiscDbDisc $(if ($script:DiscDbLookup) { $script:DiscDbLookup.Disc } else { $null }) `
-            -UndoScriptSource (Join-Path $PSScriptRoot 'undo-rename.ps1') -HandBrakePath $handbrakePath
+            -UndoScriptSource (Join-Path $PSScriptRoot 'undo-rename.ps1') -HandBrakePath $handbrakePath -AutoAccept:$Yes
 
         # Keep files in disc subdirectory (Jellyfin scans recursively)
         Write-Host "Episodes kept in disc directory: $finalOutputDir" -ForegroundColor Green
