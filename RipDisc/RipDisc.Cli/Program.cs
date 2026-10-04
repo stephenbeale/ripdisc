@@ -1,3 +1,5 @@
+using RipDisc.Core;
+
 namespace RipDisc;
 
 class Program
@@ -7,12 +9,25 @@ class Program
         try
         {
             var options = CommandLineParser.Parse(args);
+            var config = RipConfig.Load();
+            var ui = new ConsoleRipUI();
 
-            if (options.ProcessQueue)
-                return RipDiscApplication.ProcessAllQueued();
+            using var cancellation = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                // First Ctrl+C stops MakeMKV/HandBrake cleanly and reports what is left to do;
+                // a second one falls through to the default hard exit
+                if (cancellation.IsCancellationRequested)
+                    return;
+                e.Cancel = true;
+                cancellation.Cancel();
+            };
 
-            var app = new RipDiscApplication(options);
-            return app.Run();
+            var result = options.ProcessQueue
+                ? new QueueProcessor(config, ui).ProcessAll(cancellation.Token)
+                : new RipPipeline(options, config, ui).Run(cancellation.Token);
+
+            return result == RipResult.Failed ? 1 : 0;
         }
         catch (ArgumentException ex)
         {
@@ -40,14 +55,17 @@ class Program
         Console.WriteLine("  -series                Flag for TV series (no value needed)");
         Console.WriteLine("  -season <int>          Season number (default: 0)");
         Console.WriteLine("  -disc <int>            Disc number (default: 1)");
-        Console.WriteLine("  -drive <string>        Drive letter (default: D:)");
+        Console.WriteLine("  -drive <string>        Drive letter (default: defaultInputDrive in ripdisc-config.json, else D:)");
         Console.WriteLine("  -driveIndex <int>      Drive index for MakeMKV (default: -1)");
-        Console.WriteLine("  -outputDrive <string>  Output drive letter (default: E:)");
+        Console.WriteLine("  -outputDrive <string>  Output drive letter (default: defaultOutputDrive in ripdisc-config.json, else E:)");
         Console.WriteLine("  -queue                 Queue encoding instead of running inline");
-        Console.WriteLine("  -bluray                Skip subtitles (Blu-ray PGS subs don't work in MP4)");
+        Console.WriteLine("  -bluray                Retry encodes without subtitles if Blu-ray PGS subtitles fail");
         Console.WriteLine();
         Console.WriteLine("Queue Mode:");
         Console.WriteLine("  -processQueue          Process all queued encoding jobs sequentially");
+        Console.WriteLine();
+        Console.WriteLine("Tool paths, the temp folder and drive labels come from ripdisc-config.json");
+        Console.WriteLine("(searched for next to RipDisc.exe and in its parent folders).");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  RipDisc -title \"The Matrix\"");

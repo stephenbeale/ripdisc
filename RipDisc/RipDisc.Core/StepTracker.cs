@@ -1,4 +1,4 @@
-namespace RipDisc;
+namespace RipDisc.Core;
 
 public class ProcessingStep
 {
@@ -46,19 +46,19 @@ public class StepTracker
 
     public List<ProcessingStep> CompletedSteps => _completedSteps;
 
-    public void ShowStepsSummary(bool showRemaining = false)
+    public void WriteSummary(IRipUI ui, bool showRemaining = false)
     {
-        Console.WriteLine();
-        ConsoleHelper.WriteSuccess("--- STEPS COMPLETED ---");
+        ui.Write("");
+        ui.Write("--- STEPS COMPLETED ---", MessageKind.Success);
         if (_completedSteps.Count == 0)
         {
-            ConsoleHelper.WriteGray("  (none)");
+            ui.Write("  (none)", MessageKind.Detail);
         }
         else
         {
             foreach (var step in _completedSteps)
             {
-                ConsoleHelper.WriteSuccess($"  [X] Step {step.Number}/4: {step.Name}");
+                ui.Write($"  [X] Step {step.Number}/4: {step.Name}", MessageKind.Success);
             }
         }
 
@@ -67,11 +67,11 @@ public class StepTracker
             var remaining = GetRemainingSteps();
             if (remaining.Count > 0)
             {
-                Console.WriteLine();
-                ConsoleHelper.WriteWarning("--- STEPS REMAINING ---");
+                ui.Write("");
+                ui.Write("--- STEPS REMAINING ---", MessageKind.Warning);
                 foreach (var step in remaining)
                 {
-                    ConsoleHelper.WriteWarning($"  [ ] Step {step.Number}/4: {step.Name} - {step.Description}");
+                    ui.Write($"  [ ] Step {step.Number}/4: {step.Name} - {step.Description}", MessageKind.Warning);
                 }
             }
         }

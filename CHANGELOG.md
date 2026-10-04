@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 (continued) - C# Port: Core Library Extraction and First Test Project
+
+First step towards a WinForms front end: the C# port is split so a GUI can drive the same pipeline as the console app. PowerShell scripts unchanged.
+
+### Changed
+- `RipDisc/` is now a solution (`RipDisc.sln`): `RipDisc.Core` (pipeline, config, queue, error analysis), `RipDisc.Cli` (the console app, still builds `RipDisc.exe`) and `RipDisc.Tests`. `RipDiscApplication` became `RipPipeline` in Core; history is kept through `git mv`
+- Core has no console code. All output and every prompt goes through a new `IRipUI` interface (`Write`, `WriteProcessOutput`, `SetStatus`, `Confirm`, `Choose`); `ConsoleRipUI` in the CLI is the console implementation. `Environment.Exit` calls inside the pipeline are gone (results come back as `RipResult.Success` / `Failed` / `Cancelled`)
+- Tool paths, the temp root, default drives and drive labels now come from `ripdisc-config.json` (the file the PowerShell scripts already use), found next to the exe or in a parent folder, with the same auto-detection fallbacks as `Load-Config.ps1`. Previously the C# app hard-coded `C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`, `C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe`, `C:\Video` and the drive labels "D: internal" / "G: ASUS external"
+- `-drive` / `-outputDrive` default to the config's `defaultInputDrive` / `defaultOutputDrive` (still `D:` / `E:` without a config) and are normalised like `Get-NormalizedDriveLetter` (`F:\` and `F::` become `F:`)
+- Prompts: "Press Enter to continue" is now "Start the rip? (Y/n)". Closed or piped-empty input is always "no", at every prompt (same lesson as the 2026-08-11 dry-run incident)
+- Ctrl+C: the first press kills the MakeMKV/HandBrake process tree and prints the usual failure summary; a second press exits immediately
+- Step 3 no longer changes the process-wide current directory (every operation already used full paths)
+- `build.bat` builds the solution; `publish.bat` publishes `RipDisc.Cli`. Executable now under `RipDisc.Cli\bin\...`
+- `nuget.config` in `RipDisc/` restores from nuget.org only
+
+### Fixed
+- `-processQueue` re-added the job it had just finished: after each job it merged the queue file back in, and the file still held that job, so the next pass found its MKVs already deleted and stopped with "No MKV files found" before encoding the rest. Confirmed by a test that fails with the old merge and passes with the fix
+
+### Added
+- `RipDisc.Tests` (xUnit, 62 tests), the repo's first C# tests: MakeMKV error classification (including the device-disconnect vs "0 titles" case from PR #123/#128), drive normalisation, title warnings, path building, config parsing and discovery, the argument parser, console prompts (closed input never consents), queue processing, and end-to-end pipeline runs against fake MakeMKV/HandBrake in a temp folder (movie feature/extras layout, series prefixing, Blu-ray subtitle retry, existing-folder choice, cancellation, output drive not ready, queue mode)
+- Smoke-tested the real `RipDisc.exe`: usage on a bad argument, and the start prompt aborting cleanly with stdin closed. **Not run against a disc**
+
 ## 2026-10-04 (continued yet again) - MakeMKV Progress Bar, Milestones and ETA
 
 ### Added

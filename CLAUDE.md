@@ -2226,6 +2226,81 @@ has no Silicon Valley entries at all, so a real-disc hash MATCH is still unconfi
 independent Python implementation agrees). TheDiscDB coverage is mostly Blu-ray; expect DVD misses.
 **Not exercised in a real rip.**
 
+### 2026-10-04 (continued) - C# Core Extraction (step 1 towards a WinForms app)
+
+**Decision (user, this session):** build the WinForms app as a new project inside this repo
+(`RipDisc.WinForms`, not yet created), on a shared `RipDisc.Core` library, rather than in a new
+repo or by wrapping the PowerShell. Still open: whether the PowerShell scripts get frozen once the
+C# side catches up, or both stay maintained (every fix twice).
+
+**What changed:** `RipDisc/` is now `RipDisc.sln` with `RipDisc.Core`, `RipDisc.Cli` (still
+`RipDisc.exe`) and `RipDisc.Tests` (xUnit, 62 tests - the first C# tests here). The pipeline
+(`RipPipeline`, ex-`RipDiscApplication`) talks only to `IRipUI`; `IProcessRunner` and
+`IRipEnvironment` (eject, open folder, drive-ready check, handle wait) are seams so tests run the
+whole pipeline against fakes in a temp folder. Config now comes from `ripdisc-config.json`.
+Details in CHANGELOG.
+
+**Found and fixed:** `-processQueue` merged the just-finished job back in from the queue file
+(see CHANGELOG). Long-standing, only in the C# path.
+
+**Worktree:** built in `C:\Users\sjbeale\source\repos\ripdisc-core-extraction` because another
+session switched the main checkout to `fix/series-extras-subfolder` mid-task.
+
+**Testing status:** 62/62 tests; CLI smoke-tested (bad-argument usage, closed-stdin abort).
+**Not run against a disc.**
+
+**Next for the WinForms track:**
+1. `makemkvcon -r` robot-mode spike on a spare disc (progress `PRGV`/`PRGC`/`PRGT`, `MSG` codes,
+   licence-expiry text) - feeds a progress bar and better error analysis
+2. `RipDisc.WinForms` project: a `WinFormsRipUI` that marshals `IRipUI` calls to the UI thread,
+   running `RipPipeline.Run` on a background task with a Cancel button wired to the token
+3. Port PowerShell-only behaviour the GUI needs most (see README Feature Parity table)
+
+### 2026-10-04 (continued) - MakeMKV Robot-Mode (-r) Trial, PAUSED
+
+**Status:** started, then paused by the user. Deliberately NOT run against a drive: two live rips
+were in progress (Silicon Valley S2 Disc2 on disc:2, S4 Disc1 on disc:0), and an info query makes
+MakeMKV scan every drive, which has interfered with concurrent rips before. Only static analysis
+and an existing captured fixture were used.
+
+**Existing fixture:** `%TEMP%\makemkv-drive-cache.txt` (real `-r` output, MakeMKV v1.18.4).
+Contains an `MSG:1005` start line, `DRV:index,visible,enabled,flags,"drive name","disc name","D:"`
+lines (e.g. `DRV:0,2,999,1,"BD-RE HL-DT-ST BD-RE BU40N 1.05 MO4P6N95940","SILICON VALLEY S1 D2","D:"`;
+empty slots are `DRV:n,256,999,0,"","",""`), `MSG:5010` "Failed to open disc", `TCOUNT:0`.
+Next session: copy it into `RipDisc.Tests` as a fixture.
+
+**Robot format strings (from makemkvcon64.exe):** `MSG:%u,%u,%u,"..."`, `PRGV:%u,%u,%u`,
+`PRGT:%u,%u,"`, `PRGC:%u,%u,"`, `DRV:%u,%u,%u,%u,"`, `TCOUNT:%u`, `CINFO:%u,%u,"`,
+`TINFO:%u,%u,%u,"`, `SINFO:%u,%u,%u,%u,"`.
+
+**Progress/operation strings:** "Current progress - %u%%  , Total progress - %u%%", "Current
+operation: %s", "Current action: %s", "Saving %1 titles into directory %2", "Copy complete. %1
+titles saved, %2 failed.", "Operation successfully completed", "Failed to save title %1 to file
+%2"; operation names include "Opening DVD disc", "Opening Blu-ray disc", "Processing BD+ code...",
+"Decrypting data".
+
+**Licence strings (for a "MakeMKV key expired" detector):** "Evaluation period has expired,
+shareware functionality unavailable.", "Evaluation version, evaluation period expired %1 day(s)
+ago", "Your temporary key has expired and was removed. Please restart the application.", "This
+application version is too old.  Please download the latest version at %1 or enter a registration
+key...", "The stored activation key is invalid...".
+
+**KEY FINDING:** "You are trying to start MakeMKV evaluation from a third-party application.
+Please launch MakeMKV if you would like to start the evaluation period." A CLI/GUI wrapper cannot
+start the Blu-ray evaluation; the MakeMKV GUI must be opened once. Answers part of the earlier
+licensing question.
+
+**Unknown:** numeric MSG codes other than 1005 and 5010 - need a real `-r` run.
+
+**Remaining trial steps (only when no rips are active):**
+1. `makemkvcon64 -r --progress=-same info disc:N` on a spare disc; capture full output as a fixture
+2. C# `MakeMkvRobotParser` in `RipDisc.Core` with tests
+3. `RipDisc.WinForms`: `WinFormsRipUI` marshalling `IRipUI` to the UI thread, pipeline on a
+   background task, Cancel wired to the `CancellationToken`, progress bar from `PRGV`
+
+**PR #144 test plan still unchecked:** real disc rip with `RipDisc.exe`; `-processQueue` with two
+real jobs. Merged to main 2026-10-04 without a real-disc test.
+
 ### 2026-10-04 (continued again) - Series Extras Subfolder; `continue-rip.ps1 -Yes` for Series Naming
 
 **Extras location:** plain `-Series` extras now move to `DiscN\extras\` (`$script:SeriesExtrasFolder`
