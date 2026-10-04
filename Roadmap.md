@@ -31,13 +31,6 @@ lookup, `extras` subfolder, manifest, or undo from #140/#142/#143 - it writes se
 into the Season folder with the older `Title-S##-...` prefix. The user has explicitly deferred this
 port; documented in README's "Known limitation" note under TV series episode naming.
 
-### PR #141 (MakeMKV progress bar) likely needs a rebase before merging
-Open PR #141 (`feature/makemkv-progress`, from another session) adds a MakeMKV progress bar, 10%
-milestones and ETA to `rip-disc.ps1`. It was branched before #140/#142/#143 landed and almost
-certainly conflicts with them in `rip-disc.ps1` (all four PRs touch the same rip/organize code).
-Needs a rebase onto `main` before it can merge cleanly. Not touched as part of this pass - logged
-here only.
-
 ### CLAUDE.md has grown to ~170 KB of session notes
 `CLAUDE.md` is loaded into every session and is now almost entirely chronological incident/session
 history rather than conventions. Worth trimming down to conventions-only, with the history moved to
