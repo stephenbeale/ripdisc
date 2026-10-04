@@ -90,6 +90,13 @@ function Assert-True {
 
 function Get-Kinds { param($Classification) ($Classification.Items | ForEach-Object { if ($_.Kind -eq 'Episode') { "E$($_.EpisodeNumber)" } else { "X$($_.ExtraNumber)" } }) -join ',' }
 function New-Titles { param([double[]]$Minutes) $i = 0; foreach ($m in $Minutes) { [pscustomobject]@{ Name = ('title_t{0:D2}.mkv' -f $i); DurationSec = if ($m -gt 0) { $m * 60 } else { $null } }; $i++ } }
+# Video files under a Disc folder, as paths relative to it (extras live in extras\).
+function Get-RelNames {
+    param([string]$Dir)
+    $root = (Resolve-Path -LiteralPath $Dir).ProviderPath.TrimEnd('\') + '\'
+    (Get-ChildItem -LiteralPath $Dir -File -Recurse | Where-Object { $_.Extension -in '.mp4', '.mkv' } |
+        ForEach-Object { $_.FullName.Substring($root.Length) } | Sort-Object) -join ','
+}
 function New-TmdbEpisodes { param([int[]]$Runtimes) $n = 1; foreach ($r in $Runtimes) { [pscustomobject]@{ Number = $n; Name = "Ep $n"; Runtime = $r }; $n++ } }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ripdisc-series-test-" + [guid]::NewGuid().ToString('N'))
@@ -268,8 +275,8 @@ try {
 
     $result = Invoke-SeriesEpisodeRename -Directory $discDir -Title 'Silicon Valley' -Season 2 -StartEpisode 1 `
         -UndoScriptSource $undoPath -ReadInput (New-InputQueue @('')) -GetDuration $getDuration
-    $names = (Get-ChildItem -LiteralPath $discDir -File | Where-Object { $_.Extension -in '.mp4', '.mkv' } | Sort-Object Name | ForEach-Object { $_.Name }) -join ','
-    Assert-Equal 'Silicon Valley-S02-E01.mp4,Silicon Valley-S02-E02.mp4,Silicon Valley-S02-E03.mkv,Silicon Valley-S02-Extra01.mp4' $names 'episodes and the short extra renamed in MakeMKV order; extension kept'
+    $names = Get-RelNames $discDir
+    Assert-Equal 'extras\Silicon Valley-S02-Extra01.mp4,Silicon Valley-S02-E01.mp4,Silicon Valley-S02-E02.mp4,Silicon Valley-S02-E03.mkv' $names 'episodes renamed in MakeMKV order (extension kept); the short extra moved into the Disc folder''s extras subfolder'
     Assert-Equal 4 $result.Renamed 'four files renamed'
 
     $manifestPath = Join-Path $discDir 'rename-manifest.csv'
@@ -277,7 +284,8 @@ try {
     $rows = @(Import-Csv $manifestPath)
     Assert-Equal 4 $rows.Count 'one manifest row per renamed file'
     Assert-Equal 'OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp' (($rows[0].PSObject.Properties | ForEach-Object { $_.Name }) -join ',') 'manifest columns'
-    Assert-Equal 'title_t03.mp4|Silicon Valley-S02-Extra01.mp4|Extra' ("{0}|{1}|{2}" -f $rows[3].OriginalName, $rows[3].NewName, $rows[3].Kind) 'extras are listed in the manifest too'
+    Assert-Equal 'title_t03.mp4|extras\Silicon Valley-S02-Extra01.mp4|Extra' ("{0}|{1}|{2}" -f $rows[3].OriginalName, $rows[3].NewName, $rows[3].Kind) 'extras are in the manifest with their path relative to the Disc folder'
+    Assert-Equal (Join-Path $discDir 'extras\Silicon Valley-S02-Extra01.mp4') $rows[3].NewPath 'manifest NewPath is the full path inside extras'
     Assert-True ($rows[0].Timestamp -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$') 'manifest rows carry a timestamp'
     Assert-True (Test-Path (Join-Path $discDir 'undo-rename.ps1')) 'undo-rename.ps1 copied next to the manifest'
     Assert-True (@($script:LogLines | Where-Object { $_ -like 'Renamed (Episode): title_t00.mp4 -> Silicon Valley-S02-E01.mp4' }).Count -eq 1) 'each rename is written to the session log'
@@ -337,8 +345,8 @@ try {
     Assert-True (Test-Path (Join-Path $promptDir 'title_t00.mp4')) 'files keep their MakeMKV names after declining'
 
     $result = Invoke-SeriesEpisodeRename -Directory $promptDir -Title 'Prompt' -Season 1 -ReadInput (New-InputQueue @('e', '2', '')) -GetDuration { param($p) 2640 } 6>$null
-    $names = (Get-ChildItem -LiteralPath $promptDir -Filter '*.mp4' | Sort-Object Name | ForEach-Object { $_.Name }) -join ','
-    Assert-Equal 'Prompt-S01-E01.mp4,Prompt-S01-E02.mp4,Prompt-S01-Extra01.mp4' $names '"e" then row 2 switches that title to an extra and renumbers the rest'
+    $names = Get-RelNames $promptDir
+    Assert-Equal 'extras\Prompt-S01-Extra01.mp4,Prompt-S01-E01.mp4,Prompt-S01-E02.mp4' $names '"e" then row 2 switches that title to an extra and renumbers the rest'
 
     $collideDir = Join-Path $tempRoot 'Series\Collide\Disc1'
     New-Item -ItemType Directory -Path $collideDir -Force | Out-Null
@@ -352,6 +360,88 @@ try {
     $outcome = Invoke-SeriesRenamePlan -Plan $plan 6>$null
     Assert-Equal 1 $outcome.Skipped 'the rename is skipped...'
     Assert-Equal 'existing' ((Get-Content (Join-Path $collideDir 'Collide-S01-E01.mp4')) -join '') '...and the existing file is never overwritten'
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nExtras subfolder (DiscN\extras, same folder name as movie rips)" -ForegroundColor Cyan
+
+    $noExtrasDir = Join-Path $tempRoot 'Series\NoExtras\Season 1\Disc1'
+    New-Item -ItemType Directory -Path $noExtrasDir -Force | Out-Null
+    'title_t00.mp4', 'title_t01.mp4' | ForEach-Object { Set-Content -Path (Join-Path $noExtrasDir $_) -Value $_ }
+    $null = Invoke-SeriesEpisodeRename -Directory $noExtrasDir -Title 'NoExtras' -Season 1 -ReadInput (New-InputQueue @('')) -GetDuration { param($p) 2640 } 6>$null
+    Assert-True (-not (Test-Path (Join-Path $noExtrasDir 'extras'))) 'a disc with no extras gets no empty extras folder'
+
+    $exDir = Join-Path $tempRoot 'Series\Ex\Season 1\Disc2'
+    New-Item -ItemType Directory -Path $exDir -Force | Out-Null
+    'title_t00.mp4', 'title_t01.mp4', 'title_t02.mp4', 'title_t03.mp4', 'title_t04.mkv' | ForEach-Object { Set-Content -Path (Join-Path $exDir $_) -Value $_ }
+    $exDur = @{ 'title_t00.mp4' = 2640; 'title_t01.mp4' = 2600; 'title_t02.mp4' = 2620; 'title_t03.mp4' = 300; 'title_t04.mkv' = 240 }
+    $exGet = { param($path) $exDur[(Split-Path -Leaf $path)] }.GetNewClosure()
+    $null = Invoke-SeriesEpisodeRename -Directory $exDir -Title 'Ex' -Season 1 -StartEpisode 5 -UndoScriptSource $undoPath `
+        -ReadInput (New-InputQueue @('')) -GetDuration $exGet 6>$null
+    Assert-Equal 'Ex-S01-E05.mp4,Ex-S01-E06.mp4,Ex-S01-E07.mp4,extras\Ex-S01-Extra01.mp4,extras\Ex-S01-Extra02.mkv' (Get-RelNames $exDir) 'episodes stay in DiscN; both extras moved to DiscN\extras (lowercase, like movie rips)'
+    Assert-True ((Test-Path (Join-Path $exDir 'rename-manifest.csv')) -and -not (Test-Path (Join-Path $exDir 'extras\rename-manifest.csv'))) 'one manifest, in the Disc folder (not inside extras)'
+    $exRows = @(Import-Csv (Join-Path $exDir 'rename-manifest.csv'))
+    Assert-Equal 'extras\Ex-S01-Extra02.mkv' $exRows[4].NewName 'manifest NewName is the path relative to the Disc folder'
+    Assert-Equal 8 (Get-SuggestedStartEpisode -SeasonDir (Split-Path $exDir -Parent) -Disc 3) 'next-disc suggestion still counts episodes only (extras in the subfolder are ignored)'
+
+    # A later re-run (e.g. a forgotten file) must not reuse Extra01/02 from the subfolder.
+    Set-Content -Path (Join-Path $exDir 'title_t09.mp4') -Value 'late'
+    $exDur['title_t09.mp4'] = 200
+    $null = Invoke-SeriesEpisodeRename -Directory $exDir -Title 'Ex' -Season 1 -StartEpisode 5 -ReadInput (New-InputQueue @('e', '1', '')) -GetDuration $exGet 6>$null
+    Assert-True (Test-Path (Join-Path $exDir 'extras\Ex-S01-Extra03.mp4')) 're-run: extras already in the subfolder keep their numbers; the new one becomes Extra03'
+    Assert-Equal 6 @(Import-Csv (Join-Path $exDir 'rename-manifest.csv')).Count 're-run appended its row to the same manifest'
+
+    Write-Host "`nUndo moves extras back out of the subfolder" -ForegroundColor Cyan
+
+    $undoResult = & (Join-Path $exDir 'undo-rename.ps1') -WhatIf 3>$null 6>$null
+    Assert-True (Test-Path (Join-Path $exDir 'extras\Ex-S01-Extra01.mp4')) '-WhatIf leaves extras where they are'
+    $undoResult = & (Join-Path $exDir 'undo-rename.ps1') 3>$null 6>$null
+    Assert-Equal 6 $undoResult.Restored 'undo restores all six rows (episodes and extras)'
+    Assert-Equal 'title_t00.mp4,title_t01.mp4,title_t02.mp4,title_t03.mp4,title_t04.mkv,title_t09.mp4' (Get-RelNames $exDir) 'every file is back in the Disc folder under its original name'
+    Assert-True (-not (Test-Path (Join-Path $exDir 'extras'))) 'the emptied extras folder is removed'
+
+    $keepDir = Join-Path $tempRoot 'Series\Keep\Disc1'
+    New-Item -ItemType Directory -Path $keepDir -Force | Out-Null
+    'title_t00.mp4', 'title_t01.mp4' | ForEach-Object { Set-Content -Path (Join-Path $keepDir $_) -Value $_ }
+    $null = Invoke-SeriesEpisodeRename -Directory $keepDir -Title 'Keep' -Season 1 -ReadInput (New-InputQueue @('e', '2', '')) -GetDuration { param($p) 2640 } 6>$null
+    Set-Content -Path (Join-Path $keepDir 'extras\my-notes.txt') -Value 'mine'
+    $undoResult = & $undoPath -ManifestPath (Join-Path $keepDir 'rename-manifest.csv') 3>$null 6>$null
+    Assert-True ((Test-Path (Join-Path $keepDir 'title_t01.mp4')) -and (Test-Path (Join-Path $keepDir 'extras\my-notes.txt'))) 'an extras folder holding other files is kept after undo'
+
+    $evilDir = Join-Path $tempRoot 'Series\Evil\Disc1'
+    New-Item -ItemType Directory -Path (Join-Path $evilDir 'other') -Force | Out-Null
+    Set-Content -Path (Join-Path $evilDir 'other\x.mp4') -Value 'x'
+    Set-Content -Path (Join-Path $tempRoot 'Series\Evil\up.mp4') -Value 'up'
+    @(
+        [pscustomobject]@{ OriginalName = 'a.mp4'; NewName = '..\up.mp4'; Kind = 'Extra'; OriginalPath = ''; NewPath = ''; Timestamp = '' }
+        [pscustomobject]@{ OriginalName = 'b.mp4'; NewName = 'other\x.mp4'; Kind = 'Extra'; OriginalPath = ''; NewPath = ''; Timestamp = '' }
+        [pscustomobject]@{ OriginalName = 'c.mp4'; NewName = 'C:\Windows\x.mp4'; Kind = 'Extra'; OriginalPath = ''; NewPath = ''; Timestamp = '' }
+        [pscustomobject]@{ OriginalName = 'd.mp4'; NewName = 'extras\..'; Kind = 'Extra'; OriginalPath = ''; NewPath = ''; Timestamp = '' }
+        [pscustomobject]@{ OriginalName = 'extras\e.mp4'; NewName = 'e2.mp4'; Kind = 'Extra'; OriginalPath = ''; NewPath = ''; Timestamp = '' }
+    ) | Export-Csv -LiteralPath (Join-Path $evilDir 'rename-manifest.csv') -NoTypeInformation -Encoding UTF8
+    $undoResult = & $undoPath -ManifestPath (Join-Path $evilDir 'rename-manifest.csv') 3>$null 6>$null
+    Assert-Equal 5 $undoResult.Skipped 'undo refuses rows pointing outside the Disc folder, into other subfolders, rooted, or with a path in OriginalName'
+    Assert-True ((Test-Path (Join-Path $evilDir 'other\x.mp4')) -and (Test-Path (Join-Path $tempRoot 'Series\Evil\up.mp4'))) '...and touches none of those files'
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nNon-interactive (-Yes): start episode and confirmation table" -ForegroundColor Cyan
+
+    $auto = Get-AutoStartEpisode -Suggested 9 -Fallback 1 -SuggestedFrom "TheDiscDB's first episode for this disc"
+    Assert-True ($auto.Episode -eq 9 -and -not $auto.IsGuess -and $auto.Reason -match 'TheDiscDB' -and $auto.Reason -match '-Yes') 'suggested default is taken, with the reason for the log'
+    $auto = Get-AutoStartEpisode -Suggested $null -Fallback 1
+    Assert-True ($auto.Episode -eq 1 -and $auto.IsGuess -and $auto.Reason -match 'check') 'no suggestion: falls back to -StartEpisode (1) and flags it as a guess rather than stopping'
+
+    $autoDir = Join-Path $tempRoot 'Series\Auto\Disc1'
+    New-Item -ItemType Directory -Path $autoDir -Force | Out-Null
+    'title_t00.mp4', 'title_t01.mp4' | ForEach-Object { Set-Content -Path (Join-Path $autoDir $_) -Value $_ }
+    $script:LogLines.Clear()
+    $neverAsk = { param($p) throw "prompted: $p" }
+    $autoResult = Invoke-SeriesEpisodeRename -Directory $autoDir -Title 'Auto' -Season 1 -ReadInput $neverAsk -GetDuration { param($p) 2640 } -AutoAccept 6>$null
+    Assert-Equal 2 $autoResult.Renamed '-AutoAccept renames without reading any input'
+    Assert-True (@($script:LogLines | Where-Object { $_ -match 'accepted automatically \(-Yes\) - 2 episode\(s\), 0 extra\(s\)' }).Count -eq 1) 'the automatic acceptance is logged with what was chosen'
+
+    $continueText = Get-Content -LiteralPath $continuePath -Raw
+    Assert-True ($continueText -match 'Invoke-SeriesEpisodeRename[\s\S]{0,600}-AutoAccept:\$Yes') 'continue-rip.ps1 passes -Yes through as -AutoAccept'
+    Assert-True ($continueText -match 'if \(\$Yes\) \{[\s\S]{0,400}Get-AutoStartEpisode[\s\S]{0,600}Write-Log "Start episode chosen automatically') 'continue-rip.ps1 -Yes takes the automatic start episode and logs it instead of prompting'
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

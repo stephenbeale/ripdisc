@@ -26,6 +26,37 @@ First step towards a WinForms front end: the C# port is split so a GUI can drive
 - `RipDisc.Tests` (xUnit, 62 tests), the repo's first C# tests: MakeMKV error classification (including the device-disconnect vs "0 titles" case from PR #123/#128), drive normalisation, title warnings, path building, config parsing and discovery, the argument parser, console prompts (closed input never consents), queue processing, and end-to-end pipeline runs against fake MakeMKV/HandBrake in a temp folder (movie feature/extras layout, series prefixing, Blu-ray subtitle retry, existing-folder choice, cancellation, output drive not ready, queue mode)
 - Smoke-tested the real `RipDisc.exe`: usage on a bad argument, and the start prompt aborting cleanly with stdin closed. **Not run against a disc**
 
+## 2026-10-04 (continued yet again) - MakeMKV Progress Bar, Milestones and ETA
+
+### Added
+- MakeMKV now runs with `--progress=-same`, so the long silence after `Saving N titles into directory ...` is replaced by:
+  - a PowerShell progress bar (`Write-Progress`) showing total %, current-title %, elapsed time and a linear ETA
+  - a timestamped console/log milestone every 10% (`[10:12:44] MakeMKV 30% complete - elapsed 12m 03s, ETA ~28m 10s`)
+  - `Current operation:` / `Current action:` lines, printed only when they change
+  - a closing `MakeMKV finished after Xm YYs` line
+- The bar, ETA and milestones restart when MakeMKV moves to a new operation (disc scan -> saving titles), since MakeMKV restarts its own total at 0
+- `tests/Test-MakeMkvProgress.ps1` covers progress-line parsing, duration formatting and ETA maths
+
+### Changed
+- Stuck-sector watchdog: progress/status lines are now neutral - they no longer reset the stuck-offset counter (they keep arriving while MakeMKV retries a bad sector, which would otherwise stop the watchdog ever firing), and `Current progress`/`Current operation` no longer mark the rip as started (they also appear while the disc is still being opened, which would disable the pre-rip authentication escape hatch). The rip-started marker is now `Saving N titles` or `Title #`.
+
+**Testing status:** parse-checked; all 9 test files pass. Progress line formats confirmed against the strings in the installed `makemkvcon64.exe` (v1.18.4). Not yet run against a real disc.
+
+## 2026-10-04 (continued again) - Series Extras Subfolder and Non-Interactive Series Naming
+
+### Changed
+- Plain `-Series` extras now move into `DiscN\extras\` instead of staying beside the episodes. It uses the same lowercase `extras` folder name movie rips use (`<title>\extras\`), placed inside the folder holding the main content. It is per disc rather than per season because Extra## numbering is per disc (a shared season folder would get two `Extra01`s), concurrent disc rips must not share a folder, and each Disc folder's manifest and undo stay self-contained. The folder is only created when there are extras. TheDiscDB extra names are kept (`extras\<Title>-S##-Extra##-<Name>.ext`)
+- `rename-manifest.csv` `NewName` is now the path relative to the Disc folder (`extras\<name>` for extras); `NewPath` is the full path. The columns are unchanged, so older manifests can still be appended to
+- `undo-rename.ps1` moves extras back out of `extras\` (Move-Item, never overwriting), removes the `extras` folder if that empties it (kept if it holds anything else), and accepts `extras\` as the only subfolder in `NewName`. Rows pointing elsewhere (`..`, other folders, rooted paths, a path in `OriginalName`) are refused
+- Re-running organize reserves the numbers of extras already in `extras\`, so a late file becomes the next `Extra##`
+
+### Added
+- `continue-rip.ps1 -Yes` no longer stops at the series prompts. On Disc 2+ it takes the suggested start episode (TheDiscDB's first episode, else the next after earlier discs, else `-StartEpisode`/1, flagged as a guess). It shows the rename table and accepts it as planned. Both choices are logged. `rip-disc.ps1` has no equivalent non-interactive flag, so nothing changed there
+- Tests: 21 new in `tests/Test-SeriesEpisodeRename.ps1` (now 109) covering the extras folder, no empty folder, manifest paths, next-disc suggestion, number reservation on re-run, undo round trip and folder clean-up, undo path safety, `-Yes` auto start episode and auto-accept. 6 existing assertions across both series test files updated for the new location
+
+### Known limitation
+- The `-Queue` / C# `-processQueue` path still has none of the series naming (no `S##-E##`, extras detection, TheDiscDB, `extras` subfolder, manifest or undo). Porting it is deferred; it is documented in README
+
 ## 2026-10-04 (continued) - TheDiscDB Lookup for Series Episode/Extra Mapping
 
 ### Added

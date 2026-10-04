@@ -9,6 +9,9 @@
 
     Names are resolved relative to the manifest's own folder (not the absolute paths
     recorded in it), so the undo still works after the folder or drive letter changes.
+    Extras were moved into the "extras" subfolder, so their NewName is recorded as
+    extras\<name>; undo moves them back out into the DiscN folder and removes the extras
+    folder if that leaves it empty. That one subfolder is the only path accepted.
 
     Safe by default:
       - a file that is missing is skipped with a warning (e.g. a rename that never ran
@@ -50,8 +53,10 @@ foreach ($row in $rows) {
     $newName = "$($row.NewName)"
     $originalName = "$($row.OriginalName)"
 
-    # Names only - a row pointing outside the folder is refused rather than followed.
-    if (-not $newName -or -not $originalName -or $newName -match '[\\/]' -or $originalName -match '[\\/]') {
+    # Bare names only, except that NewName may sit in the extras subfolder - a row
+    # pointing anywhere else (other folders, .., rooted paths) is refused, not followed.
+    $newNameOk = ($newName -match '^(?:extras[\\/])?[^\\/:]+$') -and ($newName -notmatch '(^|[\\/])\.\.?$')
+    if (-not $newName -or -not $originalName -or -not $newNameOk -or $originalName -match '[\\/:]') {
         Write-Warning "Skipping malformed row: '$originalName' / '$newName'"
         $skipped++
         continue
@@ -77,7 +82,8 @@ foreach ($row in $rows) {
 
     if ($PSCmdlet.ShouldProcess($currentPath, "Rename back to $originalName")) {
         try {
-            Rename-Item -LiteralPath $currentPath -NewName $originalName -ErrorAction Stop
+            # Move-Item so an extra comes back out of the extras subfolder; never overwrites.
+            Move-Item -LiteralPath $currentPath -Destination $originalPath -ErrorAction Stop
             Write-Host "  $newName -> $originalName" -ForegroundColor Gray
             $restored++
         } catch {
@@ -85,6 +91,13 @@ foreach ($row in $rows) {
             $skipped++
         }
     }
+}
+
+# Remove the extras subfolder if undoing emptied it (it only exists because of the rename).
+$extrasDir = Join-Path $manifestDir 'extras'
+if (-not $WhatIfPreference -and (Test-Path -LiteralPath $extrasDir -PathType Container) -and
+    -not (Get-ChildItem -LiteralPath $extrasDir -Force | Select-Object -First 1)) {
+    Remove-Item -LiteralPath $extrasDir -ErrorAction SilentlyContinue
 }
 
 Write-Host "Undo complete: $restored restored, $skipped skipped$(if ($WhatIfPreference) { ' (WhatIf - nothing changed)' })" -ForegroundColor $(if ($skipped) { 'Yellow' } else { 'Green' })

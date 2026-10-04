@@ -7,9 +7,20 @@
 # it keeps its own numbering and move-up logic in Step 3 of each script.
 #
 # Final names (files stay in the per-disc DiscN folder, so no disc number is needed):
-#   episodes: <Title>-S02-E05.mkv
-#   extras:   <Title>-S02-Extra01.mkv
+#   episodes: DiscN\<Title>-S02-E05.mkv
+#   extras:   DiscN\extras\<Title>-S02-Extra01.mkv   (or -Extra01-<TheDiscDB name>)
 # With no -Season the season tag falls back to S01.
+#
+# Extras go in an "extras" subfolder - the same lowercase folder name movie rips use
+# (<title>\extras) - placed inside the folder that holds the main content, which for a
+# series is the DiscN folder. Per disc, not per season, because Extra## numbering is
+# per disc (two discs would both produce -Extra01 in a shared season folder), because
+# concurrent rips of different discs must not write into the same folder (the reason
+# DiscN exists, PR #41), and so each DiscN folder's manifest/undo stays self-contained.
+
+# Name of the extras subfolder, relative to the DiscN folder. Must match movie mode's
+# Join-Path ... "extras" in rip-disc.ps1 / continue-rip.ps1, and undo-rename.ps1.
+$script:SeriesExtrasFolder = 'extras'
 
 # ---------------------------------------------------------------------------
 # Naming
@@ -139,6 +150,20 @@ function Read-StartEpisode {
         Write-Host "Please enter a whole number of 1 or more." -ForegroundColor Red
     }
     throw "No valid starting episode number entered - pass -StartEpisode N on the command line."
+}
+
+# Non-interactive answer to the start-episode question (continue-rip.ps1 -Yes): the
+# suggested default when there is one (TheDiscDB's first episode, or the next number
+# after earlier discs), otherwise -Fallback (the current -StartEpisode, normally 1) -
+# a non-interactive run must not stop to ask. Returns the number and a one-line reason
+# for the log, flagged when it is only the fallback.
+function Get-AutoStartEpisode {
+    param($Suggested = $null, [int]$Fallback = 1, [string]$SuggestedFrom = "suggested default")
+    if ($Suggested -and [int]$Suggested -ge 1) {
+        return [pscustomobject]@{ Episode = [int]$Suggested; Reason = "$SuggestedFrom (-Yes, not asked)"; IsGuess = $false }
+    }
+    $n = [math]::Max(1, $Fallback)
+    return [pscustomobject]@{ Episode = $n; Reason = "no suggestion available - defaulted to E{0:D2} (-Yes, not asked) - check the names" -f $n; IsGuess = $true }
 }
 
 # ---------------------------------------------------------------------------
@@ -428,16 +453,21 @@ function New-SeriesRenamePlan {
 
     $plan = @(foreach ($item in $Classification.Items) {
         $ext = [System.IO.Path]::GetExtension($item.Name)
-        $newName = if ($item.Kind -eq 'Episode') {
-            Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
+        # NewName is the path RELATIVE to $Directory (what the manifest records and
+        # undo-rename.ps1 resolves): a bare name for episodes, extras\<name> for extras.
+        if ($item.Kind -eq 'Episode') {
+            $fileName = Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
+            $newName = $fileName
         } else {
-            Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label
+            $fileName = Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label
+            $newName = "$($script:SeriesExtrasFolder)\$fileName"
         }
         $newPath = Join-Path $Directory $newName
         $skip = Test-Path -LiteralPath $newPath
         [pscustomobject]@{
             OriginalName = $item.Name
             NewName      = $newName
+            FileName     = $fileName
             Kind         = $item.Kind
             Source       = $item.Source
             DurationSec  = $item.DurationSec
@@ -491,7 +521,9 @@ function Confirm-SeriesRenamePlan {
         [string]$Directory,
         [object]$TmdbSeason = $null,
         [object]$DiscDbDisc = $null,
-        [scriptblock]$ReadInput = { param($p) Read-Host $p }
+        [scriptblock]$ReadInput = { param($p) Read-Host $p },
+        # Non-interactive (continue-rip.ps1 -Yes): show the table, then accept it as-is.
+        [switch]$AutoAccept
     )
 
     $overrides = @{}
@@ -499,6 +531,11 @@ function Confirm-SeriesRenamePlan {
         $classification = Get-SeriesTitleClassification @ClassifyArgs -Overrides $overrides
         $plan = New-SeriesRenamePlan -Classification $classification -Title $Title -Season $Season -Directory $Directory
         Show-SeriesRenamePlan -Plan $plan -Classification $classification -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc
+
+        if ($AutoAccept) {
+            Write-Host "Accepted automatically (-Yes) - undo-rename.ps1 reverses it if it is wrong." -ForegroundColor Gray
+            return @{ Classification = $classification; Plan = $plan; AutoAccepted = $true }
+        }
 
         $answer = & $ReadInput "Accept these names? [Y]es (default) / [n]o, leave files as they are / [e]dit"
         # No input available (redirected/non-interactive): take the default, accept.
@@ -571,9 +608,17 @@ function Invoke-SeriesRenamePlan {
             $skipped++
             continue
         }
+        # Extras move into the extras subfolder; create it on first use only, so a disc
+        # with no extras gets no empty folder.
+        $targetDir = Split-Path -Parent $p.NewPath
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction Stop | Out-Null
+        }
         for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
             try {
-                Rename-Item -LiteralPath $p.OriginalPath -NewName $p.NewName -ErrorAction Stop
+                # Move-Item, not Rename-Item, so extras can change folder. Same volume, so
+                # it is still a rename on disk; it never overwrites (no -Force).
+                Move-Item -LiteralPath $p.OriginalPath -Destination $p.NewPath -ErrorAction Stop
                 break
             } catch [System.IO.IOException] {
                 if ($attempt -eq $MaxRetries) {
@@ -609,7 +654,9 @@ function Invoke-SeriesEpisodeRename {
         [string]$HandBrakePath = "",
         [scriptblock]$ReadInput = { param($p) Read-Host $p },
         # Injectable so tests do not need real video files.
-        [scriptblock]$GetDuration = $null
+        [scriptblock]$GetDuration = $null,
+        # Accept the confirmation table without asking (continue-rip.ps1 -Yes).
+        [switch]$AutoAccept
     )
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
@@ -623,6 +670,13 @@ function Invoke-SeriesEpisodeRename {
             if ($Matches['ep']) { $takenEpisodes += [int]$Matches['ep'] } else { $takenExtras += [int]$Matches['extra'] }
         } else {
             $candidates += $f
+        }
+    }
+    # Extras already moved into the extras subfolder by an earlier run keep their numbers.
+    $extrasDir = Join-Path $Directory $script:SeriesExtrasFolder
+    if (Test-Path -LiteralPath $extrasDir -PathType Container) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $extrasDir -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' })) {
+            if ($f.Name -match $pattern -and $Matches['extra']) { $takenExtras += [int]$Matches['extra'] }
         }
     }
     if ($takenEpisodes.Count + $takenExtras.Count -gt 0) {
@@ -669,7 +723,7 @@ function Invoke-SeriesEpisodeRename {
         DiscDbMap        = $discDbMap
         Season           = $Season
     }
-    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput
+    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput -AutoAccept:$AutoAccept
     if (-not $result) {
         Write-Host "  Rename declined - files keep their current names. Re-run later with: continue-rip.ps1 ... -FromStep organize" -ForegroundColor Yellow
         Write-Log "Series rename: declined at the confirmation prompt - files left unchanged"
@@ -677,6 +731,10 @@ function Invoke-SeriesEpisodeRename {
     }
 
     $plan = @($result.Plan)
+    if ($result.AutoAccepted) {
+        $autoEpisodes = @($plan | Where-Object { $_.Kind -eq 'Episode' }).Count
+        Write-Log "Series rename: confirmation table accepted automatically (-Yes) - $autoEpisodes episode(s), $($plan.Count - $autoEpisodes) extra(s) as planned"
+    }
     Write-Log "Series rename: classification by $(if ($result.Classification.DiscDbCount -gt 0) { "TheDiscDB ($($result.Classification.DiscDbCount) title(s)), then " })$($result.Classification.Method); start episode $StartEpisode"
     foreach ($w in $result.Classification.Warnings) { Write-Log "Series rename WARNING: $w" }
 
@@ -698,6 +756,7 @@ function Invoke-SeriesEpisodeRename {
     $episodes = @($plan | Where-Object { $_.Kind -eq 'Episode' -and -not $_.Skip }).Count
     $extras = @($plan | Where-Object { $_.Kind -eq 'Extra' -and -not $_.Skip }).Count
     Write-Host "Renamed $($outcome.Renamed) file(s) ($episodes episode(s), $extras extra(s))$(if ($outcome.Skipped) { ", skipped $($outcome.Skipped)" })" -ForegroundColor Green
+    if ($extras -gt 0) { Write-Host "  Extras moved to: $extrasDir" -ForegroundColor Gray }
     Write-Host "  To undo: & `"$(Join-Path $Directory 'undo-rename.ps1')`"   (add -WhatIf to preview)" -ForegroundColor Gray
     Write-Log "Series rename: $($outcome.Renamed) renamed, $($outcome.Skipped) skipped"
 

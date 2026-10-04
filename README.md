@@ -261,9 +261,14 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
 |--------|-------|
 | `title_t00.mp4` | `Silicon Valley-S02-E01.mp4` |
 | `title_t01.mkv` | `Silicon Valley-S02-E02.mkv` (extension is never changed) |
-| `title_t02.mp4` (a 5-minute featurette) | `Silicon Valley-S02-Extra01.mp4` |
+| `title_t02.mp4` (a 5-minute featurette) | `extras\Silicon Valley-S02-Extra01.mp4` |
 
 - **No disc number in the name** - files stay in `Season N\DiscN\`, which already says which disc they came from.
+- **Extras go in `DiscN\extras\`** - the same lowercase `extras` folder movie rips use (`<title>\extras\`),
+  placed inside the folder holding the main content, which for a series is the Disc folder. It is per disc,
+  not per season, because extras are numbered per disc (two discs would both have an `Extra01`), because
+  concurrent rips of different discs must not share a folder, and so each Disc folder's manifest and undo
+  stay self-contained. The folder is only created when the disc has extras.
 - **No `-season`** - the tag falls back to `S01` (`Fargo-S01-E01.mp4`); the folder layout is unchanged (no Season folder).
 - **Numbering** starts at `-startEpisode` (default 1) and runs in MakeMKV title order. It does not
   continue across discs on its own: for Disc 2+ without `-startEpisode` you are asked for the starting
@@ -295,7 +300,8 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
   Enter accepts, `n` leaves every file as it is, `e` lets you switch rows between episode and extra.
 - **Manifest and undo** - `rename-manifest.csv` (`OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp`)
   is written in the Disc folder *before* anything is renamed, and `undo-rename.ps1` is copied next to it.
-  Renames never overwrite an existing file. To undo:
+  `NewName` is the path relative to the Disc folder (`extras\<name>` for extras), so undo moves extras back
+  out and removes the `extras` folder if that empties it. Renames never overwrite an existing file. To undo:
 
 ```powershell
 & "E:\Series\Silicon Valley\Season 2\Disc1\undo-rename.ps1" -WhatIf   # preview
@@ -303,7 +309,18 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
 # or, from the repo:  .\undo-rename.ps1 -ManifestPath "<Disc folder>\rename-manifest.csv"
 ```
 
-Undo skips (with a warning) files that are missing or whose original name is already taken.
+Undo skips (with a warning) files that are missing or whose original name is already taken, and refuses
+any manifest row that points outside the Disc folder or its `extras` subfolder.
+
+- **Non-interactive** - `continue-rip.ps1 -Yes` never stops at the series prompts: on Disc 2+ it takes the
+  suggested start episode (TheDiscDB's first episode, else the next after earlier discs, else
+  `-startEpisode`/1, flagged as a guess), and it shows the confirmation table and accepts it as planned.
+  Both automatic choices are written to the log. `rip-disc.ps1` has no equivalent non-interactive flag.
+- **Known limitation: `-queue` / C# `-processQueue`** - a queued rip's encode and organize run in the C#
+  queue processor, which does not have any of this: no `S##-E##` renames, extras detection, TheDiscDB
+  lookup, `extras` subfolder, manifest or undo. It still writes series files straight into the Season
+  folder with the older `Title-S##-...` prefix naming. Porting it has been deferred; for now, rip series
+  discs without `-queue` to get this naming.
 
 Genre series (`-series` with `-documentary` etc.) keeps its own naming, described below.
 
@@ -366,7 +383,8 @@ E:\Series\SeriesName\
     ├── Disc1\
     │   ├── SeriesName-S02-E01.mp4
     │   ├── SeriesName-S02-E02.mp4
-    │   ├── SeriesName-S02-Extra01.mp4
+    │   ├── extras\
+    │   │   └── SeriesName-S02-Extra01-Making Of.mp4
     │   ├── rename-manifest.csv
     │   └── undo-rename.ps1
     └── Disc2\
@@ -516,7 +534,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Movie mode (Feature file + extras) | Yes | Yes |
 | Multi-disc concurrent ripping | Yes | Yes |
 | `-Bluray` output dir + forced subtitle scan | Yes | No |
-| `-Queue` / `-ProcessQueue` | Yes | Yes |
+| `-Queue` / `-ProcessQueue` | Yes | Yes (queued series rips don't get episode naming - see TV series episode naming) |
 | Window title management | Yes | Yes |
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
@@ -617,6 +635,12 @@ fails after the rip completes, it now prints the exact command to run — see
 | `organize` | 3 | MP4 files in output directory |
 | `open` | 4 | Output directory exists |
 
+**`-Yes`** (`continue-rip.ps1` only) skips confirmation prompts for a plain `-Series` resume: the
+Disc 2+ starting-episode prompt and the pre-rename confirmation table are both answered
+automatically (suggested start episode, plan accepted as shown — see
+[TV series episode naming](#tv-series-episode-naming--series) above for exactly what each one
+defaults to). Both automatic choices are written to the log. `rip-disc.ps1` has no equivalent flag.
+
 All other parameters work the same as `rip-disc.ps1`:
 
 ```powershell
@@ -678,6 +702,8 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 
 - **series-cleanup.ps1** - Utility for cleaning up series naming
 - **continue-rip.ps1** - Resume failed rips from a specific step
+- **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
+- **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
 
 ## Project Structure
 
@@ -689,7 +715,11 @@ ripdisc/
 ├── ripdisc-config.sample.json  # Sample configuration file
 ├── rip-disc.ps1           # PowerShell implementation
 ├── continue-rip.ps1       # Resume failed rips from a specific step
+├── SeriesEpisodes.ps1     # Shared -Series naming logic (dot-sourced, not run directly)
+├── undo-rename.ps1        # Reverses a -Series rename from a rename-manifest.csv
 ├── series-cleanup.ps1     # Series cleanup utility
+├── CHANGELOG.md           # Release history
+├── Roadmap.md             # Open feature requests and backlog
 ├── CLAUDE.md              # Development notes
 ├── README.md              # This file
 └── RipDisc/               # C# implementation
