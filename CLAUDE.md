@@ -2251,3 +2251,20 @@ PR #140/#142/this-PR series naming; it writes series files into the Season folde
 **Testing status:** `Test-SeriesEpisodeRename.ps1` 109/109 (21 new), `Test-TheDiscDbLookup.ps1` 79/79.
 **Not exercised in a real rip**; Jellyfin's handling of `DiscN\extras\` (an extras folder nested
 under a non-season folder) is unverified.
+
+### 2026-10-04 - MakeMKV Progress Bar, Milestones and ETA (PR #141)
+
+**What changed:** `rip-disc.ps1` now runs MakeMKV with `--progress=-same` and shows a
+`Write-Progress` bar, 10% milestone lines with ETA, and op/action lines. Progress lines are
+neutral to the stuck-sector watchdog (they neither reset nor trip it), and the rip-started
+marker is narrowed to `Saving N titles|Title #`. Format strings were verified against
+`makemkvcon64.exe` v1.18.4. New tests: `tests/Test-MakeMkvProgress.ps1` (9/9 pass).
+
+**Status:** PR #141 deliberately left OPEN pending a real-disc test; **not hardware-tested**.
+Developed in the worktree `ripdisc-makemkv-progress` (sibling of the main checkout) because
+the main checkout held another session's uncommitted `SeriesEpisodes.ps1` changes on
+`feature/thediscdb-lookup`.
+
+**Outstanding:** rip a real disc from this branch and confirm the bar/ETA and watchdog
+behaviour. Rebased onto `main` after #142/#143/#145 (TheDiscDB/extras work) landed:
+`rip-disc.ps1` merged cleanly; only CHANGELOG/CLAUDE.md needed both entries kept.
