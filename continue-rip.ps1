@@ -85,9 +85,15 @@
 
 # ========== LOAD CONFIG ==========
 . (Join-Path $PSScriptRoot "Load-Config.ps1")
+# Plain -Series episode/extra naming, rename manifest and TMDb season lookup - the same
+# file rip-disc.ps1 uses, so a resumed rip names files exactly like the original run.
+. (Join-Path $PSScriptRoot "SeriesEpisodes.ps1")
 
 # Apply config defaults to parameters that weren't explicitly passed
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
+# Whether -StartEpisode was given (rip-disc.ps1's retry command always passes it once it
+# has been answered there). Decides whether the Disc 2+ prompt below is needed.
+$script:StartEpisodeExplicit = $PSBoundParameters.ContainsKey('StartEpisode')
 
 # ========== GENRE SERIES (e.g. multi-disc documentary box sets) ==========
 # See rip-disc.ps1 for the full explanation. Mirrored here so continuing a genre
@@ -871,6 +877,7 @@ function Get-EquivalentCommand {
     if ($Music)       { $parts += "-Music" }
     if ($Surf)        { $parts += "-Surf" }
     if ($Force)       { $parts += "-Force" }
+    if ($StartEpisode -ne 1 -or $script:StartEpisodeExplicit) { $parts += "-StartEpisode $StartEpisode" }
     $parts += "-OutputDrive $($outputDriveLetter.TrimEnd(':'))"
     return ($parts -join " ")
 }
@@ -1067,6 +1074,31 @@ while ($true) {
     }
     $FromStep = $newKey
     Write-Log "Starting step changed at the prompt to: $FromStep"
+}
+
+# ========== SERIES EPISODE NUMBERING (plain -Series only) ==========
+# Same rule as rip-disc.ps1: asked up front (before any encode), only for Disc 2+ and
+# only when -StartEpisode was not given. Skipped entirely when the run starts at step 4.
+$script:TmdbSeason = $null
+if ($Series -and -not $script:IsGenreSeries -and $StartFromStepNumber -le 3) {
+    $script:TmdbSeason = Get-SeriesTmdbSeason -Title $title -Season $Season
+    if (Test-ShouldPromptStartEpisode -Series:$Series -GenreSeries:$script:IsGenreSeries -Extras:$Extras -Disc $Disc -StartEpisodeExplicit:$script:StartEpisodeExplicit) {
+        $suggestedStart = Get-SuggestedStartEpisode -SeasonDir $seriesSeasonDir -Disc $Disc
+        Write-Host "`nDisc $Disc of a series - which episode number does this disc start at?" -ForegroundColor Cyan
+        if ($suggestedStart) {
+            Write-Host "  Earlier discs already hold episodes up to E$("{0:D2}" -f ($suggestedStart - 1)) - press Enter to start at E$("{0:D2}" -f $suggestedStart)." -ForegroundColor Gray
+        } else {
+            Write-Host "  No numbered episodes found on earlier discs in $seriesSeasonDir - type the number." -ForegroundColor Gray
+        }
+        $StartEpisode = Read-StartEpisode -Disc $Disc -Suggested $suggestedStart
+        $script:StartEpisodeExplicit = $true
+    }
+    Write-Log "Start episode: $StartEpisode$(if ($script:StartEpisodeExplicit) { ' (explicit/prompted)' } else { ' (default)' })"
+    if ($script:TmdbSeason) {
+        Write-Log "TMDb season: $($script:TmdbSeason.ShowName) S$($script:TmdbSeason.Season) - $($script:TmdbSeason.EpisodeCount) episode(s)"
+    } else {
+        Write-Log "TMDb season: unavailable - extras detection uses the median title length"
+    }
 }
 Disable-ConsoleClose
 
@@ -1486,47 +1518,20 @@ if ($StartFromStepNumber -le 3) {
         $finalOutputDir = $genreSeriesTargetDir
         $script:LastWorkingDirectory = $finalOutputDir
     } elseif ($Series) {
-        # ========== SERIES MODE: Prefix files with title + season-disc tag ==========
-        # Keeps original MakeMKV filenames (t00, t01...) for episode ordering
-        Write-Host "`nPrefixing series files..." -ForegroundColor Yellow
+        # ========== SERIES MODE: Rename to <Title>-S##-E## (extras <Title>-S##-Extra##) ==========
+        # Identical to rip-disc.ps1 - see the comment there. Files stay in Disc$Disc.
         # Read the title-folder name back from disk rather than trusting $safeTitle as text.
         # $seriesBaseDir (set above where $finalOutputDir was built) IS that folder. Matches
         # the pattern Movie mode already uses below ((Get-Item $finalOutputDir).Name) and
         # closes the whole bug class - not just the specific trailing-dot/space case
         # Get-SafeTitle now handles - since any other Windows path normalization $safeTitle
-        # doesn't happen to replicate would otherwise silently desync the prefix from the
+        # doesn't happen to replicate would otherwise silently desync the name from the
         # real on-disk name the same way "W." by Oliver Stone did.
         $dirName = (Get-Item $seriesBaseDir).Name
-        $seasonTag = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
-        $discTag = "D$Disc"
-        $prefix = "$dirName-$seasonTag-$discTag"
-
-        $episodeFiles = Get-ChildItem -File | Where-Object {
-            $_.Extension -match '\.(mp4|mkv)$'
-        } | Sort-Object Name
-
-        foreach ($file in $episodeFiles) {
-            $newName = "$prefix-$($file.Name)"
-            Write-Host "  $($file.Name) -> $newName" -ForegroundColor Gray
-            $maxRetries = 10
-            $retryDelay = 5
-            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-                try {
-                    Rename-Item -LiteralPath $file.FullName -NewName $newName -ErrorAction Stop
-                    break
-                } catch [System.IO.IOException] {
-                    if ($attempt -eq $maxRetries) {
-                        Write-Host "  FAILED to rename $($file.Name) after $maxRetries attempts: $_" -ForegroundColor Red
-                        Write-Log "ERROR: Failed to rename $($file.Name) after $maxRetries attempts: $_"
-                        throw
-                    }
-                    Write-Host "  File locked: $($file.Name) - retrying in ${retryDelay}s (attempt $attempt/$maxRetries)..." -ForegroundColor Yellow
-                    Start-Sleep -Seconds $retryDelay
-                }
-            }
-        }
-        Write-Host "Renamed $($episodeFiles.Count) file(s)" -ForegroundColor Green
-        Write-Log "Prefixed $($episodeFiles.Count) file(s) with $prefix"
+        Write-Host "`nNaming series episodes..." -ForegroundColor Yellow
+        $null = Invoke-SeriesEpisodeRename -Directory $finalOutputDir -Title $dirName -Season $Season `
+            -StartEpisode $StartEpisode -TmdbSeason $script:TmdbSeason -AllExtras:$Extras `
+            -UndoScriptSource (Join-Path $PSScriptRoot 'undo-rename.ps1') -HandBrakePath $handbrakePath
 
         # Keep files in disc subdirectory (Jellyfin scans recursively)
         Write-Host "Episodes kept in disc directory: $finalOutputDir" -ForegroundColor Green

@@ -2163,3 +2163,34 @@ only.
   nothing this pass touched that
 - Confirm the GitHub MCP server actually connects next session, if its tools are needed
 - Everything carried from the two entries above still stands
+
+### 2026-10-04 - Series Episode Naming, Extras Detection, Rename Manifest and Undo
+
+**What changed:** plain `-Series` Step 3 now renames to `<Title>-S##-E##.ext` (extras
+`<Title>-S##-Extra##.ext`), files staying in `DiscN`. This reverses the March 2026
+prefix-only change (`a3d4c7c`, `Title-S01-D1-title_t00.mp4`), which had dropped episode
+numbers because cross-disc auto-detection raced between concurrent rips. That race is
+avoided here by NOT auto-detecting at Step 3: numbering is per disc from `-StartEpisode`,
+and Disc 2+ without `-StartEpisode` is asked up front (before the rip), pre-filled from
+earlier `DiscN` folders. The answer is carried into the failure-time continue command
+(`-StartEpisodeExplicit` on `Get-ContinueRipCommand`).
+
+**Shared code:** the logic lives in `SeriesEpisodes.ps1`, dot-sourced by both scripts
+(like `Load-Config.ps1`) instead of being duplicated - a deliberate break from the
+copy-in-both-scripts convention, given its size (~500 lines). `undo-rename.ps1` is
+standalone and is copied next to each `rename-manifest.csv`.
+
+**Extras detection:** TMDb `/tv/{id}/season/{n}` per-episode runtimes when available
+(15% / 3 min tolerance, under 60% = extra), median-length fallback otherwise, play-all =
+70-130% of the sum of the others. Durations come from the encoded files (Shell
+`System.Media.Duration`, HandBrakeCLI `--scan` fallback), not MakeMKV `TINFO:n,9` - the
+disc is already ejected by Step 3 and `TINFO` is only parsed in auto-discovery mode.
+
+**Testing status:** `tests/Test-SeriesEpisodeRename.ps1` 88/88; full suite 237/237.
+Duration reader checked against one real MP4 (7104 s); MKV duration via the Shell
+property is unverified. **Not exercised against a real rip or the live TMDb API**
+(TMDb is mocked in the tests).
+
+**Outstanding:** real-disc validation of a Disc 1 + Disc 2 season; check whether Jellyfin
+treats `-S02-Extra01` files as extras or ignores them (an `extras\` subfolder is the
+alternative); the C# `-processQueue` path does not get the new naming.
