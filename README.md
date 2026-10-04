@@ -17,7 +17,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
 - **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Music, Surf) with different organization strategies
-- **Jellyfin episode naming** for series (`Title-S01E01.mp4`)
+- **Episode naming** for series (`Title-S02-E01.mp4`), with extras told apart from episodes (TMDb runtimes or title length), a confirm/edit step, a rename manifest and a one-command undo
 - **Composite mega-file detection** skips all-in-one files during series encoding
 - **Multi-disc support** with concurrent ripping capability
 - **HandBrake queue mode** for sequential encoding after concurrent rips
@@ -151,7 +151,8 @@ Both versions use the same command-line parameters:
 -fitness                Fitness mode (outputs to Fitness folder)
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
--startEpisode <int>     Starting episode number for series (default: 1)
+-startEpisode <int>     Starting episode number for series (default: 1). For plain -series
+                        Disc 2+, you are asked at the start of the run if this is omitted
 -noSound                Skip the completion fanfare (Console.Beep melody)
 -noEject                Skip ejecting the disc after the MakeMKV rip (rip-disc.ps1 only —
                         continue-rip.ps1 accepts it for command-line compatibility but
@@ -247,7 +248,49 @@ script falls back to querying Windows for the same drive letter before giving up
 **Rip a TV series disc 2 (continuing episode numbers):**
 ```powershell
 .\rip-disc.ps1 -title "Breaking Bad" -series -season 1 -disc 2 -startEpisode 5
+# or leave -startEpisode off: you're asked before the rip starts, with the next number
+# after Disc1's episodes pre-filled (press Enter to accept)
 ```
+
+### TV series episode naming (`-series`)
+
+At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` folder are renamed:
+
+| Before | After |
+|--------|-------|
+| `title_t00.mp4` | `Silicon Valley-S02-E01.mp4` |
+| `title_t01.mkv` | `Silicon Valley-S02-E02.mkv` (extension is never changed) |
+| `title_t02.mp4` (a 5-minute featurette) | `Silicon Valley-S02-Extra01.mp4` |
+
+- **No disc number in the name** - files stay in `Season N\DiscN\`, which already says which disc they came from.
+- **No `-season`** - the tag falls back to `S01` (`Fargo-S01-E01.mp4`); the folder layout is unchanged (no Season folder).
+- **Numbering** starts at `-startEpisode` (default 1) and runs in MakeMKV title order. It does not
+  continue across discs on its own: for Disc 2+ without `-startEpisode` you are asked for the starting
+  number before the rip begins, with the next number after the earlier discs' episodes pre-filled.
+  Disc 1, or an explicit `-startEpisode`, never prompts. A failed run's suggested `continue-rip.ps1`
+  command carries the answer, so a resumed rip doesn't ask again.
+- **Extras vs episodes** - extras get `Extra##` names and no episode number. With a TMDb key, the
+  season's published per-episode runtimes are used: each title is compared with the runtime of the
+  episode it would become (within 15% or 3 minutes). A title under 60% of that runtime is an extra;
+  anything else that doesn't match is kept as an episode but flagged. Without TMDb (no key, no match,
+  offline) titles under 60% of the median title length are extras. A "play all" title (about the sum
+  of the others) is always an extra. You're warned if numbering would run past the season's last
+  episode on TMDb.
+- **Confirm before renaming** - the planned names are shown with actual and expected durations.
+  Enter accepts, `n` leaves every file as it is, `e` lets you switch rows between episode and extra.
+- **Manifest and undo** - `rename-manifest.csv` (`OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp`)
+  is written in the Disc folder *before* anything is renamed, and `undo-rename.ps1` is copied next to it.
+  Renames never overwrite an existing file. To undo:
+
+```powershell
+& "E:\Series\Silicon Valley\Season 2\Disc1\undo-rename.ps1" -WhatIf   # preview
+& "E:\Series\Silicon Valley\Season 2\Disc1\undo-rename.ps1"           # rename back
+# or, from the repo:  .\undo-rename.ps1 -ManifestPath "<Disc folder>\rename-manifest.csv"
+```
+
+Undo skips (with a warning) files that are missing or whose original name is already taken.
+
+Genre series (`-series` with `-documentary` etc.) keeps its own naming, described below.
 
 **Rip a documentary:**
 ```powershell
@@ -304,19 +347,26 @@ E:\DVDs\MovieName\
 
 ```
 E:\Series\SeriesName\
-└── Season 1\
-    ├── SeriesName-S01E01.mp4
-    ├── SeriesName-S01E02.mp4
-    └── SeriesName-S01E03.mp4
+└── Season 2\
+    ├── Disc1\
+    │   ├── SeriesName-S02-E01.mp4
+    │   ├── SeriesName-S02-E02.mp4
+    │   ├── SeriesName-S02-Extra01.mp4
+    │   ├── rename-manifest.csv
+    │   └── undo-rename.ps1
+    └── Disc2\
+        ├── SeriesName-S02-E03.mp4
+        └── ...
 ```
 
 ### TV Series (no season)
 
 ```
 E:\Series\SeriesName\
-├── SeriesName-E01.mp4
-├── SeriesName-E02.mp4
-└── SeriesName-E03.mp4
+└── Disc1\
+    ├── SeriesName-S01-E01.mp4
+    ├── SeriesName-S01-E02.mp4
+    └── ...
 ```
 
 ### Documentaries
@@ -459,7 +509,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Genre series (`-Documentary`/etc. combined with `-Series`) | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
 | `-StartEpisode` parameter | Yes | No |
-| Jellyfin episode naming (`S01E01`) | Yes | No |
+| Episode naming (`S02-E01`), extras detection, rename manifest + undo | Yes | No |
 | Composite mega-file detection | Yes | No |
 | Disc 1 temp dir isolation (`Disc1/`) | Yes | No |
 | Series per-disc encoding isolation | Yes | No |

@@ -121,16 +121,17 @@ foreach ($scriptPath in @($ripDiscPath, $continuePath)) {
     $scriptName = Split-Path $scriptPath -Leaf
     $lines = Get-Content -Path $scriptPath
 
-    $seriesBlockStart = ($lines | Select-String -Pattern 'SERIES MODE: Prefix files with title \+ season-disc tag' | Select-Object -First 1).LineNumber
+    $seriesBlockStart = ($lines | Select-String -Pattern 'SERIES MODE: Rename to <Title>-S##-E##' -SimpleMatch | Select-Object -First 1).LineNumber
     $extrasBlockStart = ($lines | Select-String -Pattern 'Extras disc: prefix with title only' | Select-Object -First 1).LineNumber
     Assert-True ($null -ne $seriesBlockStart) "Series-mode prefix block found in $scriptName"
     Assert-True ($null -ne $extrasBlockStart) "Extras-mode prefix block found in $scriptName"
 
     if ($seriesBlockStart) {
-        # The $prefix assignment is a handful of lines below the block header
-        $seriesWindow = $lines[($seriesBlockStart - 1)..($seriesBlockStart + 14)] -join "`n"
-        Assert-True ($seriesWindow -match '\(Get-Item\s+\$seriesBaseDir\)\.Name') "Series-mode prefix in $scriptName is built from (Get-Item `$seriesBaseDir).Name"
-        Assert-True ($seriesWindow -notmatch '\$prefix\s*=\s*"\$safeTitle-') "Series-mode prefix in $scriptName no longer interpolates `$safeTitle directly (regression guard)"
+        # The title is read from disk a handful of lines below the block header, then
+        # handed to Invoke-SeriesEpisodeRename as -Title.
+        $seriesWindow = $lines[($seriesBlockStart - 1)..($seriesBlockStart + 20)] -join "`n"
+        Assert-True ($seriesWindow -match '\(Get-Item\s+\$seriesBaseDir\)\.Name') "Series-mode episode title in $scriptName is built from (Get-Item `$seriesBaseDir).Name"
+        Assert-True (($seriesWindow -match 'Invoke-SeriesEpisodeRename\s.*-Title\s+\$dirName') -and ($seriesWindow -notmatch '-Title\s+\$safeTitle')) "Series-mode rename in $scriptName passes the on-disk name, not `$safeTitle text (regression guard)"
     }
 
     if ($extrasBlockStart) {

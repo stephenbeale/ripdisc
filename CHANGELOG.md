@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-04 - Series Episode Naming, Extras Detection, Rename Manifest and Undo
+
+### Changed
+- Plain `-Series` Step 3 (both `rip-disc.ps1` and `continue-rip.ps1`) now renames files to `<Title>-S##-E##.ext` (e.g. `Silicon Valley-S02-E01.mp4`) instead of prefixing the MakeMKV name (`Title-S02-D1-title_t00.mp4`). Files stay in the per-disc `DiscN` folder, so the name carries no disc number. The real extension is kept; the title is the on-disk (sanitised) folder name
+- No `-Season`: the season tag falls back to `S01` (folder layout unchanged)
+- `-StartEpisode` is now honoured by plain `-Series` (it had been ignored since the March 2026 prefix-only change). Numbering is per disc from `-StartEpisode`, in MakeMKV title order
+
+### Added
+- Start-of-run prompt for the starting episode on plain `-Series` Disc 2+ when `-StartEpisode` is omitted, pre-filled from the highest episode on earlier `DiscN` folders (files or manifests). Disc 1 and explicit `-StartEpisode` never prompt. The failure-time `continue-rip.ps1` command now carries `-StartEpisode` whenever it was given or answered (even 1), and `continue-rip.ps1` applies the same prompt rule
+- Extras detection: extras are named `<Title>-S##-Extra##.ext` and take no episode number. With a TMDb key, each title is compared with the published runtime of the episode it would become (`/tv/{id}/season/{n}`, within 15% or 3 minutes); under 60% of that runtime is an extra, other mismatches stay episodes but are flagged. Without TMDb data, titles under 60% of the median length are extras. Play-all titles (70-130% of the sum of the others) are always extras. A warning is shown when the disc has more episode-length titles than the season has episodes left. `-Series -Extras` names everything as extras
+- TMDb season lookup is optional and fail-soft (no key, no match, offline all fall back to the median heuristic). Auto-discovery's TMDb match id is reused; otherwise a non-interactive `/search/tv` picks an exact-name match or the top result
+- Pre-rename confirmation table with actual and expected durations: Enter accepts, `n` leaves files untouched, `e` switches rows between episode and extra
+- `rename-manifest.csv` (`OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp`) written in the Disc folder before any rename; appended on re-runs. Renames never overwrite an existing file, and files already in the final format are left alone with their numbers reserved, so re-running organize after a part-way failure carries on correctly
+- `undo-rename.ps1` (repo root, copied next to each manifest): renames everything in a manifest back, newest first, skipping with a warning on missing files or name collisions, with `-WhatIf` support
+- `SeriesEpisodes.ps1`: the shared implementation, dot-sourced by both scripts
+- `tests/Test-SeriesEpisodeRename.ps1` - 88 tests: name format, start-episode prompt rules and answers, suggestion from earlier discs, continue-command carry-through, classification (median, play-all, TMDb match/short/mismatch/past-season), mocked TMDb lookups, manifest, part-way failure and resume, no-overwrite, confirm/decline/edit, and undo
+
 ## 2026-08-31 (continued) - Derive Series/Extras File Prefixes From the Real On-Disk Directory Name
 
 ### Fixed
