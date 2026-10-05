@@ -94,11 +94,14 @@ function Get-SeriesRenameUnits {
                 FileFilter = { param($n) $null -eq (Get-DiscNumberFromFileName $n) }
             })
         }
+        # GetNewClosure() binds the filter to a new dynamic module, which cannot see functions
+        # dot-sourced into rename-series.ps1's script scope - so capture the function itself.
+        $discOf = ${function:Get-DiscNumberFromFileName}
         foreach ($t in $tokens) {
             $wanted = [int]$t
             $units.Add([pscustomobject]@{
                 Directory = $Dir; Title = $UnitTitle; Season = $UnitSeason; Disc = $wanted; SeasonDir = $Dir
-                FileFilter = { param($n) (Get-DiscNumberFromFileName $n) -eq $wanted }.GetNewClosure()
+                FileFilter = { param($n) (& $discOf $n) -eq $wanted }.GetNewClosure()
             })
         }
     }

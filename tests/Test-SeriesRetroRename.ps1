@@ -281,6 +281,16 @@ try {
     & (Join-Path $ja1 'undo-rename.ps1') *> $null
     Assert-Equal $beforeJa1 (Get-RelNames $ja1) 'undo in Series 1 restores its names and keeps the existing extras file'
 
+    # TODO: INEFFECTIVE - this block still PASSES against the old buggy code (GetNewClosure() bug), so it
+    # does not guard the regression. Hand-made temp layouts run in an interactive console DO reproduce it.
+    # Find out what differs (console vs -File, fixture layout) and make it fail on the old code.
+    # The real driver in its own process: the per-disc FileFilter closures must still find
+    # Get-DiscNumberFromFileName (a GetNewClosure() module scope cannot see script-scope functions).
+    $cliOut = powershell.exe -NoProfile -File (Join-Path $repoRoot 'rename-series.ps1') $ja -NoTmdb *>&1 | Out-String
+    Assert-True ($cliOut -notmatch 'CommandNotFoundException|not\s+recognized') 'rename-series.ps1 run as a script: disc-token filters work (no "not recognized" error)'
+    Assert-True ($cliOut -match 'Joking Apart-S02-E07') 'rename-series.ps1 run as a script: Disc 2 file is planned (filter matched it)'
+    Assert-Equal $beforeJa2 (Get-RelNames $ja2) 'rename-series.ps1 dry run as a script: nothing renamed'
+
     # Two units sharing a folder never plan the same Extra number, and a later run continues
     $x = Join-Path $tempRoot 'Xtra\Xtra-Series 1'
     New-DiscFolder $x @{ 'Xtra-Series 1 Disc 1-A_t00.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t01.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t03.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t02.mkv' = 4; 'Xtra-Series 1 Disc 2-B_t00.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t01.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t03.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t02.mkv' = 4 }
