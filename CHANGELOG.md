@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-05 - Standalone Series Rename Utility (`rename-series.ps1`)
+
+### Added
+- `rename-series.ps1` renames series that are already ripped on disk, reusing the live `-Series` rip's logic (`Invoke-SeriesEpisodeRename`): same `<Title>-S##-E##` / `extras\<Title>-S##-Extra##` names, same episode-vs-extra detection (TMDb runtimes / median length / play-all), same confirmation table, `rename-manifest.csv` written before any file moves and `undo-rename.ps1` copied into every folder, never overwrites, already-renamed files left alone.
+- Takes a series folder, a Season folder or a single DiscN folder; walks Season then Disc in numeric order and continues episode numbers across discs (from renamed files / manifests on disk, or from the plan itself in a dry run). `-StartEpisode`, `-Title`, `-Season`, `-NoTmdb`, `-Yes`.
+- Dry run by default: without `-Apply` it only prints each folder's plan.
+- `SeriesRetroRename.ps1` (discovery + orchestration, dot-sourced) and `tests/Test-SeriesRetroRename.ps1` (45 tests, temp folders, injected durations, no drive).
+
+### Changed
+- `Invoke-SeriesEpisodeRename` gained `-DryRun` (classify + show the plan, no prompt/manifest/move) and now also returns `Plan` and `DryRun`. Rip behaviour is unchanged.
+
+**Not used:** TheDiscDB (needs the physical disc's hash). **Testing status:** new suite 45/45, existing series/TheDiscDB suites unchanged. **Not run against real media** (only temp-folder fixtures and a temp-folder smoke run of the script).
+
 ## 2026-10-04 (continued) - Blu-ray Feature Files Tagged `-BluRay`
 
 ### Added

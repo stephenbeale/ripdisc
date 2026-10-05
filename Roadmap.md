@@ -6,7 +6,8 @@ e.g. Fame-extras should look for an existing Fame dir and, if extras dir exists 
 ## Feature - Check for dir char length
 Handle all output max. char lengths so that they do not break- warn user of this and offer to abort to allow them to input a shorter title. Consider all sub dirs.
 
-## Feature - Standalone series episode rename utility (added 2026-10-04)
+## Feature - Standalone series episode rename utility (added 2026-10-04) - FIRST VERSION BUILT 2026-10-05
+Built as `rename-series.ps1` + `SeriesRetroRename.ps1` (dry run by default, `-Apply` to rename; see README "Additional Tools"). Still open: TheDiscDB use (needs a disc hash), episode titles in names, recording a manifest for folders hand-renamed earlier with no manifest, and a real-media test.
 A retroactive, bulk tool for series that are ALREADY ripped on disk (e.g. `F:\Series\...`), not tied
 to a live rip. The user has many series folders of episodes to rename, and it must be done safely
 while keeping the original file names.
