@@ -6,21 +6,45 @@
 # would have. Genre series (-Series plus -Documentary etc.) does NOT use this file -
 # it keeps its own numbering and move-up logic in Step 3 of each script.
 #
-# Final names (files stay in the per-disc DiscN folder, so no disc number is needed):
-#   episodes: DiscN\<Title>-S02-E05.mkv
-#   extras:   DiscN\extras\<Title>-S02-Extra01.mkv   (or -Extra01-<TheDiscDB name>)
+# Final names (episodes stay in the per-disc DiscN folder):
+#   episodes: <Series>\Season 2\Disc1\<Title>-S02-E05.mkv
+#   extras:   <Series>\Specials\<Title>-S02-D1-Extra01.mkv   (or -Extra01-<TheDiscDB name>)
 # With no -Season the season tag falls back to S01.
 #
-# Extras go in an "extras" subfolder - the same lowercase folder name movie rips use
-# (<title>\extras) - placed inside the folder that holds the main content, which for a
-# series is the DiscN folder. Per disc, not per season, because Extra## numbering is
-# per disc (two discs would both produce -Extra01 in a shared season folder), because
-# concurrent rips of different discs must not write into the same folder (the reason
-# DiscN exists, PR #41), and so each DiscN folder's manifest/undo stays self-contained.
+# Extras go in ONE "Specials" folder at series level, alongside the Season folders -
+# Jellyfin did not pick up the earlier DiscN\extras\ (PR #143), and treats a series-level
+# Specials folder as Season 00. Every disc of every season shares that folder, so an
+# extra's name carries its season AND disc (-S02-D1-): Extra## is numbered per disc, and
+# the disc part keeps two discs' -Extra01 apart. Concurrent rips of different discs only
+# ever create distinct names there, and renames never overwrite. The manifest stays in
+# the DiscN folder, recording each extra's path relative to it (..\..\Specials\<name>).
 
-# Name of the extras subfolder, relative to the DiscN folder. Must match movie mode's
-# Join-Path ... "extras" in rip-disc.ps1 / continue-rip.ps1, and undo-rename.ps1.
-$script:SeriesExtrasFolder = 'extras'
+# Series-level folder for extras. Must match undo-rename.ps1's NewName whitelist.
+$script:SeriesExtrasFolder = 'Specials'
+# Where PR #143 put extras (DiscN\extras\). Still read so extras moved there by an older
+# run keep their numbers, and still accepted by undo-rename.ps1 for older manifests.
+$script:SeriesLegacyExtrasFolder = 'extras'
+
+# The Specials folder for a folder of episodes, as a path RELATIVE to it: up past DiscN,
+# then up past Season N, to the series folder. "..\..\Specials" for Season N\DiscN,
+# "..\Specials" for a DiscN or Season N folder directly under the series.
+function Get-SeriesSpecialsRelativeDir {
+    param([string]$Directory)
+    $dir = $Directory.TrimEnd('\', '/')
+    $ups = 0
+    if ((Split-Path $dir -Leaf) -match '^Disc\d+$') { $dir = Split-Path $dir -Parent; $ups++ }
+    if ($dir -and (Split-Path $dir -Leaf) -match '^Season\s+\d+$') { $ups++ }
+    $prefix = ('..\' * $ups)
+    return "$prefix$($script:SeriesExtrasFolder)"
+}
+
+# Disc number from a DiscN folder name, 0 when the folder is not a DiscN folder (a Season
+# folder that holds the files itself) - the name then has no -D# part.
+function Get-SeriesDiscFromDirectory {
+    param([string]$Directory)
+    if ((Split-Path $Directory.TrimEnd('\', '/') -Leaf) -match '^Disc(\d+)$') { return [int]$Matches[1] }
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # Naming
@@ -40,12 +64,14 @@ function Get-SeriesEpisodeFileName {
 }
 
 function Get-SeriesExtraFileName {
-    param([string]$Title, [int]$Season, [int]$Extra, [string]$Extension, [string]$Label = "")
+    param([string]$Title, [int]$Season, [int]$Extra, [string]$Extension, [string]$Label = "", [int]$Disc = 0)
     # -Label is TheDiscDB's published name for the extra (already made filename-safe by
     # Get-SeriesExtraLabel). It goes AFTER the number, so sorting and uniqueness are
-    # still decided by Extra## alone: <Title>-S02-Extra01-Making Of.mkv
+    # still decided by D#-Extra## alone: <Title>-S02-D1-Extra01-Making Of.mkv
+    # -Disc 0 (files not in a DiscN folder) leaves the -D# part out.
     $suffix = if ($Label) { "-$Label" } else { "" }
-    return "{0}-{1}-Extra{2:D2}{3}{4}" -f $Title, (Get-SeriesSeasonTag $Season), $Extra, $suffix, $Extension
+    $discPart = if ($Disc -gt 0) { "D$Disc-" } else { "" }
+    return "{0}-{1}-{2}Extra{3:D2}{4}{5}" -f $Title, (Get-SeriesSeasonTag $Season), $discPart, $Extra, $suffix, $Extension
 }
 
 # Turns a published extra name into something safe to put in a filename: characters
@@ -70,11 +96,12 @@ function Get-SeriesExtraLabel {
 # Regex matching a file already in the final shape for this title and season. Used to
 # leave already-renamed files alone (e.g. re-running organize after a failure part-way
 # through) and to reserve their numbers so nothing is ever numbered twice. Extras may
-# carry a TheDiscDB name after the number (-Extra01-Making Of).
+# carry a disc part (-D2-, absent on PR #143-era names) and a TheDiscDB name after the
+# number (-Extra01-Making Of).
 function Get-SeriesNamePattern {
     param([string]$Title, [int]$Season)
     $tag = Get-SeriesSeasonTag $Season
-    return '^' + [regex]::Escape($Title) + '-' + $tag + '-(?:E(?<ep>\d+)|Extra(?<extra>\d+)(?:-[^\\/]+)?)\.(?:mp4|mkv)$'
+    return '^' + [regex]::Escape($Title) + '-' + $tag + '-(?:E(?<ep>\d+)|(?:D(?<disc>\d+)-)?Extra(?<extra>\d+)(?:-[^\\/]+)?)\.(?:mp4|mkv)$'
 }
 
 # ---------------------------------------------------------------------------
@@ -451,18 +478,21 @@ function Get-SeriesTitleClassification {
 function New-SeriesRenamePlan {
     param([object]$Classification, [string]$Title, [int]$Season, [string]$Directory)
 
+    $specialsRel = Get-SeriesSpecialsRelativeDir -Directory $Directory
+    $disc = Get-SeriesDiscFromDirectory -Directory $Directory
     $plan = @(foreach ($item in $Classification.Items) {
         $ext = [System.IO.Path]::GetExtension($item.Name)
         # NewName is the path RELATIVE to $Directory (what the manifest records and
-        # undo-rename.ps1 resolves): a bare name for episodes, extras\<name> for extras.
+        # undo-rename.ps1 resolves): a bare name for episodes, ..\..\Specials\<name> for extras.
         if ($item.Kind -eq 'Episode') {
             $fileName = Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
             $newName = $fileName
         } else {
-            $fileName = Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label
-            $newName = "$($script:SeriesExtrasFolder)\$fileName"
+            $fileName = Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label -Disc $disc
+            $newName = "$specialsRel\$fileName"
         }
-        $newPath = Join-Path $Directory $newName
+        # GetFullPath folds the ..\ segments so NewPath (manifest, messages) is a clean path.
+        $newPath = [System.IO.Path]::GetFullPath((Join-Path $Directory $newName))
         $skip = Test-Path -LiteralPath $newPath
         [pscustomobject]@{
             OriginalName = $item.Name
@@ -608,8 +638,8 @@ function Invoke-SeriesRenamePlan {
             $skipped++
             continue
         }
-        # Extras move into the extras subfolder; create it on first use only, so a disc
-        # with no extras gets no empty folder.
+        # Extras move into the series-level Specials folder; create it on first use only,
+        # so a series with no extras gets no empty folder.
         $targetDir = Split-Path -Parent $p.NewPath
         if (-not (Test-Path -LiteralPath $targetDir)) {
             New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction Stop | Out-Null
@@ -684,11 +714,18 @@ function Invoke-SeriesEpisodeRename {
             if (-not $FileFilter -or (& $FileFilter $f.Name)) { $candidates += $f }
         }
     }
-    # Extras already moved into the extras subfolder by an earlier run keep their numbers.
-    $extrasDir = Join-Path $Directory $script:SeriesExtrasFolder
-    if (Test-Path -LiteralPath $extrasDir -PathType Container) {
-        foreach ($f in @(Get-ChildItem -LiteralPath $extrasDir -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' })) {
-            if ($f.Name -match $pattern -and $Matches['extra']) { $takenExtras += [int]$Matches['extra'] }
+    # Extras already moved out by an earlier run keep their numbers: this disc's own
+    # (-D#-) extras in the shared Specials folder, and anything in a PR #143-era
+    # DiscN\extras\ folder (those names have no disc part and belong to this disc).
+    $disc = Get-SeriesDiscFromDirectory -Directory $Directory
+    $extrasDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory)))
+    $legacyExtrasDir = Join-Path $Directory $script:SeriesLegacyExtrasFolder
+    foreach ($dir in @($extrasDir, $legacyExtrasDir)) {
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' })) {
+            if (-not ($f.Name -match $pattern) -or -not $Matches['extra']) { continue }
+            $fileDisc = if ($Matches['disc']) { [int]$Matches['disc'] } else { 0 }
+            if ($dir -eq $legacyExtrasDir -or $fileDisc -eq $disc) { $takenExtras += [int]$Matches['extra'] }
         }
     }
     if ($takenEpisodes.Count + $takenExtras.Count -gt 0) {

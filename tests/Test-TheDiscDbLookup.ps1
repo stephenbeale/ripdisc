@@ -284,7 +284,7 @@ try {
 
     $plan = New-SeriesRenamePlan -Classification $c -Title '30 Rock' -Season 1 -Directory $tempRoot
     Assert-Equal '30 Rock-S01-Extra01-Making Of The Baby Show.mkv' $plan[2].FileName 'named extra: <Title>-S##-Extra##-<published name>.ext'
-    Assert-Equal 'extras\30 Rock-S01-Extra01-Making Of The Baby Show.mkv' $plan[2].NewName '...placed in the extras subfolder'
+    Assert-Equal 'Specials\30 Rock-S01-Extra01-Making Of The Baby Show.mkv' $plan[2].NewName '...placed in the Specials folder (no DiscN/Season level here, so no -D# and no ..\)'
     Assert-Equal 'TheDiscDB' $plan[0].Source 'plan rows carry the Source for the confirmation table'
 
     $c = Get-SeriesTitleClassification -Titles $titles -DiscDbMap $map -Season 1 -Overrides @{ 'title_t00.mkv' = 'Extra'; 'title_t02.mkv' = 'Episode' }
@@ -349,10 +349,10 @@ try {
     $script:LogLines.Clear()
     $result = Invoke-SeriesEpisodeRename -Directory $discDir -Title '30 Rock' -Season 1 -StartEpisode 8 -DiscDbDisc $lookup.Disc `
         -ReadInput (New-InputQueue @('')) -GetDuration $getDuration 6>$null
-    $names = (Get-ChildItem -LiteralPath $discDir -File -Recurse | Where-Object { $_.Extension -eq '.mp4' } | Sort-Object Name | ForEach-Object { $_.Name }) -join ','
-    Assert-Equal '30 Rock-S01-E08.mp4,30 Rock-S01-E09.mp4,30 Rock-S01-E10.mp4,30 Rock-S01-Extra01-The Rural Juror Deleted Scene.mp4' $names 'episodes numbered by TheDiscDB; the deleted scene renamed with its published name'
+    $names = (Get-ChildItem -LiteralPath (Join-Path $tempRoot 'Series\30 Rock') -File -Recurse | Where-Object { $_.Extension -eq '.mp4' } | Sort-Object Name | ForEach-Object { $_.Name }) -join ','
+    Assert-Equal '30 Rock-S01-D2-Extra01-The Rural Juror Deleted Scene.mp4,30 Rock-S01-E08.mp4,30 Rock-S01-E09.mp4,30 Rock-S01-E10.mp4' $names 'episodes numbered by TheDiscDB; the deleted scene renamed with its published name'
     $rows = @(Import-Csv (Join-Path $discDir 'rename-manifest.csv'))
-    Assert-Equal 'extras\30 Rock-S01-Extra01-The Rural Juror Deleted Scene.mp4' $rows[3].NewName 'manifest records the named extra with its extras\ path'
+    Assert-Equal '..\..\Specials\30 Rock-S01-D2-Extra01-The Rural Juror Deleted Scene.mp4' $rows[3].NewName 'manifest records the named extra with its Specials path'
     Assert-True (@($script:LogLines | Where-Object { $_ -match '^TheDiscDB: 4 of 4 file\(s\) lined up' }).Count -eq 1) 'how many files lined up is logged'
     Assert-True (@($script:LogLines | Where-Object { $_ -match 'classification by TheDiscDB \(4 title' }).Count -eq 1) 'the session log records that TheDiscDB decided the names'
     $again = Invoke-SeriesEpisodeRename -Directory $discDir -Title '30 Rock' -Season 1 -DiscDbDisc $lookup.Disc -ReadInput (New-InputQueue @('')) -GetDuration $getDuration 6>$null
