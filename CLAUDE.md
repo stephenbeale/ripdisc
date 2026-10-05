@@ -19,6 +19,16 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-05 - rename-series.ps1 (PR #151, open, -Apply untested)
+
+`rename-series.ps1` + `SeriesRetroRename.ps1` rename already-ripped series folders to
+`<Title>-S##-E##` (dry run by default; `-Apply` writes `rename-manifest.csv` and
+`undo-rename.ps1` before moving). Handles "Series N" / "<Title>-Series N" folders, "Disc N"
+tokens in names, and leaves existing `extras\` alone. 84/84 new tests, full suite passing.
+NOT yet run with `-Apply` on real media. Next: test on the copy `C:\Video\Series\Joking Apart`,
+then `F:\Series\Joking Apart`. Concern: dry run planned S02 Disc 2 `D1_t00` as S02-E07
+(probably a pilot or extra). PR #152 (extras to Specials) is stacked on #151.
+
 ### 2026-10-04 - Series Episode Naming, Extras Detection, Rename Manifest and Undo
 
 **What changed:** plain `-Series` Step 3 now renames to `<Title>-S##-E##.ext` (extras
