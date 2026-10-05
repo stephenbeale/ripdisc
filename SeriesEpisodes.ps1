@@ -660,7 +660,15 @@ function Invoke-SeriesEpisodeRename {
         # Preview only (rename-series.ps1 without -Apply): classify and show the planned
         # names, then stop - no prompt, no manifest, no undo script, no file touched.
         # The returned Plan is what an apply run would do.
-        [switch]$DryRun
+        [switch]$DryRun,
+        # Only files whose NAME this accepts are renamed (rename-series.ps1: several discs'
+        # files sharing one folder, grouped by a "Disc N" token in the file name). Files
+        # already in final shape still reserve their numbers whatever the filter says.
+        [scriptblock]$FileFilter = $null,
+        # Extra numbers already planned for this folder by an earlier unit in the same run
+        # (a dry run has not renamed them yet), so two units sharing a folder never plan
+        # the same -Extra##.
+        [int[]]$ReservedExtras = @()
     )
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
@@ -673,7 +681,7 @@ function Invoke-SeriesEpisodeRename {
         if ($f.Name -match $pattern) {
             if ($Matches['ep']) { $takenEpisodes += [int]$Matches['ep'] } else { $takenExtras += [int]$Matches['extra'] }
         } else {
-            $candidates += $f
+            if (-not $FileFilter -or (& $FileFilter $f.Name)) { $candidates += $f }
         }
     }
     # Extras already moved into the extras subfolder by an earlier run keep their numbers.
@@ -687,6 +695,8 @@ function Invoke-SeriesEpisodeRename {
         Write-Host "  $($takenEpisodes.Count + $takenExtras.Count) file(s) already renamed - leaving them alone and skipping their numbers" -ForegroundColor Gray
         Write-Log "Series rename: $($takenEpisodes.Count + $takenExtras.Count) file(s) already in final format, left unchanged"
     }
+    # Reserved only now, so the "already renamed" count above stays about real files.
+    $takenExtras += @($ReservedExtras)
     if ($candidates.Count -eq 0) {
         Write-Host "  No files to rename" -ForegroundColor Gray
         Write-Log "Series rename: no files to rename in $Directory"

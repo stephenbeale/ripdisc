@@ -203,6 +203,96 @@ try {
     $null = Invoke-SeriesRetroRename -Root $clash -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1
     Assert-Equal 'precious' ((Get-Content -LiteralPath $target -Raw).Trim()) 'an existing target file is left byte-for-byte untouched'
     Assert-Equal 'Clash-S01-E01.mkv,Clash-S01-E02.mkv,Clash-S01-E03.mkv' (Get-RelNames $clash) 'originals took the next free numbers instead of overwriting'
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nOlder rip layouts (Joking Apart): Series N folders, several discs in one folder" -ForegroundColor Cyan
+
+    Assert-Equal '1' "$(Get-SeasonFolderNumber 'Series 1')" 'season name: "Series 1"'
+    Assert-Equal '2' "$(Get-SeasonFolderNumber 'Season 2')" 'season name: "Season 2"'
+    Assert-Equal '1' "$(Get-SeasonFolderNumber 'Joking Apart-Series 1')" 'season name: "<anything>-Series 1"'
+    Assert-Equal '3' "$(Get-SeasonFolderNumber 'Joking Apart Series 3')" 'season name: "<anything> Series 3"'
+    Assert-Equal '4' "$(Get-SeasonFolderNumber 'Joking Apart-Season 4')" 'season name: "<anything>-Season 4"'
+    Assert-Equal '12' "$(Get-SeasonFolderNumber 'show - SERIES 12')" 'season name: case-insensitive, two digits'
+    Assert-Equal '5' "$(Get-SeasonFolderNumber 'series5')" 'season name: no space'
+    Assert-True ($null -eq (Get-SeasonFolderNumber 'Joking Apart')) 'a plain series folder is not a season'
+    Assert-True ($null -eq (Get-SeasonFolderNumber 'Series 1 Extras')) 'a folder merely containing "Series 1" is not a season'
+    Assert-Equal '2' "$(Get-DiscFolderNumber 'Disc 2')" 'disc folder: "Disc 2" (with space)'
+    Assert-Equal '3' "$(Get-DiscFolderNumber 'disc3')" 'disc folder: "disc3"'
+    Assert-Equal '1' "$(Get-DiscNumberFromFileName 'Joking Apart-Series 2 Disc 1-B1_t06.mp4')" 'file token: "Series 2 Disc 1-..."'
+    Assert-True ($null -eq (Get-DiscNumberFromFileName 'Joking Apart-Series 1-C1_t00.mp4')) 'file token: none when the name has no Disc N'
+
+    $ja = Join-Path $tempRoot 'Joking Apart'
+    $ja1 = Join-Path $ja 'Joking Apart-Series 1'
+    $ja2 = Join-Path $ja 'Joking Apart-Series 2'
+    $s1Files = @{}
+    foreach ($n in 'C1_t00','C1_t01','C1_t02','C1_t03','C1_t04','C1_t06') { $s1Files["Joking Apart-Series 1-$n.mp4"] = 30 }
+    New-DiscFolder $ja1 $s1Files
+    New-DiscFolder (Join-Path $ja1 'extras') @{ 'Joking Apart-Series 1-B1_t05.mp4' = 4 }
+    $s2Files = @{ 'Joking Apart-Series 2 Disc 1-B1_t06.mp4' = 5 }
+    foreach ($n in 1..6) { $s2Files["Joking Apart-Series 2 Disc 1-C$($n)_t0$($n - 1).mp4"] = 30 }
+    $s2Files['Joking Apart-Series 2 Disc 2-D1_t00.mp4'] = 30
+    New-DiscFolder $ja2 $s2Files
+    $beforeJa1 = Get-RelNames $ja1
+    $beforeJa2 = Get-RelNames $ja2
+
+    $units = @(Get-SeriesRenameUnits -Root $ja)
+    Assert-Equal 'S1D0,S2D1,S2D2' (($units | ForEach-Object { "S$($_.Season)D$($_.Disc)" }) -join ',') 'series root: Series 1 is one unit, Series 2 splits into Disc 1 and Disc 2'
+    Assert-True (@($units | Where-Object { $_.Title -ne 'Joking Apart' }).Count -eq 0) 'title is the series folder (Joking Apart), not the season folder name'
+    Assert-True ($null -eq $units[0].FileFilter -and $null -ne $units[1].FileFilter) 'no disc tokens -> no filter; disc tokens -> a filter per disc'
+    Assert-True ($units[1].Directory -eq $ja2 -and $units[2].Directory -eq $ja2) 'both Series 2 units stay in the one folder (nothing moved into Disc folders)'
+    Assert-True (@($units | Where-Object { $_.Directory -like '*extras*' }).Count -eq 0) 'an existing extras folder is never a unit'
+
+    $units = @(Get-SeriesRenameUnits -Root $ja1)
+    Assert-Equal 'Joking Apart|1|0' ("$($units[0].Title)|$($units[0].Season)|$($units[0].Disc)") 'pointing straight at "Joking Apart-Series 1": title is the parent folder'
+    $units = @(Get-SeriesRenameUnits -Root $ja2)
+    Assert-Equal 2 $units.Count 'pointing straight at Series 2: two disc units'
+
+    $spaced = Join-Path $tempRoot 'Spaced\Series 3\Disc 2'
+    New-DiscFolder $spaced @{ 's_t00.mkv' = 40 }
+    $units = @(Get-SeriesRenameUnits -Root (Join-Path $tempRoot 'Spaced'))
+    Assert-Equal 'Spaced|3|2' ("$($units[0].Title)|$($units[0].Season)|$($units[0].Disc)") '"Series 3\Disc 2" (space) is found from the series root'
+    $units = @(Get-SeriesRenameUnits -Root $spaced)
+    Assert-Equal 'Spaced|3|2' ("$($units[0].Title)|$($units[0].Season)|$($units[0].Disc)") '"Disc 2" folder pointed at directly: season/title inferred'
+
+    # Dry run
+    $s = Invoke-SeriesRetroRename -Root $ja -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal $beforeJa1 (Get-RelNames $ja1) 'dry run: Series 1 untouched'
+    Assert-Equal $beforeJa2 (Get-RelNames $ja2) 'dry run: Series 2 untouched'
+    Assert-True (-not (Test-Path (Join-Path $ja2 'rename-manifest.csv'))) 'dry run: no manifest'
+    $p1 = @($s.Results[0].Result.Plan | ForEach-Object { $_.NewName }) -join ','
+    Assert-Equal 'Joking Apart-S01-E01.mp4,Joking Apart-S01-E02.mp4,Joking Apart-S01-E03.mp4,Joking Apart-S01-E04.mp4,Joking Apart-S01-E05.mp4,Joking Apart-S01-E06.mp4' $p1 'Series 1: six files -> E01-E06 (existing extras\ file ignored)'
+    $d1plan = @($s.Results[1].Result.Plan)
+    $d2plan = @($s.Results[2].Result.Plan)
+    Assert-Equal 7 $d1plan.Count 'Series 2 Disc 1 unit takes only the 7 "Disc 1" files'
+    Assert-Equal 1 $d2plan.Count 'Series 2 Disc 2 unit takes only the "Disc 2" file'
+    Assert-Equal 'extras\Joking Apart-S02-Extra01.mp4' (($d1plan | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the 5-minute Disc 1 title is planned as an extra'
+    Assert-Equal 'Joking Apart-S02-E07.mp4' $d2plan[0].NewName 'Disc 2 continues numbering after Disc 1 (E07)'
+
+    # Apply
+    $s = Invoke-SeriesRetroRename -Root $ja -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 'extras\Joking Apart-S02-Extra01.mp4,Joking Apart-S02-E01.mp4,Joking Apart-S02-E02.mp4,Joking Apart-S02-E03.mp4,Joking Apart-S02-E04.mp4,Joking Apart-S02-E05.mp4,Joking Apart-S02-E06.mp4,Joking Apart-S02-E07.mp4' (Get-RelNames $ja2) 'apply: Series 2 episodes E01-E07 across both discs, extra moved to extras\'
+    Assert-True (Test-Path -LiteralPath (Join-Path $ja1 'extras\Joking Apart-Series 1-B1_t05.mp4')) 'apply: the pre-existing extras file is left exactly where it was, under its old name'
+    $rows = @(Import-Csv -LiteralPath (Join-Path $ja2 'rename-manifest.csv'))
+    Assert-Equal 8 $rows.Count 'two units in one folder: ONE manifest holding both units rows (appended, not clobbered)'
+    Assert-Equal 8 @($rows | Select-Object -ExpandProperty OriginalName -Unique).Count 'manifest rows are distinct (every original name recorded once)'
+    Assert-True (Test-Path (Join-Path $ja2 'undo-rename.ps1')) 'undo script copied next to the shared manifest'
+    & (Join-Path $ja2 'undo-rename.ps1') *> $null
+    Assert-Equal $beforeJa2 (Get-RelNames $ja2) 'undo of the shared manifest restores BOTH discs original names'
+    & (Join-Path $ja1 'undo-rename.ps1') *> $null
+    Assert-Equal $beforeJa1 (Get-RelNames $ja1) 'undo in Series 1 restores its names and keeps the existing extras file'
+
+    # Two units sharing a folder never plan the same Extra number, and a later run continues
+    $x = Join-Path $tempRoot 'Xtra\Xtra-Series 1'
+    New-DiscFolder $x @{ 'Xtra-Series 1 Disc 1-A_t00.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t01.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t03.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t02.mkv' = 4; 'Xtra-Series 1 Disc 2-B_t00.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t01.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t03.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t02.mkv' = 4 }
+    $s = Invoke-SeriesRetroRename -Root $x -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    $xe1 = @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.NewName }) -join ','
+    $xe2 = @($s.Results[1].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.NewName }) -join ','
+    Assert-Equal 'extras\Xtra-S01-Extra01.mkv|extras\Xtra-S01-Extra02.mkv' "$xe1|$xe2" 'dry run: Disc 2 plans Extra02, not a second Extra01'
+
+    $r = Join-Path $tempRoot 'Resume\Resume-Series 1'
+    New-DiscFolder $r @{ 'Resume-S01-E01.mkv' = 30; 'Resume-S01-E02.mkv' = 30; 'Resume-Series 1 Disc 2-B_t00.mkv' = 30 }
+    $s = Invoke-SeriesRetroRename -Root $r -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 'Resume-S01-E03.mkv' (@($s.Results[0].Result.Plan)[0].NewName) 'a Disc 2 file whose Disc 1 is already renamed in the same folder starts at E03'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
