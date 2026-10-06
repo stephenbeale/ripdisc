@@ -124,7 +124,8 @@ function Test-ShouldPromptStartEpisode {
 }
 
 # Highest episode number already on an EARLIER disc of this season, plus one. Reads
-# both the renamed files and any rename-manifest.csv in sibling DiscN folders.
+# both the renamed files and any rename-manifest.csv in sibling DiscN folders (also
+# "Disc N" and "<Show>-Disc N", as older rips named them).
 # Returns $null when nothing can be inferred.
 function Get-SuggestedStartEpisode {
     param([string]$SeasonDir, [int]$Disc)
@@ -133,7 +134,7 @@ function Get-SuggestedStartEpisode {
 
     $max = 0
     $discDirs = @(Get-ChildItem -LiteralPath $SeasonDir -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '^Disc(\d+)$' -and [int]$Matches[1] -lt $Disc })
+        Where-Object { $_.Name -match '(?i)(?:^|[\s\-_.])disc\s*(\d+)$' -and [int]$Matches[1] -lt $Disc })
 
     foreach ($dir in $discDirs) {
         $names = @(Get-ChildItem -LiteralPath $dir.FullName -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
@@ -291,6 +292,9 @@ function Get-SeriesTitleClassification {
         [hashtable]$Overrides = @{},
         [switch]$AllExtras,
         [hashtable]$DiscDbMap = @{},
+        # Name -> disc number, when one folder holds several discs' files (older rips).
+        # The play-all check then runs per disc, since each disc has its own play-all.
+        [hashtable]$Groups = @{},
         # The season the files are being named for - a TheDiscDB title from a different
         # season is still used, but flagged for checking.
         [int]$Season = 0,
@@ -300,6 +304,7 @@ function Get-SeriesTitleClassification {
     )
     if (-not $DiscDbMap) { $DiscDbMap = @{} }
     if (-not $Overrides) { $Overrides = @{} }
+    if (-not $Groups) { $Groups = @{} }
 
     $items = @(foreach ($t in $Titles) {
         $d = if ($null -ne $t.DurationSec -and [double]$t.DurationSec -gt 0) { [double]$t.DurationSec } else { $null }
@@ -323,9 +328,11 @@ function Get-SeriesTitleClassification {
 
     # --- 1. play-all / composite ---
     $known = @($items | Where-Object { $null -ne $_.DurationSec })
-    if ($known.Count -ge 3) {
-        $largest = $known | Sort-Object DurationSec -Descending | Select-Object -First 1
-        $sumOthers = ($known | Where-Object { $_ -ne $largest } | Measure-Object -Property DurationSec -Sum).Sum
+    foreach ($group in @($known | Group-Object { "$($Groups[$_.Name])" })) {
+        $members = @($group.Group)
+        if ($members.Count -lt 3) { continue }
+        $largest = $members | Sort-Object DurationSec -Descending | Select-Object -First 1
+        $sumOthers = ($members | Where-Object { $_ -ne $largest } | Measure-Object -Property DurationSec -Sum).Sum
         if ($largest.DurationSec -ge ($sumOthers * 0.7) -and $largest.DurationSec -le ($sumOthers * 1.3)) {
             $largest.Kind = 'Extra'
             $largest.Note = 'play-all / composite (about the sum of the others)'
@@ -692,18 +699,16 @@ function Invoke-SeriesEpisodeRename {
         # names, then stop - no prompt, no manifest, no undo script, no file touched.
         # The returned Plan is what an apply run would do.
         [switch]$DryRun,
-        # Only files whose NAME this accepts are renamed (rename-series.ps1: several discs'
-        # files sharing one folder, grouped by a "Disc N" token in the file name). Files
-        # already in final shape still reserve their numbers whatever the filter says.
-        [scriptblock]$FileFilter = $null,
-        # Extra numbers already planned for this folder by an earlier unit in the same run
-        # (a dry run has not renamed them yet), so two units sharing a folder never plan
-        # the same -Extra##.
-        [int[]]$ReservedExtras = @()
+        # File name -> disc number or $null (rename-series.ps1: several discs' files in one
+        # folder, told apart by a "Disc N" token in the name). The folder is still one table
+        # and one classification; this only makes the play-all check run per disc.
+        [scriptblock]$GroupOf = $null
     )
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
-    $videoFiles = @(Get-ChildItem -LiteralPath $Directory -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' } | Sort-Object Name)
+    # Numbers in names compare as numbers, so "Show (2)" comes before "Show (10)".
+    $videoFiles = @(Get-ChildItem -LiteralPath $Directory -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' } |
+        Sort-Object { [regex]::Replace($_.Name, '\d+', { param($m) $m.Value.PadLeft(10, '0') }) })
 
     $takenEpisodes = @()
     $takenExtras = @()
@@ -712,7 +717,7 @@ function Invoke-SeriesEpisodeRename {
         if ($f.Name -match $pattern) {
             if ($Matches['ep']) { $takenEpisodes += [int]$Matches['ep'] } else { $takenExtras += [int]$Matches['extra'] }
         } else {
-            if (-not $FileFilter -or (& $FileFilter $f.Name)) { $candidates += $f }
+            $candidates += $f
         }
     }
     # Extras already moved out by an earlier run keep their numbers: this disc's own
@@ -733,8 +738,6 @@ function Invoke-SeriesEpisodeRename {
         Write-Host "  $($takenEpisodes.Count + $takenExtras.Count) file(s) already renamed - leaving them alone and skipping their numbers" -ForegroundColor Gray
         Write-Log "Series rename: $($takenEpisodes.Count + $takenExtras.Count) file(s) already in final format, left unchanged"
     }
-    # Reserved only now, so the "already renamed" count above stays about real files.
-    $takenExtras += @($ReservedExtras)
     if ($candidates.Count -eq 0) {
         Write-Host "  No files to rename" -ForegroundColor Gray
         Write-Log "Series rename: no files to rename in $Directory"
@@ -774,6 +777,11 @@ function Invoke-SeriesEpisodeRename {
         AllExtras        = [bool]$AllExtras
         DiscDbMap        = $discDbMap
         Season           = $Season
+    }
+    if ($GroupOf) {
+        $groups = @{}
+        foreach ($t in $titles) { $groups[$t.Name] = & $GroupOf $t.Name }
+        $classifyArgs.Groups = $groups
     }
     if ($DryRun) {
         $classification = Get-SeriesTitleClassification @classifyArgs

@@ -19,6 +19,32 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-06 - rename-series.ps1 Fixes (branch `fix/rename-series-folder-classification`)
+
+Fixed three #151 bugs, plus -WhatIf:
+- **One unit per folder.** A Season folder holding files directly is one table and one
+  classification, even when names carry "Disc N" tokens. The FileFilter/ReservedExtras
+  per-disc units are gone. Only the play-all check still runs per disc (`-GroupOf` ->
+  `Get-SeriesTitleClassification -Groups`). Fixes the lone 4:27 extra becoming an episode.
+- **`<Show>-Disc N` folders.** These are now recognised (`Get-DiscFolderNumber`,
+  `Get-SuggestedStartEpisode`). Disc folders beside exactly one Season folder join that
+  season, and season 0 shares S01's numbering.
+- **Numeric sort.** Files are sorted with numbers compared as numbers, so `(2)` comes
+  before `(10)`. This also applies to live rips.
+- **-WhatIf.** `rename-series.ps1` now accepts -WhatIf (`SupportsShouldProcess`), and it
+  always means a dry run.
+
+**Tests:** 472/472 pass (`Test-SeriesRetroRename.ps1` 107).
+
+**Real-file test:** run on the copy `C:\Video\Series\Boys From the Black Stuff`.
+- Apply gave the extra to Specials and E01-E05 across Season 1, -Disc 2 and -Disc 3.
+- Undo fully restored the original names. The copy is left at original names.
+- Still open: the 1:42:26 Disc 1 title becomes E01. It may be the 1980 play, which needs
+  S00/too-long handling (not done).
+- F: not touched. **Before running on F:**, delete the stale `rename-manifest.csv` and
+  `undo-rename.ps1` in `F:\...\Boys From the Black Stuff\Season 1`. If they stay, the
+  apply appends to them, and undo would replay the old rows (manifest-append bug, still open).
+
 ### 2026-10-05 - rename-series.ps1 (PR #151, merged 71a74c0)
 
 `rename-series.ps1` + `SeriesRetroRename.ps1` rename already-ripped series folders to

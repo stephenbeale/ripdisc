@@ -10,8 +10,9 @@
     that already exist (SeriesEpisodes.ps1 does the work; this is the driver).
 
     SAFE BY DEFAULT: without -Apply it only shows the plan for every folder and changes
-    nothing. With -Apply, each folder shows its table and asks (Enter accepts, n leaves the
-    folder alone, e edits episode/extra); -Yes accepts every table without asking.
+    nothing (-WhatIf means the same dry run, even alongside -Apply). With -Apply, each
+    folder shows its table and asks (Enter accepts, n leaves the folder alone, e edits
+    episode/extra); -Yes accepts every table without asking.
     Before any file in a folder moves, rename-manifest.csv (OriginalName, NewName, Kind,
     OriginalPath, NewPath, Timestamp) is written there and undo-rename.ps1 is copied next
     to it, so the original file names are always recoverable. Nothing is ever overwritten,
@@ -25,7 +26,8 @@
     classification uses TMDb (if a key is configured) or title lengths.
 
 .PARAMETER Path
-    A series folder (<root>\Silicon Valley), one Season folder, or one DiscN folder.
+    A series folder (<root>\Silicon Valley), one Season folder, or one DiscN folder
+    ("Disc 2" and "<Title>-Disc 2" folders are recognised too).
 
 .PARAMETER Title
     Series title used in the new names. Default: the series folder's name.
@@ -55,7 +57,7 @@
 .EXAMPLE
     .\rename-series.ps1 "F:\Series\Silicon Valley\Season 3\Disc2" -StartEpisode 6 -Apply
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory, Position = 0)]
     [string]$Path,
@@ -70,6 +72,11 @@ param(
 if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
     Write-Error "Folder not found: $Path"
     exit 1
+}
+if ($WhatIfPreference) {
+    # -WhatIf is the dry run this script already does without -Apply.
+    if ($Apply) { Write-Host "-WhatIf given: dry run only, -Apply ignored." -ForegroundColor Yellow }
+    $Apply = $false
 }
 if ($Yes -and -not $Apply) {
     Write-Host "Note: -Yes only matters with -Apply; this is a dry run." -ForegroundColor DarkGray
