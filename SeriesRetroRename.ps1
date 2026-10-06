@@ -4,7 +4,7 @@
 # Dot-sourced by rename-series.ps1 AFTER SeriesEpisodes.ps1. It adds no naming, no
 # classification and no manifest logic of its own: every folder goes through the same
 # Invoke-SeriesEpisodeRename a live -Series rip uses (episode vs extra criteria, TMDb
-# runtimes, <Title>-S##-E## / extras\<Title>-S##-Extra## names, the confirmation table,
+# runtimes, <Title>-S##-E## / Specials\<Title>-S##-D#-Extra## names, the confirmation table,
 # rename-manifest.csv written BEFORE any file moves, undo-rename.ps1 copied next to it,
 # never overwriting). This file only works out WHICH folders to run it on, in what order,
 # and where each folder's episode numbering starts.
@@ -38,8 +38,8 @@ function Get-DiscNumberFromFileName {
 }
 
 # Finds the folders to process. Only season / Disc folders become units, so a folder
-# named "extras" (already-moved extras) is never treated as one and its files are never
-# renamed here.
+# named "Specials" or "extras" (already-moved extras) is never treated as one and its
+# files are never renamed here.
 #
 # A season folder with no Disc subfolders holds its files directly. When their names carry
 # a "Disc N" token (older rips put several discs in one folder), each disc becomes its own

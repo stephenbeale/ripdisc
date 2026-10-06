@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-05 (continued) - Series Extras Move to `<Series>\Specials\`
+
+### Changed
+- Plain `-Series` extras (live rip, `continue-rip.ps1` and `rename-series.ps1`) now go to one `Specials` folder at series level, beside the `Season N` folders, instead of `DiscN\extras\`. Jellyfin ignored the nested `DiscN\extras\` (checked on Silicon Valley S03); a series-level `Specials` folder is read as Season 00.
+- Extras are named `<Title>-S##-D#-Extra##[-<TheDiscDB name>]` - the disc part keeps per-disc `Extra##` numbers apart in the shared folder. A Season folder holding files directly (no DiscN) gets no `-D#` part.
+- The manifest stays in the Disc folder; an extra's `NewName` is `..\..\Specials\<name>` (`..\Specials\<name>` with no Season or DiscN level), and `NewPath` is the folded full path. Columns unchanged.
+- `undo-rename.ps1` accepts exactly those Specials paths plus the old `extras\<name>`, and removes Specials / extras only when emptied (another disc's extras keep Specials in place).
+- Already-renamed detection accepts the `-D#-` part; a re-run reserves this disc's numbers from Specials and any numbers in a PR #143-era `DiscN\extras\`.
+
+**Testing status:** full PowerShell suite 411/411 (`Test-SeriesEpisodeRename` 121, `Test-SeriesRetroRename` 46, `Test-TheDiscDbLookup` 79). **Not run against a real rip.** Existing `DiscN\extras\` folders are not migrated.
+
 ## 2026-10-05 - Standalone Series Rename Utility (`rename-series.ps1`)
 
 ### Added

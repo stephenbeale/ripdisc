@@ -34,10 +34,11 @@ Requirements:
   (TMDb) into the new names, and handle folders that were renamed earlier by hand/other tools with no
   manifest (record a manifest from current names so a future undo is possible).
 
-## Feature - Classify extras and move them to an `extras` subfolder as part of the series rename (added 2026-10-04)
+## Feature - Classify extras and move them out as part of the series rename (added 2026-10-04)
 Part of the standalone utility above: while renaming a series folder, classify each file as episode or
-extra using the criteria ALREADY in place, then move extras into the `extras` sub-dir using the
-existing move logic, so a retroactive rename ends up laid out exactly as a fresh `-Series` rip.
+extra using the criteria ALREADY in place, then move extras out using the existing move logic, so a
+retroactive rename ends up laid out exactly as a fresh `-Series` rip. Since 2026-10-05 extras go to
+the series-level `Specials` folder, not `DiscN\extras\`; the notes below describe the PR #143 design.
 
 Reuse (no new criteria):
 - Classification: `Get-SeriesTitleClassification` in `SeriesEpisodes.ps1` (play-all/composite 70-130%
@@ -53,19 +54,21 @@ Reuse (no new criteria):
 
 ## Backlog / Open Items (added 2026-10-04, after PRs #140/#142/#143)
 
-### Real-disc end-to-end test of series naming (#140/#142/#143) - not yet done
-Rip Disc 1 then Disc 2 of a real series season and check, against actual hardware/APIs rather
-than fixtures: the Disc 2+ start-episode prompt, extras detection, a live TMDb lookup, and a real
-TheDiscDB hash match - ideally a Blu-ray likely to already be in TheDiscDB's catalogue (ripped with
-`-Drive X:` so the hash can actually be computed; see the TheDiscDB section of the README for why
-`-DriveIndex` alone skips it). None of PRs #140/#142/#143 have been exercised against a real rip -
-only AST-extracted logic tests and fixtures so far.
+### Real-disc end-to-end test of series naming (#140/#142/#143) - PARTLY DONE 2026-10-05
+The user confirmed `S##-E##` episode renaming works on a real disc (Silicon Valley). Still
+unconfirmed against real hardware/APIs: the Disc 2+ start-episode prompt, extras detection, a live
+TMDb lookup, and a real TheDiscDB hash match - ideally a Blu-ray likely to already be in TheDiscDB's
+catalogue (ripped with `-Drive X:` so the hash can actually be computed; see the TheDiscDB section of
+the README for why `-DriveIndex` alone skips it). The new `<Series>\Specials\` extras location
+(below) also needs a real rip.
 
-### Confirm Jellyfin recognises `DiscN\extras\` as extras under a non-season folder
-PR #143 moved series extras into `DiscN\extras\` (per disc, same lowercase folder name movie mode
-uses). Jellyfin's handling of an `extras\` folder nested under a plain `DiscN` folder (not a
-`Season N` folder) has not been verified - confirm it's picked up as extras rather than ignored or
-miscategorised.
+### Jellyfin and series extras - DONE 2026-10-05 (moved to `<Series>\Specials\`)
+Jellyfin did NOT pick up PR #143's `DiscN\extras\` (checked on Silicon Valley S03). Jellyfin's docs
+only recognise extras folders at series or season level. The user decided that series extras go in a
+`Specials` folder at series level, beside the `Season N` folders (Jellyfin treats it as Season 00),
+named `<Title>-S##-D#-Extra##` so discs sharing the folder never collide. Still to check: how Jellyfin
+lists `-S##-D#-Extra##` files inside Specials (as specials with no TMDb match), and moving extras
+already sitting in old `DiscN\extras\` folders (the user moved Silicon Valley S03's by hand).
 
 ### Deferred: port series naming to the C# `RipDisc -processQueue` / `-Queue` path
 The C# queue processor still has none of the `S##-E##` renaming, extras detection, TheDiscDB

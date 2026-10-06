@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Renames series episodes that are ALREADY ripped on disk to <Title>-S##-E##, moving
-    extras into DiscN\extras, with a manifest and undo script for every folder.
+    extras into the series-level Specials folder, with a manifest and undo script for every folder.
 
 .DESCRIPTION
     The retroactive twin of a live `rip-disc.ps1 -Series` rip: same naming, same episode vs
