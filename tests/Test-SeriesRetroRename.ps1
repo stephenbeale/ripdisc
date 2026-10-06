@@ -267,12 +267,13 @@ try {
     $d2plan = @($s.Results[2].Result.Plan)
     Assert-Equal 7 $d1plan.Count 'Series 2 Disc 1 unit takes only the 7 "Disc 1" files'
     Assert-Equal 1 $d2plan.Count 'Series 2 Disc 2 unit takes only the "Disc 2" file'
-    Assert-Equal 'extras\Joking Apart-S02-Extra01.mp4' (($d1plan | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the 5-minute Disc 1 title is planned as an extra'
+    Assert-Equal '..\Specials\Joking Apart-S02-Extra01.mp4' (($d1plan | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the 5-minute Disc 1 title is planned as an extra'
     Assert-Equal 'Joking Apart-S02-E07.mp4' $d2plan[0].NewName 'Disc 2 continues numbering after Disc 1 (E07)'
 
     # Apply
     $s = Invoke-SeriesRetroRename -Root $ja -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
-    Assert-Equal 'extras\Joking Apart-S02-Extra01.mp4,Joking Apart-S02-E01.mp4,Joking Apart-S02-E02.mp4,Joking Apart-S02-E03.mp4,Joking Apart-S02-E04.mp4,Joking Apart-S02-E05.mp4,Joking Apart-S02-E06.mp4,Joking Apart-S02-E07.mp4' (Get-RelNames $ja2) 'apply: Series 2 episodes E01-E07 across both discs, extra moved to extras\'
+    Assert-Equal 'Joking Apart-S02-E01.mp4,Joking Apart-S02-E02.mp4,Joking Apart-S02-E03.mp4,Joking Apart-S02-E04.mp4,Joking Apart-S02-E05.mp4,Joking Apart-S02-E06.mp4,Joking Apart-S02-E07.mp4' (Get-RelNames $ja2) 'apply: Series 2 episodes E01-E07 across both discs, extra moved to extras\'
+    Assert-Equal 'Joking Apart-S02-Extra01.mp4' (Get-RelNames (Join-Path $ja 'Specials')) 'apply: the Series 2 extra moved to the series-level Specials folder, beside the season folders'
     Assert-True (Test-Path -LiteralPath (Join-Path $ja1 'extras\Joking Apart-Series 1-B1_t05.mp4')) 'apply: the pre-existing extras file is left exactly where it was, under its old name'
     $rows = @(Import-Csv -LiteralPath (Join-Path $ja2 'rename-manifest.csv'))
     Assert-Equal 8 $rows.Count 'two units in one folder: ONE manifest holding both units rows (appended, not clobbered)'
@@ -299,7 +300,7 @@ try {
     $s = Invoke-SeriesRetroRename -Root $x -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     $xe1 = @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.NewName }) -join ','
     $xe2 = @($s.Results[1].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.NewName }) -join ','
-    Assert-Equal 'extras\Xtra-S01-Extra01.mkv|extras\Xtra-S01-Extra02.mkv' "$xe1|$xe2" 'dry run: Disc 2 plans Extra02, not a second Extra01'
+    Assert-Equal '..\Specials\Xtra-S01-Extra01.mkv|..\Specials\Xtra-S01-Extra02.mkv' "$xe1|$xe2" 'dry run: Disc 2 plans Extra02, not a second Extra01'
 
     $r = Join-Path $tempRoot 'Resume\Resume-Series 1'
     New-DiscFolder $r @{ 'Resume-S01-E01.mkv' = 30; 'Resume-S01-E02.mkv' = 30; 'Resume-Series 1 Disc 2-B_t00.mkv' = 30 }

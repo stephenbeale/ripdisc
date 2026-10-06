@@ -32,8 +32,9 @@ function Get-SeriesSpecialsRelativeDir {
     param([string]$Directory)
     $dir = $Directory.TrimEnd('\', '/')
     $ups = 0
-    if ((Split-Path $dir -Leaf) -match '^Disc\d+$') { $dir = Split-Path $dir -Parent; $ups++ }
-    if ($dir -and (Split-Path $dir -Leaf) -match '^Season\s+\d+$') { $ups++ }
+    if ((Split-Path $dir -Leaf) -match '^Disc\s*\d+$') { $dir = Split-Path $dir -Parent; $ups++ }
+    # Same season-folder forms rename-series.ps1 accepts: Season 2, Series 1, <Title>-Series 1.
+    if ($dir -and (Split-Path $dir -Leaf) -match '(?i)(?:^|[\s\-_.])(?:series|season)\s*\d+$') { $ups++ }
     $prefix = ('..\' * $ups)
     return "$prefix$($script:SeriesExtrasFolder)"
 }
@@ -42,7 +43,7 @@ function Get-SeriesSpecialsRelativeDir {
 # folder that holds the files itself) - the name then has no -D# part.
 function Get-SeriesDiscFromDirectory {
     param([string]$Directory)
-    if ((Split-Path $Directory.TrimEnd('\', '/') -Leaf) -match '^Disc(\d+)$') { return [int]$Matches[1] }
+    if ((Split-Path $Directory.TrimEnd('\', '/') -Leaf) -match '^Disc\s*(\d+)$') { return [int]$Matches[1] }
     return 0
 }
 
