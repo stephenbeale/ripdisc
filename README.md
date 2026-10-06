@@ -269,7 +269,7 @@ At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` fo
   reads a series-level `Season 0` folder as Season 00 (so the name was changed from `Season 0` on 2026-10-06). Because the folder is shared and extras are
   numbered per disc, an extra's name carries its season and disc (`-S02-D1-Extra01`), so two discs'
   `Extra01` never collide. The folder is only created when there are extras. Extras a pre-2026-10-05 run
-  left in `DiscN\extras\`, or in `<Series>\Season 0`'s earlier name `Specials\` (2026-10-05 runs), still keep their numbers and can still be undone. Existing `Specials` folders are not moved automatically; rename them to `Season 0` by hand if you want them in one place.
+  left in `DiscN\extras\`, or in `<Series>\Specials\` (the earlier name of `Season 0`, 2026-10-05 runs), still keep their numbers and can still be undone. Existing `Specials` folders are not moved automatically; rename them to `Season 0` by hand if you want them in one place.
 - **No `-season`** - the tag falls back to `S01` (`Fargo-S01-E01.mp4`); the folder layout is unchanged (no Season folder).
 - **Numbering** starts at `-startEpisode` (default 1) and runs in MakeMKV title order. It does not
   continue across discs on its own: for Disc 2+ without `-startEpisode` you are asked for the starting
@@ -706,11 +706,60 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 ## Additional Tools
 
 - **series-cleanup.ps1** - Utility for cleaning up series naming
-- **rename-series.ps1** - Renames series that are ALREADY ripped on disk (retroactive twin of the `-Series` rip naming): `.\rename-series.ps1 "F:\Series\Silicon Valley"` previews every Season/Disc folder and changes nothing; add `-Apply` to rename (each folder asks first, `-Yes` accepts all). Also understands older layouts (`Series 1`/`Season 1`/`<Title>-Series 1` folders, `Disc 1` with a space, several discs in one folder told apart by `Disc N` in the file names). Same names, episode/extra detection and series-level `Season 0` folder as a live rip; every folder gets `rename-manifest.csv` + `undo-rename.ps1` BEFORE anything moves; never overwrites; numbering continues across discs (`-StartEpisode N` if the first disc isn't E01). TheDiscDB is not used (needs the physical disc's hash) - TMDb runtimes or title lengths decide episode vs extra. See `Get-Help .\rename-series.ps1 -Full`
+- **rename-series.ps1** - Renames series that are ALREADY ripped on disk; dry run by default, `-Apply` to rename. Full usage in [rename-series.ps1](#rename-seriesps1-rename-series-already-ripped-on-disk) below.
 - **continue-rip.ps1** - Resume failed rips from a specific step
 - **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
 - **SeriesRetroRename.ps1** - Folder discovery and numbering across discs for `rename-series.ps1`, dot-sourced, not run directly
 - **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
+
+### rename-series.ps1 (rename series already ripped on disk)
+
+The retroactive twin of the `-Series` rip naming. Point it at a series folder, a Season folder or a single
+Disc folder. It uses the same names, episode/extra detection and series-level `Season 0` folder as a live rip.
+TheDiscDB is not used (it needs the physical disc's hash); TMDb runtimes (or, without a key, title lengths)
+decide episode vs extra.
+
+```powershell
+.\rename-series.ps1 "F:\Series\Silicon Valley"            # dry run (default): prints each folder's plan, changes nothing
+.\rename-series.ps1 "F:\Series\Silicon Valley" -WhatIf    # also a dry run, always
+.\rename-series.ps1 "F:\Series\Silicon Valley" -Apply     # asks per folder before renaming
+.\rename-series.ps1 "F:\Series\Silicon Valley" -Apply -Yes   # accepts every folder's plan without asking
+```
+
+- **`-StartEpisode N`** - episode number for the first folder of each season. An explicit value always wins,
+  even over the start suggested from earlier discs. Without it, numbering continues across discs.
+- **`-MarkSpecial` / `-MarkExtra` / `-MarkEpisode`** - force matching files (wildcards on the ORIGINAL file
+  names) to a kind. Specials become `<Title>-S00-E##` in `Season 0`; extras become
+  `<Title>-S##-Extra##` (or `-D#-Extra##`) in `Season 0`; episodes stay `S##-E##`.
+- **Prompt edit codes** - at a folder's confirmation prompt, Enter accepts, `n` declines (so does end-of-input),
+  `e` edits. In the edit, enter a row number followed by a code: `2s` = special, `2x` = extra, `2e` = episode.
+- **Flagged, not converted** - a title at least 1.6x the expected length is flagged "a special?" but stays an
+  episode, because double episodes look the same by length. Use `-MarkSpecial` or `2s` to move it.
+- **`Season 0` folder** - extras and specials of all seasons go to one `<Series>\Season 0\` folder, which
+  Jellyfin reads as Season 00. It is never itself treated as a season to rename.
+- **Layouts understood** - `Series N`, `Season N`, `<Title>-Series N`, `Disc N` (with a space), `<Show>-Disc N`
+  folders beside a Season folder (they join that season), and several discs in one folder told apart by
+  `Disc N` in the file names. Files sort numerically (`(2)` before `(10)`).
+- **Manifest and undo** - every folder gets `rename-manifest.csv` + `undo-rename.ps1` BEFORE anything moves;
+  nothing is overwritten. Running a folder's `undo-rename.ps1` reverses it, and when every row was undone the
+  manifest is retired as `rename-manifest.undone-<stamp>[-n].csv`, so the next apply starts a fresh manifest
+  instead of replaying old rows. Undo still accepts manifests recorded with `Specials\` or `DiscN\extras\` paths.
+
+**Example: Boys From the Black Stuff (2026-10-06).** Disc 1 sat in `Season 1` with the 1980 Play for Today
+"The Black Stuff" (1:42:26) and a 4:27 extra; Discs 2 and 3 were in `Boys from the Black Stuff-Disc 2` and
+`-Disc 3`. Episode 3 had never been ripped, so Disc 3 starts at E04.
+
+```powershell
+$s = "F:\Series\Boys From the Black Stuff"
+# Disc 1: the long title is a special (S00-E01); the 4:27 title is detected as an extra
+.\rename-series.ps1 "$s\Season 1" -MarkSpecial "*Disc 1 - E01*" -Apply
+.\rename-series.ps1 "$s\Boys from the Black Stuff-Disc 2" -StartEpisode 1 -Apply   # S01-E01, E02
+.\rename-series.ps1 "$s\Boys from the Black Stuff-Disc 3" -StartEpisode 4 -Apply   # S01-E04, E05
+# Always run each without -Apply first to check the plan. Re-rip E03 later with -StartEpisode 3.
+```
+
+Result: `Season 0\Boys From the Black Stuff-S00-E01.mp4` and `...-S01-Extra01.mp4`; episodes renamed in their
+folders (moving them into `Season 1` is a separate manual step). See `Get-Help .\rename-series.ps1 -Full`.
 
 ## Project Structure
 
