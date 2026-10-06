@@ -45,6 +45,29 @@ Fixed three #151 bugs, plus -WhatIf:
   `undo-rename.ps1` in `F:\...\Boys From the Black Stuff\Season 1`. If they stay, the
   apply appends to them, and undo would replay the old rows (manifest-append bug, still open).
 
+**Added later the same day (also on PR #153), 491/491 tests pass (`Test-SeriesRetroRename.ps1` 126):**
+1. **Specials (S00).** New Kind `Special`, named `<Title>-S00-E##` in the series-level
+   `Specials` folder. Numbering skips existing S00 files and specials already planned by
+   earlier folders in the same run. A title at least 1.6x the expected length (TMDb runtime,
+   else the median) is FLAGGED "a special?" but stays an episode, because double episodes
+   look the same by length. To make a special: `rename-series.ps1 -MarkSpecial`, `-MarkExtra`
+   or `-MarkEpisode` (wildcards on original names), or the prompt's edit option, which takes
+   `2s` / `2x` / `2e`. `Get-SuggestedStartEpisode` ignores Special rows.
+2. **Explicit `-StartEpisode` wins** for the first folder of each season, even over the
+   start suggested from earlier discs.
+3. **Manifest-after-undo fixed.** When `undo-rename.ps1` undoes every row it renames the
+   manifest to `rename-manifest.undone-<stamp>[-n].csv`, so the next apply starts fresh.
+4. **EOF at the confirmation prompt now declines** (it used to accept).
+
+**Next (F: Boys From the Black Stuff, once #153 merges; dry-run each first):**
+1. Rename the stale `Season 1\rename-manifest.csv` to `rename-manifest.undone-old.csv` (keep it).
+2. `.\rename-series.ps1 "F:\Series\Boys From the Black Stuff\Season 1" -MarkSpecial "*Disc 1 - E01*" -Apply`
+   (the 1:42:26 title is "The Black Stuff", 1980 Play for Today, so S00-E01; the 4:27 `B1_T00-1.mp4` is an extra).
+3. `... "...\Boys from the Black Stuff-Disc 2" -StartEpisode 1 -Apply`
+4. `... "...\Boys from the Black Stuff-Disc 3" -StartEpisode 4 -Apply`
+- E03 "Shop Thy Neighbour" (60 min) was never ripped; re-rip it. Runtimes: E1 54, E2 57, E3 60, E4 68, E5 68.
+- TMDb key is not set, so detection is length-only.
+
 ### 2026-10-05 - rename-series.ps1 (PR #151, merged 71a74c0)
 
 `rename-series.ps1` + `SeriesRetroRename.ps1` rename already-ripped series folders to

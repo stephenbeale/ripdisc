@@ -163,11 +163,18 @@ try {
     Assert-Equal $before1 (Get-RelNames $d1) 'undo: Disc1 back to original names (extra moved back from Specials)'
     Assert-Equal $before2 (Get-RelNames $d2) 'undo: Disc2 back to original names'
     Assert-True (-not (Test-Path (Join-Path $show 'Specials'))) 'undo: emptied Specials folder removed'
+    Assert-True (-not (Test-Path (Join-Path $d1 'rename-manifest.csv'))) 'undo: a fully undone manifest is retired, so the next rename starts a fresh one'
+    Assert-Equal 1 @(Get-ChildItem -LiteralPath $d1 -Filter 'rename-manifest.undone-*.csv').Count 'undo: ...and kept as rename-manifest.undone-<timestamp>.csv'
+
+    # Re-apply after undo: the new manifest holds only the new rows (no stale ones to replay).
+    $null = Invoke-SeriesRetroRename -Root $d1 -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1
+    Assert-Equal 4 @(Import-Csv -LiteralPath (Join-Path $d1 'rename-manifest.csv')).Count 're-apply after undo: fresh manifest with only this run''s 4 rows'
+    & (Join-Path $d1 'undo-rename.ps1') *> $null
+    Assert-Equal $before1 (Get-RelNames $d1) 're-apply then undo: original names again'
 
     # ---------------------------------------------------------------------------
     Write-Host "`nDeclining leaves a folder alone; a single Disc2 can continue from renamed Disc1" -ForegroundColor Cyan
 
-    Remove-Item (Join-Path $d1 'rename-manifest.csv'), (Join-Path $d2 'rename-manifest.csv') -Force
     $answers = New-Object System.Collections.Queue
     'n' | ForEach-Object { $answers.Enqueue($_) }
     $readNo = { param($p) if ($answers.Count -gt 0) { $answers.Dequeue() } else { $null } }.GetNewClosure()
@@ -289,13 +296,11 @@ try {
     Assert-Equal $beforeJa2 (Get-RelNames $ja2) 'rename-series.ps1 dry run as a script: nothing renamed'
 
     # -WhatIf is accepted (users expect it, as undo-rename.ps1 has it) and always means dry run.
-    # (the manifest left behind by the undo above must not grow)
-    $manifestBefore = (Get-Content (Join-Path $ja2 'rename-manifest.csv')).Count
     $cliOut = powershell.exe -NoProfile -File (Join-Path $repoRoot 'rename-series.ps1') $ja -NoTmdb -Apply -Yes -WhatIf *>&1 | Out-String
     Assert-True ($cliOut -notmatch 'parameter cannot be found') 'rename-series.ps1 accepts -WhatIf'
     Assert-True ($cliOut -match 'DRY RUN') '-WhatIf with -Apply still runs as a dry run'
     Assert-Equal $beforeJa2 (Get-RelNames $ja2) '-WhatIf -Apply -Yes: nothing renamed'
-    Assert-Equal $manifestBefore (Get-Content (Join-Path $ja2 'rename-manifest.csv')).Count '-WhatIf -Apply -Yes: manifest not written to'
+    Assert-True (-not (Test-Path (Join-Path $ja2 'rename-manifest.csv'))) '-WhatIf -Apply -Yes: no manifest written'
 
     # Two units sharing a folder never plan the same Extra number, and a later run continues
     $x = Join-Path $tempRoot 'Xtra\Xtra-Series 1'
@@ -361,6 +366,66 @@ try {
     $paExtras = @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.OriginalName }) -join ','
     Assert-Equal 'P-Series 1 Disc 1-t03.mkv,P-Series 1 Disc 2-t03.mkv' $paExtras 'each disc has its own play-all, and both are extras (neither is the sum of the whole folder)'
     Assert-Equal 6 @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Episode' }).Count 'the six 30-minute titles are episodes'
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nSpecials (S00): flagged when much too long, made only on request" -ForegroundColor Cyan
+
+    $sp = Join-Path $tempRoot 'Black Stuff'
+    $sp1 = Join-Path $sp 'Season 1'
+    $sp2 = Join-Path $sp 'Black Stuff-Disc 2'
+    $sp3 = Join-Path $sp 'Black Stuff-Disc 3'
+    New-DiscFolder $sp1 @{ 'B1_T00-1.mp4' = 4.4; 'Black Stuff-Disc 1 - E01.mp4' = 102 }
+    New-DiscFolder $sp2 @{ 'Black Stuff-Disc 2 - E01.mp4' = 54; 'Black Stuff-Disc 2 - E02.mp4' = 57 }
+    New-DiscFolder $sp3 @{ 'Black Stuff-Disc 3 - E01.mp4' = 68; 'Black Stuff-Disc 3 - E02.mp4' = 68 }
+    $beforeSp1 = Get-RelNames $sp1
+
+    $s = Invoke-SeriesRetroRename -Root $sp1 -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    $long = @($s.Results[0].Result.Plan | Where-Object { $_.OriginalName -like '*Disc 1*' })[0]
+    Assert-Equal 'Episode' $long.Kind 'a much-too-long title is NOT made a special on its own (a double episode looks the same)'
+    Assert-True ($long.Note -match 'special\?') '...but its note asks whether it is a special'
+
+    $s = Invoke-SeriesRetroRename -Root $sp -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    $p1 = @($s.Results[0].Result.Plan)
+    Assert-Equal '..\Specials\Black Stuff-S00-E01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Special' }).NewName) '-MarkKinds Special: <Title>-S00-E01 in the series Specials folder'
+    Assert-Equal '..\Specials\Black Stuff-S01-Extra01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the short title is still an extra'
+    Assert-Equal 'Black Stuff-S01-E01.mp4,Black Stuff-S01-E02.mp4' (@($s.Results[1].Result.Plan | ForEach-Object { $_.NewName }) -join ',') 'a special uses no episode number: Disc 2 starts at E01'
+
+    # An episode missing from the rip: -StartEpisode on the folder after the gap wins over the suggestion.
+    $s = Invoke-SeriesRetroRename -Root $sp3 -NoTmdb -StartEpisode 4 -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 'Black Stuff-S01-E04.mp4,Black Stuff-S01-E05.mp4' (@($s.Results[0].Result.Plan | ForEach-Object { $_.NewName }) -join ',') '-StartEpisode 4 on a lone Disc 3 wins (E03 was never ripped)'
+
+    # Apply the special, check undo brings it back and retires the manifest.
+    $null = Invoke-SeriesRetroRename -Root $sp1 -Apply -Yes -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1
+    Assert-Equal 'Black Stuff-S00-E01.mp4,Black Stuff-S01-Extra01.mp4' (Get-RelNames (Join-Path $sp 'Specials')) 'apply: special and extra both in Specials'
+    Assert-Equal 'Special' (@(Import-Csv -LiteralPath (Join-Path $sp1 'rename-manifest.csv') | Where-Object { $_.NewName -like '*S00-E01*' })[0].Kind) 'manifest records Kind Special'
+    $s = Invoke-SeriesRetroRename -Root $sp2 -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 'Black Stuff-S01-E01.mp4' (@($s.Results[0].Result.Plan)[0].NewName) 'a renamed special is not counted as an earlier episode'
+    & (Join-Path $sp1 'undo-rename.ps1') *> $null
+    Assert-Equal $beforeSp1 (Get-RelNames $sp1) 'undo: special and extra back under their original names'
+
+    # A second special in the same Specials folder takes S00-E02.
+    New-Item -ItemType Directory -Path (Join-Path $sp 'Specials') -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $sp 'Specials\Black Stuff-S00-E01.mp4') | Out-Null
+    $s = Invoke-SeriesRetroRename -Root $sp1 -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal '..\Specials\Black Stuff-S00-E02.mp4' ((@($s.Results[0].Result.Plan) | Where-Object { $_.Kind -eq 'Special' }).NewName) 'an existing S00-E01 in Specials pushes the new special to S00-E02'
+    Remove-Item -LiteralPath (Join-Path $sp 'Specials') -Recurse -Force
+
+    # Edit at the prompt: "e" then "2s" makes row 2 a special.
+    $answers = New-Object System.Collections.Queue
+    'e', '2s', 'y' | ForEach-Object { $answers.Enqueue($_) }
+    $readEdit = { param($p) if ($answers.Count -gt 0) { $answers.Dequeue() } else { $null } }.GetNewClosure()
+    $null = Invoke-SeriesRetroRename -Root $sp1 -Apply -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath -ReadInput $readEdit 6>&1
+    Assert-True (Test-Path -LiteralPath (Join-Path $sp 'Specials\Black Stuff-S00-E01.mp4')) 'prompt edit "2s": row 2 renamed as special S00-E01'
+    & (Join-Path $sp1 'undo-rename.ps1') *> $null
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nNo answer (end of input) at the prompt renames nothing" -ForegroundColor Cyan
+
+    $readEof = { param($p) $null }
+    $s = Invoke-SeriesRetroRename -Root $sp2 -Apply -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath -ReadInput $readEof 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 1 $s.Declined 'end of input declines the folder'
+    Assert-Equal 0 $s.Renamed 'end of input: nothing renamed'
+    Assert-True (-not (Test-Path (Join-Path $sp2 'rename-manifest.csv'))) 'end of input: no manifest written'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

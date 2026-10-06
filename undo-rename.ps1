@@ -21,6 +21,9 @@
       - a file is never renamed over an existing file - name collisions are skipped
       - rows are undone newest-first
       - -WhatIf shows what would happen without touching anything
+      - when every row is undone, the manifest is renamed to
+        rename-manifest.undone-<timestamp>.csv, so it is kept as a record but a later
+        rename starts a fresh manifest (instead of appending to one already undone)
 
 .PARAMETER ManifestPath
     Path to rename-manifest.csv. Defaults to the one next to this script.
@@ -105,6 +108,17 @@ foreach ($extrasDir in $extrasDirs.Keys) {
         -not (Get-ChildItem -LiteralPath $extrasDir -Force | Select-Object -First 1)) {
         Remove-Item -LiteralPath $extrasDir -ErrorAction SilentlyContinue
     }
+}
+
+# Fully undone: retire the manifest (kept as a record) so the next rename in this folder
+# writes a fresh one rather than appending to rows that no longer apply.
+if (-not $WhatIfPreference -and $skipped -eq 0 -and $restored -gt 0) {
+    # Never reuse a name: two undos in the same second (re-apply, undo again) must both be kept.
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $retired = "rename-manifest.undone-$stamp.csv"
+    for ($n = 2; Test-Path -LiteralPath (Join-Path $manifestDir $retired); $n++) { $retired = "rename-manifest.undone-$stamp-$n.csv" }
+    Rename-Item -LiteralPath $ManifestPath -NewName $retired -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { Write-Host "  Manifest kept as $retired" -ForegroundColor Gray }
 }
 
 Write-Host "Undo complete: $restored restored, $skipped skipped$(if ($WhatIfPreference) { ' (WhatIf - nothing changed)' })" -ForegroundColor $(if ($skipped) { 'Yellow' } else { 'Green' })

@@ -39,6 +39,18 @@
     First episode number for the first folder of each season (default 1). Later discs
     continue automatically.
 
+.PARAMETER MarkSpecial
+    File name wildcard(s), matched against the ORIGINAL names, to make specials
+    (<Title>-S00-E##, in the series Specials folder), whatever their length says.
+    Titles 1.6x longer than expected are flagged as possible specials, but only this
+    (or the prompt's edit, 2s) makes one.
+
+.PARAMETER MarkExtra
+    File name wildcard(s) to make extras, whatever their length says.
+
+.PARAMETER MarkEpisode
+    File name wildcard(s) to make episodes, whatever their length says.
+
 .PARAMETER Apply
     Actually rename. Without it, dry run only.
 
@@ -56,6 +68,9 @@
 
 .EXAMPLE
     .\rename-series.ps1 "F:\Series\Silicon Valley\Season 3\Disc2" -StartEpisode 6 -Apply
+
+.EXAMPLE
+    .\rename-series.ps1 "F:\Series\Boys from the Black Stuff\Season 1" -MarkSpecial "*Disc 1 - E01*" -Apply
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -66,7 +81,10 @@ param(
     [int]$StartEpisode = 0,
     [switch]$Apply,
     [switch]$Yes,
-    [switch]$NoTmdb
+    [switch]$NoTmdb,
+    [string[]]$MarkSpecial = @(),
+    [string[]]$MarkExtra = @(),
+    [string[]]$MarkEpisode = @()
 )
 
 if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
@@ -92,8 +110,13 @@ function Write-Log {
     if ($Apply) { Add-Content -LiteralPath $script:LogFile -Value ("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) }
 }
 
+$markKinds = @{}
+foreach ($m in $MarkEpisode) { $markKinds[$m] = 'Episode' }
+foreach ($m in $MarkExtra) { $markKinds[$m] = 'Extra' }
+foreach ($m in $MarkSpecial) { $markKinds[$m] = 'Special' }
+
 $summary = Invoke-SeriesRetroRename -Root $Path -Title $Title -Season $Season -StartEpisode $StartEpisode `
-    -Apply:$Apply -Yes:$Yes -NoTmdb:$NoTmdb `
+    -Apply:$Apply -Yes:$Yes -NoTmdb:$NoTmdb -MarkKinds $markKinds `
     -HandBrakePath $script:Config_HandBrakePath `
     -UndoScriptSource (Join-Path $PSScriptRoot "undo-rename.ps1")
 if ($Apply -and $summary.Units -gt 0) { Write-Host "Log: $script:LogFile" -ForegroundColor Gray }

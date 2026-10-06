@@ -9,6 +9,7 @@
 # Final names (episodes stay in the per-disc DiscN folder):
 #   episodes: <Series>\Season 2\Disc1\<Title>-S02-E05.mkv
 #   extras:   <Series>\Specials\<Title>-S02-D1-Extra01.mkv   (or -Extra01-<TheDiscDB name>)
+#   specials: <Series>\Specials\<Title>-S00-E01.mkv          (feature-length one-offs)
 # With no -Season the season tag falls back to S01.
 #
 # Extras go in ONE "Specials" folder at series level, alongside the Season folders -
@@ -50,6 +51,23 @@ function Get-SeriesDiscFromDirectory {
 # ---------------------------------------------------------------------------
 # Naming
 # ---------------------------------------------------------------------------
+
+# A special: a one-off much longer than the episodes (a pilot film, a Christmas special,
+# the play a series grew out of). Jellyfin reads <Title>-S00-E## in the series-level
+# Specials folder as Season 00, episode ##.
+function Get-SeriesSpecialFileName {
+    param([string]$Title, [int]$Special, [string]$Extension)
+    return "{0}-S00-E{1:D2}{2}" -f $Title, $Special, $Extension
+}
+
+# Special numbers already used in a Specials folder for this title.
+function Get-SeriesTakenSpecials {
+    param([string]$SpecialsDir, [string]$Title)
+    if (-not (Test-Path -LiteralPath $SpecialsDir -PathType Container)) { return @() }
+    $pattern = '^' + [regex]::Escape($Title) + '-S00-E(\d+)\.(?:mp4|mkv)$'
+    return @(Get-ChildItem -LiteralPath $SpecialsDir -File | Where-Object { $_.Name -match $pattern } |
+        ForEach-Object { [int]([regex]::Match($_.Name, $pattern).Groups[1].Value) })
+}
 
 function Get-SeriesSeasonTag {
     param([int]$Season)
@@ -141,7 +159,7 @@ function Get-SuggestedStartEpisode {
         $manifest = Join-Path $dir.FullName 'rename-manifest.csv'
         if (Test-Path -LiteralPath $manifest) {
             try {
-                $names += @(Import-Csv -LiteralPath $manifest | Where-Object { $_.Kind -ne 'Extra' } | ForEach-Object { $_.NewName })
+                $names += @(Import-Csv -LiteralPath $manifest | Where-Object { $_.Kind -notin @('Extra', 'Special') } | ForEach-Object { $_.NewName })
             } catch { }
         }
         foreach ($name in $names) {
@@ -270,6 +288,10 @@ function Get-Median {
 #      episode number. Anything else stays an episode but is flagged as a mismatch.
 #   3. Without TMDb data (no key, no match, offline) or beyond the season's last
 #      episode: the median heuristic - under 60% of the median title length is an extra.
+#   Either way, a title at least 1.6x the expected length (TMDb runtime, else the median)
+#   stays an episode but is flagged as a possible SPECIAL (S00). It is never made one
+#   automatically: a double episode looks the same by length. Specials come only from
+#   the prompt's edit (2s) or rename-series.ps1 -MarkSpecial (-Overrides 'Special').
 #   4. A title with no readable duration stays an episode, flagged.
 #
 # TheDiscDB comes before all of that: -DiscDbMap (OriginalName -> TheDiscDB title, from
@@ -278,7 +300,7 @@ function Get-Median {
 # any file TheDiscDB does not cover skips them. A TheDiscDB episode number that is
 # already taken falls back to the steps above instead of being used twice.
 #
-# -Overrides (OriginalName -> 'Episode'|'Extra') comes from the confirmation prompt's
+# -Overrides (OriginalName -> 'Episode'|'Extra'|'Special') comes from the confirmation prompt's
 # edit option and always wins. Numbers in -TakenEpisodes / -TakenExtras (files already
 # renamed in this folder) are skipped so nothing is numbered twice.
 function Get-SeriesTitleClassification {
@@ -289,6 +311,8 @@ function Get-SeriesTitleClassification {
         [int]$TmdbEpisodeCount = 0,
         [int[]]$TakenEpisodes = @(),
         [int[]]$TakenExtras = @(),
+        # S00 numbers already used in the Specials folder (or planned by an earlier folder).
+        [int[]]$TakenSpecials = @(),
         [hashtable]$Overrides = @{},
         [switch]$AllExtras,
         [hashtable]$DiscDbMap = @{},
@@ -299,6 +323,7 @@ function Get-SeriesTitleClassification {
         # season is still used, but flagged for checking.
         [int]$Season = 0,
         [double]$ShortRatio = 0.6,
+        [double]$LongRatio = 1.6,
         [double]$TolerancePct = 0.15,
         [double]$ToleranceMinSec = 180
     )
@@ -314,6 +339,7 @@ function Get-SeriesTitleClassification {
             Kind          = $null
             EpisodeNumber = $null
             ExtraNumber   = $null
+            SpecialNumber = $null
             ExpectedSec   = $null
             Note          = ""
             Mismatch      = $false
@@ -351,6 +377,8 @@ function Get-SeriesTitleClassification {
     $nextExtra = 1
     $takenEp = @{}; foreach ($n in $TakenEpisodes) { $takenEp[[int]$n] = $true }
     $takenEx = @{}; foreach ($n in $TakenExtras) { $takenEx[[int]$n] = $true }
+    $nextSpecial = 1
+    $takenSp = @{}; foreach ($n in $TakenSpecials) { $takenSp[[int]$n] = $true }
 
     # --- 0. TheDiscDB episode numbers, reserved before any sequential numbering ---
     $discDbEpisode = @{}
@@ -411,6 +439,10 @@ function Get-SeriesTitleClassification {
             if ([math]::Abs($item.DurationSec - $expected) -le $tolerance) {
                 $item.Kind = 'Episode'
                 $item.Note = 'matches TMDb'
+            } elseif ($item.DurationSec -ge ($expected * $LongRatio)) {
+                $item.Kind = 'Episode'
+                $item.Note = "much longer than E{0:D2} (TMDb ~{1}) - a special? [e]dit, then Ns - check" -f $nextEpisode, (Format-SeriesDuration $expected)
+                $item.Mismatch = $true
             } elseif ($item.DurationSec -lt ($expected * $ShortRatio)) {
                 $item.Kind = 'Extra'
                 $item.Note = "too short for E{0:D2} (TMDb ~{1})" -f $nextEpisode, (Format-SeriesDuration $expected)
@@ -424,6 +456,10 @@ function Get-SeriesTitleClassification {
             if ($null -ne $medianSec -and $item.DurationSec -lt ($medianSec * $ShortRatio)) {
                 $item.Kind = 'Extra'
                 $item.Note = "short (under 60% of typical {0})" -f (Format-SeriesDuration $medianSec)
+            } elseif ($null -ne $medianSec -and $item.DurationSec -ge ($medianSec * $LongRatio)) {
+                $item.Kind = 'Episode'
+                $item.Note = "much longer than typical {0} - a special? [e]dit, then Ns - check" -f (Format-SeriesDuration $medianSec)
+                $item.Mismatch = $true
             } else {
                 $item.Kind = 'Episode'
                 if ($TmdbEpisodeCount -gt 0 -and $nextEpisode -gt $TmdbEpisodeCount) {
@@ -448,6 +484,11 @@ function Get-SeriesTitleClassification {
             $item.EpisodeNumber = $nextEpisode
             $item.ExpectedSec = $expected
             $nextEpisode++
+        } elseif ($item.Kind -eq 'Special') {
+            # Its own S00 sequence - does not use up an episode or an extra number.
+            while ($takenSp.ContainsKey($nextSpecial)) { $nextSpecial++ }
+            $item.SpecialNumber = $nextSpecial
+            $nextSpecial++
         } else {
             if ($item.Source -eq 'TheDiscDB') { $item.ExpectedSec = $dd.DurationSec }
             while ($takenEx.ContainsKey($nextExtra)) { $nextExtra++ }
@@ -491,10 +532,14 @@ function New-SeriesRenamePlan {
     $plan = @(foreach ($item in $Classification.Items) {
         $ext = [System.IO.Path]::GetExtension($item.Name)
         # NewName is the path RELATIVE to $Directory (what the manifest records and
-        # undo-rename.ps1 resolves): a bare name for episodes, ..\..\Specials\<name> for extras.
+        # undo-rename.ps1 resolves): a bare name for episodes, ..\..\Specials\<name> for
+        # extras and specials.
         if ($item.Kind -eq 'Episode') {
             $fileName = Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
             $newName = $fileName
+        } elseif ($item.Kind -eq 'Special') {
+            $fileName = Get-SeriesSpecialFileName -Title $Title -Special $item.SpecialNumber -Extension $ext
+            $newName = "$specialsRel\$fileName"
         } else {
             $fileName = Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label -Disc $disc
             $newName = "$specialsRel\$fileName"
@@ -540,7 +585,7 @@ function Show-SeriesRenamePlan {
     for ($i = 0; $i -lt $Plan.Count; $i++) {
         $p = $Plan[$i]
         $expected = if ($p.ExpectedSec) { Format-SeriesDuration $p.ExpectedSec } else { '-' }
-        $color = if ($p.Skip) { 'Red' } elseif ($p.Kind -eq 'Extra') { 'DarkYellow' } elseif ($p.Note -match 'check') { 'Yellow' } else { 'White' }
+        $color = if ($p.Skip) { 'Red' } elseif ($p.Kind -eq 'Extra') { 'DarkYellow' } elseif ($p.Kind -eq 'Special') { 'Cyan' } elseif ($p.Note -match 'check') { 'Yellow' } else { 'White' }
         Write-Host ($row -f ($i + 1), $p.OriginalName.PadRight($nameWidth), (Format-SeriesDuration $p.DurationSec), $expected, $p.Kind, $p.Source, $p.NewName.PadRight($newWidth), $p.Note) -ForegroundColor $color
     }
     foreach ($w in $Classification.Warnings) {
@@ -549,7 +594,8 @@ function Show-SeriesRenamePlan {
 }
 
 # Shows the plan and asks: Enter/Y accepts (the default), N leaves every file with its
-# current name, E lets the user switch rows between episode and extra and re-plans.
+# current name, E lets the user change rows (episode / extra / special) and re-plans.
+# No answer at all (end of input) declines: nothing is renamed without a yes.
 # Returns @{ Classification; Plan } or $null when declined.
 function Confirm-SeriesRenamePlan {
     param(
@@ -561,10 +607,13 @@ function Confirm-SeriesRenamePlan {
         [object]$DiscDbDisc = $null,
         [scriptblock]$ReadInput = { param($p) Read-Host $p },
         # Non-interactive (continue-rip.ps1 -Yes): show the table, then accept it as-is.
-        [switch]$AutoAccept
+        [switch]$AutoAccept,
+        # OriginalName -> Kind decided before the prompt (rename-series.ps1 -MarkSpecial etc.).
+        [hashtable]$InitialOverrides = @{}
     )
 
     $overrides = @{}
+    if ($InitialOverrides) { foreach ($k in $InitialOverrides.Keys) { $overrides[$k] = $InitialOverrides[$k] } }
     for ($round = 1; $round -le 50; $round++) {
         $classification = Get-SeriesTitleClassification @ClassifyArgs -Overrides $overrides
         $plan = New-SeriesRenamePlan -Classification $classification -Title $Title -Season $Season -Directory $Directory
@@ -576,18 +625,26 @@ function Confirm-SeriesRenamePlan {
         }
 
         $answer = & $ReadInput "Accept these names? [Y]es (default) / [n]o, leave files as they are / [e]dit"
-        # No input available (redirected/non-interactive): take the default, accept.
-        if ($null -eq $answer) { return @{ Classification = $classification; Plan = $plan } }
+        # No input available (end of input, redirected stdin): never rename on silence.
+        if ($null -eq $answer) {
+            Write-Host "No answer (end of input) - leaving these files as they are. Use -Yes to accept without asking." -ForegroundColor Yellow
+            return $null
+        }
 
         switch -Regex ("$answer".Trim().ToLower()) {
             '^(|y|yes)$' { return @{ Classification = $classification; Plan = $plan } }
             '^(n|no)$'   { return $null }
             '^(e|edit)$' {
-                $rows = & $ReadInput "Row number(s) to switch between episode and extra (e.g. 2 5)"
+                $rows = & $ReadInput "Row number(s) to change (2 5 switches episode/extra; 2s = special, 2x = extra, 2e = episode)"
                 foreach ($token in ("$rows" -split '[\s,]+' | Where-Object { $_ })) {
-                    if ($token -match '^\d+$' -and [int]$token -ge 1 -and [int]$token -le $plan.Count) {
-                        $row = $plan[[int]$token - 1]
-                        $overrides[$row.OriginalName] = if ($row.Kind -eq 'Episode') { 'Extra' } else { 'Episode' }
+                    if ($token -match '^(\d+)([sxe]?)$' -and [int]$Matches[1] -ge 1 -and [int]$Matches[1] -le $plan.Count) {
+                        $row = $plan[[int]$Matches[1] - 1]
+                        $overrides[$row.OriginalName] = switch ($Matches[2].ToLower()) {
+                            's' { 'Special' }
+                            'x' { 'Extra' }
+                            'e' { 'Episode' }
+                            default { if ($row.Kind -eq 'Episode') { 'Extra' } else { 'Episode' } }
+                        }
                     } else {
                         Write-Host "  Ignoring '$token' - not a row number" -ForegroundColor Red
                     }
@@ -702,7 +759,12 @@ function Invoke-SeriesEpisodeRename {
         # File name -> disc number or $null (rename-series.ps1: several discs' files in one
         # folder, told apart by a "Disc N" token in the name). The folder is still one table
         # and one classification; this only makes the play-all check run per disc.
-        [scriptblock]$GroupOf = $null
+        [scriptblock]$GroupOf = $null,
+        # Wildcard on the ORIGINAL file name -> 'Episode'|'Extra'|'Special', applied before
+        # classification as if chosen at the prompt (rename-series.ps1 -MarkSpecial etc.).
+        [hashtable]$MarkKinds = @{},
+        # S00 numbers an earlier folder in the same run has planned but not yet created.
+        [int[]]$ReservedSpecials = @()
     )
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
@@ -734,6 +796,7 @@ function Invoke-SeriesEpisodeRename {
             if ($dir -eq $legacyExtrasDir -or $fileDisc -eq $disc) { $takenExtras += [int]$Matches['extra'] }
         }
     }
+    $takenSpecials = @(Get-SeriesTakenSpecials -SpecialsDir $extrasDir -Title $Title) + @($ReservedSpecials)
     if ($takenEpisodes.Count + $takenExtras.Count -gt 0) {
         Write-Host "  $($takenEpisodes.Count + $takenExtras.Count) file(s) already renamed - leaving them alone and skipping their numbers" -ForegroundColor Gray
         Write-Log "Series rename: $($takenEpisodes.Count + $takenExtras.Count) file(s) already in final format, left unchanged"
@@ -774,6 +837,7 @@ function Invoke-SeriesEpisodeRename {
         TmdbEpisodeCount = if ($TmdbSeason) { [int]$TmdbSeason.EpisodeCount } else { 0 }
         TakenEpisodes    = $takenEpisodes
         TakenExtras      = $takenExtras
+        TakenSpecials    = [int[]]$takenSpecials
         AllExtras        = [bool]$AllExtras
         DiscDbMap        = $discDbMap
         Season           = $Season
@@ -783,14 +847,22 @@ function Invoke-SeriesEpisodeRename {
         foreach ($t in $titles) { $groups[$t.Name] = & $GroupOf $t.Name }
         $classifyArgs.Groups = $groups
     }
+    $marked = @{}
+    if ($MarkKinds) {
+        foreach ($t in $titles) {
+            foreach ($pat in $MarkKinds.Keys) {
+                if ($t.Name -like $pat) { $marked[$t.Name] = $MarkKinds[$pat] }
+            }
+        }
+    }
     if ($DryRun) {
-        $classification = Get-SeriesTitleClassification @classifyArgs
+        $classification = Get-SeriesTitleClassification @classifyArgs -Overrides $marked
         $plan = New-SeriesRenamePlan -Classification $classification -Title $Title -Season $Season -Directory $Directory
         Show-SeriesRenamePlan -Plan $plan -Classification $classification -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc
         return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $false; ManifestPath = $null; Plan = @($plan); DryRun = $true }
     }
 
-    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput -AutoAccept:$AutoAccept
+    $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput -AutoAccept:$AutoAccept -InitialOverrides $marked
     if (-not $result) {
         Write-Host "  Rename declined - files keep their current names. Re-run later with: continue-rip.ps1 ... -FromStep organize" -ForegroundColor Yellow
         Write-Log "Series rename: declined at the confirmation prompt - files left unchanged"
@@ -822,8 +894,10 @@ function Invoke-SeriesEpisodeRename {
     $outcome = Invoke-SeriesRenamePlan -Plan $plan
     $episodes = @($plan | Where-Object { $_.Kind -eq 'Episode' -and -not $_.Skip }).Count
     $extras = @($plan | Where-Object { $_.Kind -eq 'Extra' -and -not $_.Skip }).Count
-    Write-Host "Renamed $($outcome.Renamed) file(s) ($episodes episode(s), $extras extra(s))$(if ($outcome.Skipped) { ", skipped $($outcome.Skipped)" })" -ForegroundColor Green
-    if ($extras -gt 0) { Write-Host "  Extras moved to: $extrasDir" -ForegroundColor Gray }
+    $specials = @($plan | Where-Object { $_.Kind -eq 'Special' -and -not $_.Skip }).Count
+    $specialsText = if ($specials) { ", $specials special(s)" } else { "" }
+    Write-Host "Renamed $($outcome.Renamed) file(s) ($episodes episode(s), $extras extra(s)$specialsText)$(if ($outcome.Skipped) { ", skipped $($outcome.Skipped)" })" -ForegroundColor Green
+    if ($extras + $specials -gt 0) { Write-Host "  Extras / specials moved to: $extrasDir" -ForegroundColor Gray }
     Write-Host "  To undo: & `"$(Join-Path $Directory 'undo-rename.ps1')`"   (add -WhatIf to preview)" -ForegroundColor Gray
     Write-Log "Series rename: $($outcome.Renamed) renamed, $($outcome.Skipped) skipped"
 

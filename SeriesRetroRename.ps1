@@ -162,6 +162,9 @@ function Invoke-SeriesRetroRename {
         # With -Apply: accept every folder's confirmation table without asking.
         [switch]$Yes,
         [switch]$NoTmdb,
+        # Wildcard on original file names -> 'Episode'|'Extra'|'Special' (rename-series.ps1
+        # -MarkEpisode / -MarkExtra / -MarkSpecial).
+        [hashtable]$MarkKinds = @{},
         [string]$HandBrakePath = "",
         [string]$UndoScriptSource = "",
         [scriptblock]$ReadInput = { param($p) Read-Host $p },
@@ -181,6 +184,8 @@ function Invoke-SeriesRetroRename {
     Write-Host "$($units.Count) folder(s) to process under $Root" -ForegroundColor Gray
 
     $nextBySeason = @{}
+    $startUsed = @{}
+    $plannedSpecials = @()
     $tmdbBySeason = @{}
     $results = @()
     foreach ($u in $units) {
@@ -197,15 +202,17 @@ function Invoke-SeriesRetroRename {
             $suggested = Get-SuggestedStartEpisode -SeasonDir $u.SeasonDir -Disc $u.Disc
             if ($suggested -and [int]$suggested -gt $start) { $start = [int]$suggested; $fromWhere = "after the episodes on earlier discs" }
         }
+        if ($StartEpisode -ge 1 -and -not $startUsed.ContainsKey($key)) {
+            # Said on the command line: wins for the first folder of each season, even over
+            # earlier discs (an episode missing from the rip leaves a gap they cannot know).
+            $start = $StartEpisode
+            $fromWhere = "-StartEpisode"
+        }
+        $startUsed[$key] = $true
         if ($start -eq 0) {
-            if ($StartEpisode -ge 1) {
-                $start = $StartEpisode
-                $fromWhere = "-StartEpisode"
-            } else {
-                $start = 1
-                if ($u.Disc -ge 2) {
-                    Write-Host "  WARNING: no episodes found on earlier discs - numbering starts at E01. Pass -StartEpisode N if this disc continues a season." -ForegroundColor Yellow
-                }
+            $start = 1
+            if ($u.Disc -ge 2) {
+                Write-Host "  WARNING: no episodes found on earlier discs - numbering starts at E01. Pass -StartEpisode N if this disc continues a season." -ForegroundColor Yellow
             }
         }
         if ($fromWhere) { Write-Host ("  Starting at E{0:D2} ({1})" -f $start, $fromWhere) -ForegroundColor Gray }
@@ -230,6 +237,8 @@ function Invoke-SeriesRetroRename {
             AutoAccept       = [bool]$Yes
             DryRun           = (-not $Apply)
             GroupOf          = ${function:Get-DiscNumberFromFileName}
+            MarkKinds        = $MarkKinds
+            ReservedSpecials = [int[]]$plannedSpecials
         }
         if ($GetDuration) { $renameArgs.GetDuration = $GetDuration }
         $r = Invoke-SeriesEpisodeRename @renameArgs
@@ -240,6 +249,10 @@ function Invoke-SeriesRetroRename {
         foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Episode' -and -not $_.Skip })) {
             $m = [regex]::Match($p.NewName, '-E(\d+)\.[^.\\]+$')
             if ($m.Success -and [int]$m.Groups[1].Value -gt $planMax) { $planMax = [int]$m.Groups[1].Value }
+        }
+        foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Special' -and -not $_.Skip })) {
+            $sm = [regex]::Match($p.NewName, '-S00-E(\d+)\.[^.\\]+$')
+            if ($sm.Success) { $plannedSpecials += [int]$sm.Groups[1].Value }
         }
         $folderMax = Get-SeriesFolderMaxEpisode -Directory $u.Directory -Title $u.Title -Season $u.Season
         $next = [math]::Max($planMax, $folderMax) + 1
