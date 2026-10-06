@@ -703,8 +703,10 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 ## Additional Tools
 
 - **series-cleanup.ps1** - Utility for cleaning up series naming
+- **rename-series.ps1** - Renames series that are ALREADY ripped on disk (retroactive twin of the `-Series` rip naming): `.\rename-series.ps1 "F:\Series\Silicon Valley"` previews every Season/Disc folder and changes nothing; add `-Apply` to rename (each folder asks first, `-Yes` accepts all). Also understands older layouts (`Series 1`/`Season 1`/`<Title>-Series 1` folders, `Disc 1` with a space, several discs in one folder told apart by `Disc N` in the file names). Same names, episode/extra detection and extras subfolder as a live rip; every folder gets `rename-manifest.csv` + `undo-rename.ps1` BEFORE anything moves; never overwrites; numbering continues across discs (`-StartEpisode N` if the first disc isn't E01). TheDiscDB is not used (needs the physical disc's hash) - TMDb runtimes or title lengths decide episode vs extra. See `Get-Help .\rename-series.ps1 -Full`
 - **continue-rip.ps1** - Resume failed rips from a specific step
 - **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
+- **SeriesRetroRename.ps1** - Folder discovery and numbering across discs for `rename-series.ps1`, dot-sourced, not run directly
 - **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
 
 ## Project Structure
@@ -718,6 +720,8 @@ ripdisc/
 ├── rip-disc.ps1           # PowerShell implementation
 ├── continue-rip.ps1       # Resume failed rips from a specific step
 ├── SeriesEpisodes.ps1     # Shared -Series naming logic (dot-sourced, not run directly)
+├── rename-series.ps1      # Retroactive series rename of already-ripped folders (dry run by default)
+├── SeriesRetroRename.ps1  # Folder discovery/orchestration for rename-series.ps1 (dot-sourced)
 ├── undo-rename.ps1        # Reverses a -Series rename from a rename-manifest.csv
 ├── series-cleanup.ps1     # Series cleanup utility
 ├── CHANGELOG.md           # Release history

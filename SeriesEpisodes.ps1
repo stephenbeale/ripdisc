@@ -656,7 +656,19 @@ function Invoke-SeriesEpisodeRename {
         # Injectable so tests do not need real video files.
         [scriptblock]$GetDuration = $null,
         # Accept the confirmation table without asking (continue-rip.ps1 -Yes).
-        [switch]$AutoAccept
+        [switch]$AutoAccept,
+        # Preview only (rename-series.ps1 without -Apply): classify and show the planned
+        # names, then stop - no prompt, no manifest, no undo script, no file touched.
+        # The returned Plan is what an apply run would do.
+        [switch]$DryRun,
+        # Only files whose NAME this accepts are renamed (rename-series.ps1: several discs'
+        # files sharing one folder, grouped by a "Disc N" token in the file name). Files
+        # already in final shape still reserve their numbers whatever the filter says.
+        [scriptblock]$FileFilter = $null,
+        # Extra numbers already planned for this folder by an earlier unit in the same run
+        # (a dry run has not renamed them yet), so two units sharing a folder never plan
+        # the same -Extra##.
+        [int[]]$ReservedExtras = @()
     )
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
@@ -669,7 +681,7 @@ function Invoke-SeriesEpisodeRename {
         if ($f.Name -match $pattern) {
             if ($Matches['ep']) { $takenEpisodes += [int]$Matches['ep'] } else { $takenExtras += [int]$Matches['extra'] }
         } else {
-            $candidates += $f
+            if (-not $FileFilter -or (& $FileFilter $f.Name)) { $candidates += $f }
         }
     }
     # Extras already moved into the extras subfolder by an earlier run keep their numbers.
@@ -683,10 +695,12 @@ function Invoke-SeriesEpisodeRename {
         Write-Host "  $($takenEpisodes.Count + $takenExtras.Count) file(s) already renamed - leaving them alone and skipping their numbers" -ForegroundColor Gray
         Write-Log "Series rename: $($takenEpisodes.Count + $takenExtras.Count) file(s) already in final format, left unchanged"
     }
+    # Reserved only now, so the "already renamed" count above stays about real files.
+    $takenExtras += @($ReservedExtras)
     if ($candidates.Count -eq 0) {
         Write-Host "  No files to rename" -ForegroundColor Gray
         Write-Log "Series rename: no files to rename in $Directory"
-        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $false; ManifestPath = $null }
+        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $false; ManifestPath = $null; Plan = @(); DryRun = [bool]$DryRun }
     }
 
     Write-Host "  Reading durations of $($candidates.Count) file(s)..." -ForegroundColor Gray
@@ -723,11 +737,18 @@ function Invoke-SeriesEpisodeRename {
         DiscDbMap        = $discDbMap
         Season           = $Season
     }
+    if ($DryRun) {
+        $classification = Get-SeriesTitleClassification @classifyArgs
+        $plan = New-SeriesRenamePlan -Classification $classification -Title $Title -Season $Season -Directory $Directory
+        Show-SeriesRenamePlan -Plan $plan -Classification $classification -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc
+        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $false; ManifestPath = $null; Plan = @($plan); DryRun = $true }
+    }
+
     $result = Confirm-SeriesRenamePlan -ClassifyArgs $classifyArgs -Title $Title -Season $Season -Directory $Directory -TmdbSeason $TmdbSeason -DiscDbDisc $DiscDbDisc -ReadInput $ReadInput -AutoAccept:$AutoAccept
     if (-not $result) {
         Write-Host "  Rename declined - files keep their current names. Re-run later with: continue-rip.ps1 ... -FromStep organize" -ForegroundColor Yellow
         Write-Log "Series rename: declined at the confirmation prompt - files left unchanged"
-        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $true; ManifestPath = $null }
+        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $true; ManifestPath = $null; Plan = @(); DryRun = $false }
     }
 
     $plan = @($result.Plan)
@@ -760,7 +781,7 @@ function Invoke-SeriesEpisodeRename {
     Write-Host "  To undo: & `"$(Join-Path $Directory 'undo-rename.ps1')`"   (add -WhatIf to preview)" -ForegroundColor Gray
     Write-Log "Series rename: $($outcome.Renamed) renamed, $($outcome.Skipped) skipped"
 
-    return [pscustomobject]@{ Renamed = $outcome.Renamed; Skipped = $outcome.Skipped; Declined = $false; ManifestPath = $manifestPath }
+    return [pscustomobject]@{ Renamed = $outcome.Renamed; Skipped = $outcome.Skipped; Declined = $false; ManifestPath = $manifestPath; Plan = $plan; DryRun = $false }
 }
 
 # ---------------------------------------------------------------------------

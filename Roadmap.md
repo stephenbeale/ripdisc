@@ -6,7 +6,9 @@ e.g. Fame-extras should look for an existing Fame dir and, if extras dir exists 
 ## Feature - Check for dir char length
 Handle all output max. char lengths so that they do not break- warn user of this and offer to abort to allow them to input a shorter title. Consider all sub dirs.
 
-## Feature - Standalone series episode rename utility (added 2026-10-04)
+## Feature - Standalone series episode rename utility (added 2026-10-04) - FIRST VERSION BUILT 2026-10-05
+Built as `rename-series.ps1` + `SeriesRetroRename.ps1` (dry run by default, `-Apply` to rename; see README "Additional Tools"). Still open: TheDiscDB use (needs a disc hash), episode titles in names, recording a manifest for folders hand-renamed earlier with no manifest, and a real-media test.
+**Status 2026-10-05:** PR #151 is open (not merged) and `-Apply` is UNTESTED on real media. Next: run `-Apply` on the safe copy `C:\Video\Series\Joking Apart` (verify rename-manifest.csv, `undo-rename.ps1 -WhatIf`, then undo), then on `F:\Series\Joking Apart`. Concern: the dry run planned S02 Disc 2 `D1_t00` as S02-E07, probably wrong (likely a pilot or an extra) - investigate the extras/episode heuristics. Ideas: optional TMDb key for runtime-based extras detection in the standalone tool, and a `-Specials`/S00 option (see PR #152).
 A retroactive, bulk tool for series that are ALREADY ripped on disk (e.g. `F:\Series\...`), not tied
 to a live rip. The user has many series folders of episodes to rename, and it must be done safely
 while keeping the original file names.

@@ -19,6 +19,16 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-05 - rename-series.ps1 (PR #151, open, -Apply untested)
+
+`rename-series.ps1` + `SeriesRetroRename.ps1` rename already-ripped series folders to
+`<Title>-S##-E##` (dry run by default; `-Apply` writes `rename-manifest.csv` and
+`undo-rename.ps1` before moving). Handles "Series N" / "<Title>-Series N" folders, "Disc N"
+tokens in names, and leaves existing `extras\` alone. 84/84 new tests, full suite passing.
+NOT yet run with `-Apply` on real media. Next: test on the copy `C:\Video\Series\Joking Apart`,
+then `F:\Series\Joking Apart`. Concern: dry run planned S02 Disc 2 `D1_t00` as S02-E07
+(probably a pilot or extra). PR #152 (extras to Specials) is stacked on #151.
+
 ### 2026-10-04 - Series Episode Naming, Extras Detection, Rename Manifest and Undo
 
 **What changed:** plain `-Series` Step 3 now renames to `<Title>-S##-E##.ext` (extras
@@ -198,3 +208,23 @@ the main checkout held another session's uncommitted `SeriesEpisodes.ps1` change
 **Outstanding:** rip a real disc from this branch and confirm the bar/ETA and watchdog
 behaviour. Rebased onto `main` after #142/#143/#145 (TheDiscDB/extras work) landed:
 `rip-disc.ps1` merged cleanly; only CHANGELOG/CLAUDE.md needed both entries kept.
+
+### 2026-10-05 (continued)
+
+**C: test of #151** (Joking Apart copy, `C:\Video\Series\Joking Apart`): -Apply, undo and re-apply all worked. The copy was left renamed; D1_t00 was marked as an extra by hand.
+
+**Fix committed on `feature/series-rename-utility`:** `SeriesRetroRename.ps1` (~line 97) FileFilter closures used `.GetNewClosure()`, which cannot see `Get-DiscNumberFromFileName` (dot-sourced into rename-series.ps1's script scope), so folders with "Disc N" tokens failed with "not recognized". Now captures `$discOf = ${function:Get-DiscNumberFromFileName}` and calls `& $discOf $n`. Verified on temp folders; 11 test files pass.
+**The new regression test in `tests/Test-SeriesRetroRename.ps1` (rename-series.ps1 via `powershell.exe -File` on the Joking Apart fixture) is INEFFECTIVE:** it still passes against the old buggy code. Marked with a TODO; needs reworking so it fails on the old code.
+
+**PR #152** (`fix/series-extras-specials`) is NOT stacked on #151's head: based on 9b43174, lacks 035d6a2. Needs a rebase.
+
+**Open bugs:**
+- (a) A folder mixing files with and without "Disc N" tokens is split into separate units: one prompt per unit, episode-vs-extra judged per unit, and a lone file is always the unit median so always becomes an Episode. Real case: `F:\Series\Boys From the Black Stuff\Season 1` - B1_T00-1.mp4 (4:27, 47 MB, clearly an extra) became S01-E01 and the 1:42:26 Disc 1 title became S01-E02. A normal rip-disc -Series run judges all of a disc's titles together. Fix: one table, one prompt, one classification per folder.
+- (b) Disc folders named `<Show>-Disc N` not recognised: `^disc\s*(\d+)$` at SeriesRetroRename.ps1:29 needs a prefix allowance like the season regex. Boys From the Black Stuff-Disc 2 and Disc 3 were never processed.
+- (c) No specials/S00 concept: only too-SHORT titles are flagged, not too-long. The 1:42:26 title may be "The Black Stuff" (1980 play), i.e. a special. Ideas: `-Specials` parameter; table warning for titles much longer than the median.
+- (d) After undo, manifest and undo script remain and the next apply appends to the manifest (duplicate rows).
+- (e) End of input at the confirmation prompt counts as "accept" (SeriesEpisodes.ps1 ~541).
+
+**F: status - CHECK FIRST next session:** the user ran `undo-rename.ps1 -WhatIf` in `F:\Series\Boys From the Black Stuff\Season 1` (looked correct). UNKNOWN whether the real undo was run.
+
+**Unfinished:** investigate how ripdisc's -Series rip logs detect duration discrepancies, using the Silicon Valley runs as the example (logs: `C:\Video\logs\Silicon Valley_disc*_*.log`). Logs found cover Seasons 1-5; none for Season 6 yet. The user says the runs they meant may be from an EARLIER season, so check the Season 1-5 logs. Then model the retro-rename classification on what the live rip does.
