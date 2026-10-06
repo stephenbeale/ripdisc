@@ -39,11 +39,8 @@ Fixed three #151 bugs, plus -WhatIf:
 **Real-file test:** run on the copy `C:\Video\Series\Boys From the Black Stuff`.
 - Apply gave the extra to Season 0 and E01-E05 across Season 1, -Disc 2 and -Disc 3.
 - Undo fully restored the original names. The copy is left at original names.
-- Still open: the 1:42:26 Disc 1 title becomes E01. It may be the 1980 play, which needs
-  S00/too-long handling (not done).
-- F: not touched. **Before running on F:**, delete the stale `rename-manifest.csv` and
-  `undo-rename.ps1` in `F:\...\Boys From the Black Stuff\Season 1`. If they stay, the
-  apply appends to them, and undo would replay the old rows (manifest-append bug, still open).
+- RESOLVED: the 1:42:26 Disc 1 title is "The Black Stuff" (1980 Play for Today) and is now S00-E01 on F: via `-MarkSpecial`.
+- RESOLVED: the stale F: manifest was kept as `rename-manifest.undone-old.csv`, and the manifest-append bug is fixed (see item 3 below).
 
 **Added later the same day (also on PR #153), 491/491 tests pass (`Test-SeriesRetroRename.ps1` 126):**
 1. **Season 0 (S00).** New Kind `Special`, named `<Title>-S00-E##` in the series-level
@@ -59,14 +56,20 @@ Fixed three #151 bugs, plus -WhatIf:
    manifest to `rename-manifest.undone-<stamp>[-n].csv`, so the next apply starts fresh.
 4. **EOF at the confirmation prompt now declines** (it used to accept).
 
-**Next (F: Boys From the Black Stuff, once #153 merges; dry-run each first):**
-1. Rename the stale `Season 1\rename-manifest.csv` to `rename-manifest.undone-old.csv` (keep it).
-2. `.\rename-series.ps1 "F:\Series\Boys From the Black Stuff\Season 1" -MarkSpecial "*Disc 1 - E01*" -Apply`
-   (the 1:42:26 title is "The Black Stuff", 1980 Play for Today, so S00-E01; the 4:27 `B1_T00-1.mp4` is an extra).
-3. `... "...\Boys from the Black Stuff-Disc 2" -StartEpisode 1 -Apply`
-4. `... "...\Boys from the Black Stuff-Disc 3" -StartEpisode 4 -Apply`
-- E03 "Shop Thy Neighbour" (60 min) was never ripped; re-rip it. Runtimes: E1 54, E2 57, E3 60, E4 68, E5 68.
-- TMDb key is not set, so detection is length-only.
+**RESULT on F: (2026-10-06, main 46a3281, `F:\Series\Boys From the Black Stuff`) - done:**
+- The stale `Season 1` manifest was kept as `rename-manifest.undone-old.csv`.
+- `Season 0\` holds `Boys From the Black Stuff-S00-E01.mp4` (The Black Stuff, 1980 Play for Today, 1:42:26)
+  and `-S01-Extra01.mp4` (4:27).
+- `-Disc 2` holds S01-E01 and E02. `-Disc 3` holds S01-E04 and E05 (applied with `-StartEpisode 4`).
+- Every folder has a manifest and undo script.
+
+**Still open (2026-10-06):**
+1. Move the Boys From the Black Stuff `-Disc 2` and `-Disc 3` episodes into `Season 1` (they are still in the `-Disc` sibling folders).
+2. Re-rip E03 "Shop Thy Neighbour" (60 min, never ripped) later, then rename with `-StartEpisode 3`. Runtimes: E1 54, E2 57, E3 60, E4 68, E5 68.
+3. Set the TMDb key; detection is length-only until then.
+4. Blackadder Season 1 has 12 files; files 7-12 are suspected duplicates.
+5. Old `Specials` folders (Joking Apart on C: and F:) and legacy `DiscN\extras` folders are not migrated to Season 0 (user: ignore for now).
+6. Check that Jellyfin shows Season 0.
 
 ### 2026-10-06 - Extras folder renamed `Specials` to `Season 0` (on PR #153)
 
@@ -85,7 +88,7 @@ Existing on-disk `Specials` folders are NOT migrated. The `-Specials` option ide
 `undo-rename.ps1` before moving). Handles "Series N" / "<Title>-Series N" folders, "Disc N"
 tokens in names, and leaves existing `extras\` alone. 84/84 new tests, full suite passing.
 Tested with `-Apply` (apply, undo, re-apply) on the copy `C:\Video\Series\Joking Apart`; not yet on F:.
-Known open bugs: manifest appended after undo (duplicate rows); EOF at the confirm prompt counts as accept;
+Known open bugs at the time (ALL FIXED in #153): manifest appended after undo (duplicate rows); EOF at the confirm prompt counts as accept;
 mixed Disc-N/no-token files classified per unit; `<Show>-Disc N` folders not matched; no S00/too-long warning;
 lexical sort of `(1)..(12)` filenames. PR #152 (extras to Specials) was rebased onto main after #151 merged.
 
@@ -102,10 +105,10 @@ accepts that and legacy `extras\<name>`, and removes Season 0 only when empty. R
 numbers from Season 0 and legacy `DiscN\extras`. 411/411 PowerShell tests pass.
 
 **PR history:** #152 was stacked on #151, then rebased onto main after #151 squash-merged.
-The Specials layout has NOT been retested on the C: Joking Apart copy (do that before F:).
+The Season 0 layout was exercised on real F: media on 2026-10-06 (Boys From the Black Stuff).
 
 **Next steps:**
-1. Retest Season 0 on the C: Joking Apart copy before running rename-series.ps1 on F:.
+1. (Done 2026-10-06: Season 0 verified on F: Boys From the Black Stuff.)
 2. Real series rip with extras; confirm they land in Season 0.
 3. Check how Jellyfin lists the `-S##-D#-Extra##` files in Season 0.
 4. Migrate old `DiscN\extras` folders into Season 0 via rename-series.ps1 (not migrated).
@@ -297,17 +300,17 @@ behaviour. Rebased onto `main` after #142/#143/#145 (TheDiscDB/extras work) land
 **C: test of #151** (Joking Apart copy, `C:\Video\Series\Joking Apart`): -Apply, undo and re-apply all worked. The copy was left renamed; D1_t00 was marked as an extra by hand.
 
 **Fix committed on `feature/series-rename-utility`:** `SeriesRetroRename.ps1` (~line 97) FileFilter closures used `.GetNewClosure()`, which cannot see `Get-DiscNumberFromFileName` (dot-sourced into rename-series.ps1's script scope), so folders with "Disc N" tokens failed with "not recognized". Now captures `$discOf = ${function:Get-DiscNumberFromFileName}` and calls `& $discOf $n`. Verified on temp folders; 11 test files pass.
-**The new regression test in `tests/Test-SeriesRetroRename.ps1` (rename-series.ps1 via `powershell.exe -File` on the Joking Apart fixture) is INEFFECTIVE:** it still passes against the old buggy code. Marked with a TODO; needs reworking so it fails on the old code.
+**(Still true:) the new regression test in `tests/Test-SeriesRetroRename.ps1` (rename-series.ps1 via `powershell.exe -File` on the Joking Apart fixture) is INEFFECTIVE:** it still passes against the old buggy code. Marked with a TODO; needs reworking so it fails on the old code.
 
-**PR #152** (`fix/series-extras-specials`) is NOT stacked on #151's head: based on 9b43174, lacks 035d6a2. Needs a rebase.
+**PR #152** was rebased and merged (extras folder, now named `Season 0`).
 
-**Open bugs:**
+**Open bugs (a-e ALL FIXED in #153, 2026-10-06; kept as history):**
 - (a) A folder mixing files with and without "Disc N" tokens is split into separate units: one prompt per unit, episode-vs-extra judged per unit, and a lone file is always the unit median so always becomes an Episode. Real case: `F:\Series\Boys From the Black Stuff\Season 1` - B1_T00-1.mp4 (4:27, 47 MB, clearly an extra) became S01-E01 and the 1:42:26 Disc 1 title became S01-E02. A normal rip-disc -Series run judges all of a disc's titles together. Fix: one table, one prompt, one classification per folder.
 - (b) Disc folders named `<Show>-Disc N` not recognised: `^disc\s*(\d+)$` at SeriesRetroRename.ps1:29 needs a prefix allowance like the season regex. Boys From the Black Stuff-Disc 2 and Disc 3 were never processed.
 - (c) No specials/S00 concept: only too-SHORT titles are flagged, not too-long. The 1:42:26 title may be "The Black Stuff" (1980 play), i.e. a special. Ideas: `-Specials` parameter; table warning for titles much longer than the median.
 - (d) After undo, manifest and undo script remain and the next apply appends to the manifest (duplicate rows).
 - (e) End of input at the confirmation prompt counts as "accept" (SeriesEpisodes.ps1 ~541).
 
-**F: status - CHECK FIRST next session:** the user ran `undo-rename.ps1 -WhatIf` in `F:\Series\Boys From the Black Stuff\Season 1` (looked correct). UNKNOWN whether the real undo was run.
+**F: status (RESOLVED 2026-10-06):** the stale Season 1 manifest was kept as `rename-manifest.undone-old.csv` and Boys From the Black Stuff was re-run correctly (see the RESULT above).
 
 **Unfinished:** investigate how ripdisc's -Series rip logs detect duration discrepancies, using the Silicon Valley runs as the example (logs: `C:\Video\logs\Silicon Valley_disc*_*.log`). Logs found cover Seasons 1-5; none for Season 6 yet. The user says the runs they meant may be from an EARLIER season, so check the Season 1-5 logs. Then model the retro-rename classification on what the live rip does.

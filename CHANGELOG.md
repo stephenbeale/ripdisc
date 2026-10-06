@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-06 (PR #153) - rename-series.ps1: Per-Folder Classification, S00 Specials, `-Disc N` Folders
+
+### Added
+- `-MarkSpecial`, `-MarkExtra`, `-MarkEpisode` (wildcards on original names) and the prompt edit codes `2s` / `2x` / `2e`. New Kind `Special`, named `<Title>-S00-E##` in `<Series>\Season 0\`; numbering skips existing S00 files and specials planned by earlier folders in the same run.
+- A title at least 1.6x the expected length (TMDb runtime, else the median) is flagged "a special?" but stays an episode, since double episodes look the same by length.
+- `-WhatIf` (`SupportsShouldProcess`): always a dry run.
+- `<Show>-Disc N` folders are recognised; Disc folders beside exactly one Season folder join that season.
+- `undo-rename.ps1` retires a fully undone manifest as `rename-manifest.undone-<stamp>[-n].csv`, so the next apply starts a fresh manifest.
+
+### Changed
+- One classification per folder (a Season folder holding files directly is one table even when names carry `Disc N` tokens); only the play-all check still runs per disc. Fixes a lone 4:27 extra becoming an episode.
+- Files sort numerically (`(2)` before `(10)`), for live rips as well.
+- An explicit `-StartEpisode` wins for the first folder of each season, even over the start suggested from earlier discs.
+- EOF at the confirmation prompt now declines (it used to accept).
+
+**Testing status:** 498 tests passed at merge (`Test-SeriesRetroRename` 126+). Run on a real series: F:\Series\Boys From the Black Stuff (Season 0 holds S00-E01 and S01-Extra01; `-Disc 2` S01-E01/E02, `-Disc 3` S01-E04/E05 via `-StartEpisode 4`).
+
 ## 2026-10-06 - Extras Folder Renamed `Specials` to `Season 0`
 
 ### Changed
