@@ -8,36 +8,40 @@
 #
 # Final names (episodes stay in the per-disc DiscN folder):
 #   episodes: <Series>\Season 2\Disc1\<Title>-S02-E05.mkv
-#   extras:   <Series>\Specials\<Title>-S02-D1-Extra01.mkv   (or -Extra01-<TheDiscDB name>)
-#   specials: <Series>\Specials\<Title>-S00-E01.mkv          (feature-length one-offs)
+#   extras:   <Series>\Season 0\<Title>-S02-D1-Extra01.mkv (or -Extra01-<TheDiscDB name>)
+#   specials: <Series>\Season 0\<Title>-S00-E01.mkv         (feature-length one-offs)
 # With no -Season the season tag falls back to S01.
 #
-# Extras go in ONE "Specials" folder at series level, alongside the Season folders -
-# Jellyfin did not pick up the earlier DiscN\extras\ (PR #143), and treats a series-level
-# Specials folder as Season 00. Every disc of every season shares that folder, so an
+# Extras go in ONE "Season 0" folder at series level, alongside the Season folders -
+# Jellyfin did not pick up the earlier DiscN\extras\ (PR #143), and reads a series-level
+# "Season 0" (or "Specials") folder as Season 00. The user chose "Season 0" on 2026-10-06. Every disc of every season shares that folder, so an
 # extra's name carries its season AND disc (-S02-D1-): Extra## is numbered per disc, and
 # the disc part keeps two discs' -Extra01 apart. Concurrent rips of different discs only
 # ever create distinct names there, and renames never overwrite. The manifest stays in
-# the DiscN folder, recording each extra's path relative to it (..\..\Specials\<name>).
+# the DiscN folder, recording each extra's path relative to it (..\..\Season 0\<name>).
 
 # Series-level folder for extras. Must match undo-rename.ps1's NewName whitelist.
-$script:SeriesExtrasFolder = 'Specials'
+$script:SeriesExtrasFolder = 'Season 0'
+# What PR #152 called it. Still read (numbers stay reserved) and still accepted by
+# undo-rename.ps1, but nothing new is written there.
+$script:SeriesLegacySpecialsFolder = 'Specials'
 # Where PR #143 put extras (DiscN\extras\). Still read so extras moved there by an older
 # run keep their numbers, and still accepted by undo-rename.ps1 for older manifests.
 $script:SeriesLegacyExtrasFolder = 'extras'
 
-# The Specials folder for a folder of episodes, as a path RELATIVE to it: up past DiscN,
-# then up past Season N, to the series folder. "..\..\Specials" for Season N\DiscN,
-# "..\Specials" for a DiscN or Season N folder directly under the series.
+# The "Season 0" folder for a folder of episodes, as a path RELATIVE to it: up past DiscN,
+# then up past Season N, to the series folder. "..\..\Season 0" for Season N\DiscN,
+# "..\Season 0" for a DiscN or Season N folder directly under the series. A folder that
+# is itself "Season 0" is not counted as a Season level (it is the target, not a season).
 function Get-SeriesSpecialsRelativeDir {
-    param([string]$Directory)
+    param([string]$Directory, [string]$Folder = $script:SeriesExtrasFolder)
     $dir = $Directory.TrimEnd('\', '/')
     $ups = 0
     if ((Split-Path $dir -Leaf) -match '^Disc\s*\d+$') { $dir = Split-Path $dir -Parent; $ups++ }
     # Same season-folder forms rename-series.ps1 accepts: Season 2, Series 1, <Title>-Series 1.
-    if ($dir -and (Split-Path $dir -Leaf) -match '(?i)(?:^|[\s\-_.])(?:series|season)\s*\d+$') { $ups++ }
+    if ($dir -and (Split-Path $dir -Leaf) -match '(?i)(?:^|[\s\-_.])(?:series|season)\s*([1-9]\d*|0+[1-9]\d*)$') { $ups++ }
     $prefix = ('..\' * $ups)
-    return "$prefix$($script:SeriesExtrasFolder)"
+    return "$prefix$Folder"
 }
 
 # Disc number from a DiscN folder name, 0 when the folder is not a DiscN folder (a Season
@@ -54,13 +58,13 @@ function Get-SeriesDiscFromDirectory {
 
 # A special: a one-off much longer than the episodes (a pilot film, a Christmas special,
 # the play a series grew out of). Jellyfin reads <Title>-S00-E## in the series-level
-# Specials folder as Season 00, episode ##.
+# Season 0 folder as Season 00, episode ##.
 function Get-SeriesSpecialFileName {
     param([string]$Title, [int]$Special, [string]$Extension)
     return "{0}-S00-E{1:D2}{2}" -f $Title, $Special, $Extension
 }
 
-# Special numbers already used in a Specials folder for this title.
+# Special numbers already used in a Season 0 / Specials folder for this title.
 function Get-SeriesTakenSpecials {
     param([string]$SpecialsDir, [string]$Title)
     if (-not (Test-Path -LiteralPath $SpecialsDir -PathType Container)) { return @() }
@@ -311,7 +315,7 @@ function Get-SeriesTitleClassification {
         [int]$TmdbEpisodeCount = 0,
         [int[]]$TakenEpisodes = @(),
         [int[]]$TakenExtras = @(),
-        # S00 numbers already used in the Specials folder (or planned by an earlier folder).
+        # S00 numbers already used in the Season 0 folder (or planned by an earlier folder).
         [int[]]$TakenSpecials = @(),
         [hashtable]$Overrides = @{},
         [switch]$AllExtras,
@@ -532,7 +536,7 @@ function New-SeriesRenamePlan {
     $plan = @(foreach ($item in $Classification.Items) {
         $ext = [System.IO.Path]::GetExtension($item.Name)
         # NewName is the path RELATIVE to $Directory (what the manifest records and
-        # undo-rename.ps1 resolves): a bare name for episodes, ..\..\Specials\<name> for
+        # undo-rename.ps1 resolves): a bare name for episodes, ..\..\Season 0\<name> for
         # extras and specials.
         if ($item.Kind -eq 'Episode') {
             $fileName = Get-SeriesEpisodeFileName -Title $Title -Season $Season -Episode $item.EpisodeNumber -Extension $ext
@@ -703,7 +707,7 @@ function Invoke-SeriesRenamePlan {
             $skipped++
             continue
         }
-        # Extras move into the series-level Specials folder; create it on first use only,
+        # Extras move into the series-level Season 0 folder; create it on first use only,
         # so a series with no extras gets no empty folder.
         $targetDir = Split-Path -Parent $p.NewPath
         if (-not (Test-Path -LiteralPath $targetDir)) {
@@ -783,12 +787,13 @@ function Invoke-SeriesEpisodeRename {
         }
     }
     # Extras already moved out by an earlier run keep their numbers: this disc's own
-    # (-D#-) extras in the shared Specials folder, and anything in a PR #143-era
-    # DiscN\extras\ folder (those names have no disc part and belong to this disc).
+    # (-D#-) extras in the shared Season 0 folder (or a PR #152-era Specials folder), and
+    # anything in a PR #143-era DiscN\extras\ folder (no disc part: they belong to this disc).
     $disc = Get-SeriesDiscFromDirectory -Directory $Directory
     $extrasDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory)))
+    $legacySpecialsDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory -Folder $script:SeriesLegacySpecialsFolder)))
     $legacyExtrasDir = Join-Path $Directory $script:SeriesLegacyExtrasFolder
-    foreach ($dir in @($extrasDir, $legacyExtrasDir)) {
+    foreach ($dir in @($extrasDir, $legacySpecialsDir, $legacyExtrasDir)) {
         if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
         foreach ($f in @(Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' })) {
             if (-not ($f.Name -match $pattern) -or -not $Matches['extra']) { continue }
@@ -796,7 +801,7 @@ function Invoke-SeriesEpisodeRename {
             if ($dir -eq $legacyExtrasDir -or $fileDisc -eq $disc) { $takenExtras += [int]$Matches['extra'] }
         }
     }
-    $takenSpecials = @(Get-SeriesTakenSpecials -SpecialsDir $extrasDir -Title $Title) + @($ReservedSpecials)
+    $takenSpecials = @(Get-SeriesTakenSpecials -SpecialsDir $extrasDir -Title $Title) + @(Get-SeriesTakenSpecials -SpecialsDir $legacySpecialsDir -Title $Title) + @($ReservedSpecials)
     if ($takenEpisodes.Count + $takenExtras.Count -gt 0) {
         Write-Host "  $($takenEpisodes.Count + $takenExtras.Count) file(s) already renamed - leaving them alone and skipping their numbers" -ForegroundColor Gray
         Write-Log "Series rename: $($takenEpisodes.Count + $takenExtras.Count) file(s) already in final format, left unchanged"

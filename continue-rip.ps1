@@ -1555,7 +1555,7 @@ if ($StartFromStepNumber -le 3) {
         $finalOutputDir = $genreSeriesTargetDir
         $script:LastWorkingDirectory = $finalOutputDir
     } elseif ($Series) {
-        # ========== SERIES MODE: Rename to <Title>-S##-E## (extras <Series>\Specials\<Title>-S##-D#-Extra##) ==========
+        # ========== SERIES MODE: Rename to <Title>-S##-E## (extras <Series>\Season 0\<Title>-S##-D#-Extra##) ==========
         # Identical to rip-disc.ps1 - see the comment there. Files stay in Disc$Disc.
         # Read the title-folder name back from disk rather than trusting $safeTitle as text.
         # $seriesBaseDir (set above where $finalOutputDir was built) IS that folder. Matches

@@ -38,7 +38,7 @@ Requirements:
 Part of the standalone utility above: while renaming a series folder, classify each file as episode or
 extra using the criteria ALREADY in place, then move extras out using the existing move logic, so a
 retroactive rename ends up laid out exactly as a fresh `-Series` rip. Since 2026-10-05 extras go to
-the series-level `Specials` folder, not `DiscN\extras\`; the notes below describe the PR #143 design.
+the series-level `Season 0` folder, not `DiscN\extras\`; the notes below describe the PR #143 design.
 
 Reuse (no new criteria):
 - Classification: `Get-SeriesTitleClassification` in `SeriesEpisodes.ps1` (play-all/composite 70-130%
@@ -59,15 +59,15 @@ The user confirmed `S##-E##` episode renaming works on a real disc (Silicon Vall
 unconfirmed against real hardware/APIs: the Disc 2+ start-episode prompt, extras detection, a live
 TMDb lookup, and a real TheDiscDB hash match - ideally a Blu-ray likely to already be in TheDiscDB's
 catalogue (ripped with `-Drive X:` so the hash can actually be computed; see the TheDiscDB section of
-the README for why `-DriveIndex` alone skips it). The new `<Series>\Specials\` extras location
+the README for why `-DriveIndex` alone skips it). The new `<Series>\Season 0\` extras location
 (below) also needs a real rip.
 
-### Jellyfin and series extras - DONE 2026-10-05 (moved to `<Series>\Specials\`)
+### Jellyfin and series extras - DONE 2026-10-05 (moved to `<Series>\Season 0\`)
 Jellyfin did NOT pick up PR #143's `DiscN\extras\` (checked on Silicon Valley S03). Jellyfin's docs
 only recognise extras folders at series or season level. The user decided that series extras go in a
-`Specials` folder at series level, beside the `Season N` folders (Jellyfin treats it as Season 00),
+`Season 0` folder at series level, beside the `Season N` folders (Jellyfin treats it as Season 00),
 named `<Title>-S##-D#-Extra##` so discs sharing the folder never collide. Still to check: how Jellyfin
-lists `-S##-D#-Extra##` files inside Specials (as specials with no TMDb match), and moving extras
+lists `-S##-D#-Extra##` files inside Season 0 (as specials with no TMDb match), and moving extras
 already sitting in old `DiscN\extras\` folders (the user moved Silicon Valley S03's by hand).
 
 ### Deferred: port series naming to the C# `RipDisc -processQueue` / `-Queue` path

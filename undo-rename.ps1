@@ -9,10 +9,10 @@
 
     Names are resolved relative to the manifest's own folder (not the absolute paths
     recorded in it), so the undo still works after the folder or drive letter changes.
-    Extras were moved into the series-level "Specials" folder, so their NewName is
-    recorded as ..\..\Specials\<name> (..\Specials\<name> when there is no Season or
+    Extras were moved into the series-level "Season 0" folder (earlier runs: "Specials"), so their NewName is
+    recorded as ..\..\Season 0\<name> (..\Season 0\<name> when there is no Season or
     DiscN level); manifests from before that (PR #143) record extras\<name>. Undo moves
-    them back into the DiscN folder and removes the Specials / extras folder if that
+    them back into the DiscN folder and removes the Season 0 / Specials / extras folder if that
     leaves it empty. Those shapes are the only paths accepted.
 
     Safe by default:
@@ -59,10 +59,10 @@ foreach ($row in $rows) {
     $newName = "$($row.NewName)"
     $originalName = "$($row.OriginalName)"
 
-    # Bare names only, except that NewName may sit in the series-level Specials folder (one
+    # Bare names only, except that NewName may sit in the series-level Season 0 (or older Specials) folder (one
     # or two levels up) or a PR #143-era extras subfolder - a row pointing anywhere else
     # (other folders, other .. paths, rooted paths) is refused, not followed.
-    $newNameOk = ($newName -match '^(?:extras[\\/]|(?:\.\.[\\/]){1,2}Specials[\\/])?[^\\/:]+$') -and ($newName -notmatch '(^|[\\/])\.\.?$')
+    $newNameOk = ($newName -match '^(?:extras[\\/]|(?:\.\.[\\/]){1,2}(?:Season 0|Specials)[\\/])?[^\\/:]+$') -and ($newName -notmatch '(^|[\\/])\.\.?$')
     if (-not $newName -or -not $originalName -or -not $newNameOk -or $originalName -match '[\\/:]') {
         Write-Warning "Skipping malformed row: '$originalName' / '$newName'"
         $skipped++
@@ -101,8 +101,8 @@ foreach ($row in $rows) {
     }
 }
 
-# Remove the Specials / extras folder if undoing emptied it (it only exists because of
-# renames). Specials is shared by every disc, so it stays while any other disc's extras remain.
+# Remove the Season 0 / Specials / extras folder if undoing emptied it (it only exists because of
+# renames). Season 0 is shared by every disc, so it stays while any other disc's extras remain.
 foreach ($extrasDir in $extrasDirs.Keys) {
     if (-not $WhatIfPreference -and (Test-Path -LiteralPath $extrasDir -PathType Container) -and
         -not (Get-ChildItem -LiteralPath $extrasDir -Force | Select-Object -First 1)) {

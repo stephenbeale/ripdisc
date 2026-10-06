@@ -41,7 +41,7 @@ function Assert-True {
     else { $script:Failed++; Write-Host "  FAIL  $Because" -ForegroundColor Red }
 }
 
-# Video files below a folder as relative paths (Specials\ / extras\ included), sorted.
+# Video files below a folder as relative paths (Season 0\ / extras\ included), sorted.
 function Get-RelNames {
     param([string]$Dir)
     $root = (Resolve-Path -LiteralPath $Dir).ProviderPath.TrimEnd('\') + '\'
@@ -75,12 +75,15 @@ try {
     New-DiscFolder (Join-Path $series 'Season 1\Disc1') @{ 'a_t00.mkv' = 25 }
     New-Item -ItemType Directory -Path (Join-Path $series 'Season 2\Disc1\extras') | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $series 'Season 2\Notes') | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $series 'Specials') | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $series 'Season 0') | Out-Null
 
+    New-Item -ItemType File -Path (Join-Path $series 'Season 0\Show A-S00-E01.mkv') | Out-Null
     $units = @(Get-SeriesRenameUnits -Root $series)
-    Assert-Equal 'S1D1,S2D1,S2D2,S2D10' (($units | ForEach-Object { "S$($_.Season)D$($_.Disc)" }) -join ',') 'series root: seasons in order, discs in NUMERIC order (Disc10 after Disc2), Specials/extras/other folders ignored'
+    Assert-Equal 'S1D1,S2D1,S2D2,S2D10' (($units | ForEach-Object { "S$($_.Season)D$($_.Disc)" }) -join ',') 'series root: seasons in order, discs in NUMERIC order (Disc10 after Disc2), Season 0/extras/other folders ignored (Season 0 matches the season pattern as season 0 but is never a unit)'
     Assert-True (@($units | Where-Object { $_.Title -ne 'Show A' }).Count -eq 0) 'title comes from the series folder name'
 
+    Assert-Equal 0 @(Get-SeriesRenameUnits -Root (Join-Path $series 'Season 0')).Count 'pointing rename-series at the Season 0 folder itself yields no units'
+    Assert-True ($null -ne (Get-SeasonFolderNumber 'Season 0') -and 0 -eq (Get-SeasonFolderNumber 'Season 0')) 'Get-SeasonFolderNumber still reads Season 0 as 0 (callers filter it)'
     $units = @(Get-SeriesRenameUnits -Root (Join-Path $series 'Season 2'))
     Assert-Equal 'Show A' $units[0].Title 'season folder: title is the folder above'
     Assert-Equal '2' "$($units[0].Season)" 'season folder: season parsed from "Season 2"'
@@ -119,19 +122,19 @@ try {
     Assert-Equal $before2 (Get-RelNames $d2) 'dry run: Disc2 file names unchanged'
     Assert-True (-not (Test-Path (Join-Path $d1 'rename-manifest.csv'))) 'dry run: no manifest written'
     Assert-True (-not (Test-Path (Join-Path $d1 'undo-rename.ps1'))) 'dry run: no undo script copied'
-    Assert-True (-not (Test-Path (Join-Path $show 'Specials'))) 'dry run: no Specials folder created'
+    Assert-True (-not (Test-Path (Join-Path $show 'Season 0'))) 'dry run: no Season 0 folder created'
     Assert-Equal 6 $s.Planned 'dry run: reports 6 files planned'
     Assert-Equal 0 $s.Renamed 'dry run: reports 0 renamed'
     $plan2 = @($s.Results[1].Result.Plan | Where-Object { $_.Kind -eq 'Episode' } | ForEach-Object { $_.NewName }) -join ','
     Assert-Equal 'Silicon Test-S03-E04.mkv,Silicon Test-S03-E05.mkv' $plan2 'dry run: Disc2 planned from E04 (continues after the PLANNED Disc1 episodes E01-E03)'
-    Assert-Equal '..\..\Specials\Silicon Test-S03-D1-Extra01.mkv' (@($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' })[0].NewName) 'dry run: the 5-minute title is planned as <Series>\Specials\...-S03-D1-Extra01'
+    Assert-Equal '..\..\Season 0\Silicon Test-S03-D1-Extra01.mkv' (@($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' })[0].NewName) 'dry run: the 5-minute title is planned as <Series>\Season 0\...-S03-D1-Extra01'
 
     # ---------------------------------------------------------------------------
     Write-Host "`nApply: rename, manifest before move, undo copied" -ForegroundColor Cyan
 
     $s = Invoke-SeriesRetroRename -Root $show -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     Assert-Equal 'Silicon Test-S03-E01.mkv,Silicon Test-S03-E02.mkv,Silicon Test-S03-E03.mkv' (Get-RelNames $d1) 'apply: Disc1 episodes renamed in place'
-    Assert-Equal 'Silicon Test-S03-D1-Extra01.mkv' (Get-RelNames (Join-Path $show 'Specials')) 'apply: the extra moved to the series-level Specials folder'
+    Assert-Equal 'Silicon Test-S03-D1-Extra01.mkv' (Get-RelNames (Join-Path $show 'Season 0')) 'apply: the extra moved to the series-level Season 0 folder'
     Assert-Equal 'Silicon Test-S03-E04.mkv,Silicon Test-S03-E05.mkv' (Get-RelNames $d2) 'apply: Disc2 continues at E04'
     Assert-Equal 6 $s.Renamed 'apply: reports 6 renamed'
     foreach ($d in @($d1, $d2)) {
@@ -143,7 +146,7 @@ try {
     Assert-Equal 'OriginalName,NewName,Kind,OriginalPath,NewPath,Timestamp' ($rows[0].PSObject.Properties.Name -join ',') 'manifest uses the ripdisc column format'
     Assert-Equal 4 $rows.Count 'Disc1 manifest has a row per renamed file'
     Assert-Equal 'SV_t00.mkv' $rows[0].OriginalName 'manifest records the ORIGINAL file name'
-    Assert-Equal '..\..\Specials\Silicon Test-S03-D1-Extra01.mkv' (($rows | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'manifest records the extra as ..\..\Specials\<name>'
+    Assert-Equal '..\..\Season 0\Silicon Test-S03-D1-Extra01.mkv' (($rows | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'manifest records the extra as ..\..\Season 0\<name>'
 
     # ---------------------------------------------------------------------------
     Write-Host "`nRe-running is a no-op (already-renamed files left alone)" -ForegroundColor Cyan
@@ -160,9 +163,9 @@ try {
 
     & (Join-Path $d1 'undo-rename.ps1') *> $null
     & (Join-Path $d2 'undo-rename.ps1') *> $null
-    Assert-Equal $before1 (Get-RelNames $d1) 'undo: Disc1 back to original names (extra moved back from Specials)'
+    Assert-Equal $before1 (Get-RelNames $d1) 'undo: Disc1 back to original names (extra moved back from Season 0)'
     Assert-Equal $before2 (Get-RelNames $d2) 'undo: Disc2 back to original names'
-    Assert-True (-not (Test-Path (Join-Path $show 'Specials'))) 'undo: emptied Specials folder removed'
+    Assert-True (-not (Test-Path (Join-Path $show 'Season 0'))) 'undo: emptied Season 0 folder removed'
     Assert-True (-not (Test-Path (Join-Path $d1 'rename-manifest.csv'))) 'undo: a fully undone manifest is retired, so the next rename starts a fresh one'
     Assert-Equal 1 @(Get-ChildItem -LiteralPath $d1 -Filter 'rename-manifest.undone-*.csv').Count 'undo: ...and kept as rename-manifest.undone-<timestamp>.csv'
 
@@ -271,13 +274,13 @@ try {
     Assert-Equal 'Joking Apart-S01-E01.mp4,Joking Apart-S01-E02.mp4,Joking Apart-S01-E03.mp4,Joking Apart-S01-E04.mp4,Joking Apart-S01-E05.mp4,Joking Apart-S01-E06.mp4' $p1 'Series 1: six files -> E01-E06 (existing extras\ file ignored)'
     $s2plan = @($s.Results[1].Result.Plan)
     Assert-Equal 8 $s2plan.Count 'Series 2: one plan covering both discs (8 files)'
-    Assert-Equal '..\Specials\Joking Apart-S02-Extra01.mp4' (($s2plan | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the 5-minute Disc 1 title is planned as an extra'
+    Assert-Equal '..\Season 0\Joking Apart-S02-Extra01.mp4' (($s2plan | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the 5-minute Disc 1 title is planned as an extra'
     Assert-Equal 'Joking Apart-S02-E07.mp4' (($s2plan | Where-Object { $_.OriginalName -like '*Disc 2*' }).NewName) 'the Disc 2 file comes after the Disc 1 episodes (E07)'
 
     # Apply
     $s = Invoke-SeriesRetroRename -Root $ja -Apply -Yes -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     Assert-Equal 'Joking Apart-S02-E01.mp4,Joking Apart-S02-E02.mp4,Joking Apart-S02-E03.mp4,Joking Apart-S02-E04.mp4,Joking Apart-S02-E05.mp4,Joking Apart-S02-E06.mp4,Joking Apart-S02-E07.mp4' (Get-RelNames $ja2) 'apply: Series 2 episodes E01-E07 across both discs, extra moved to extras\'
-    Assert-Equal 'Joking Apart-S02-Extra01.mp4' (Get-RelNames (Join-Path $ja 'Specials')) 'apply: the Series 2 extra moved to the series-level Specials folder, beside the season folders'
+    Assert-Equal 'Joking Apart-S02-Extra01.mp4' (Get-RelNames (Join-Path $ja 'Season 0')) 'apply: the Series 2 extra moved to the series-level Season 0 folder, beside the season folders'
     Assert-True (Test-Path -LiteralPath (Join-Path $ja1 'extras\Joking Apart-Series 1-B1_t05.mp4')) 'apply: the pre-existing extras file is left exactly where it was, under its old name'
     $rows = @(Import-Csv -LiteralPath (Join-Path $ja2 'rename-manifest.csv'))
     Assert-Equal 8 $rows.Count 'one manifest holding a row for every file of both discs'
@@ -307,7 +310,7 @@ try {
     New-DiscFolder $x @{ 'Xtra-Series 1 Disc 1-A_t00.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t01.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t03.mkv' = 30; 'Xtra-Series 1 Disc 1-A_t02.mkv' = 4; 'Xtra-Series 1 Disc 2-B_t00.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t01.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t03.mkv' = 30; 'Xtra-Series 1 Disc 2-B_t02.mkv' = 4 }
     $s = Invoke-SeriesRetroRename -Root $x -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     $xe = @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Extra' } | ForEach-Object { $_.NewName }) -join ','
-    Assert-Equal '..\Specials\Xtra-S01-Extra01.mkv,..\Specials\Xtra-S01-Extra02.mkv' $xe 'dry run: the two discs extras are Extra01 and Extra02, never a second Extra01'
+    Assert-Equal '..\Season 0\Xtra-S01-Extra01.mkv,..\Season 0\Xtra-S01-Extra02.mkv' $xe 'dry run: the two discs extras are Extra01 and Extra02, never a second Extra01'
     $xep = @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Episode' } | ForEach-Object { $_.OriginalName }) -join ','
     Assert-Equal 'Xtra-Series 1 Disc 1-A_t00.mkv,Xtra-Series 1 Disc 1-A_t01.mkv,Xtra-Series 1 Disc 1-A_t03.mkv,Xtra-Series 1 Disc 2-B_t00.mkv,Xtra-Series 1 Disc 2-B_t01.mkv,Xtra-Series 1 Disc 2-B_t03.mkv' $xep 'episodes numbered in disc-then-title order'
 
@@ -334,7 +337,7 @@ try {
     $s = Invoke-SeriesRetroRename -Root $boys -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     Assert-Equal 3 $s.Units 'three units: Season 1 plus the two Disc folders'
     $sp = @($s.Results[0].Result.Plan)
-    Assert-Equal '..\Specials\Boys from the Black Stuff-S01-Extra01.mp4' (($sp | Where-Object { $_.OriginalName -eq 'B1_T00-1.mp4' }).NewName) 'the 4-minute token-less file is an EXTRA (judged against the Disc 1 title, not alone)'
+    Assert-Equal '..\Season 0\Boys from the Black Stuff-S01-Extra01.mp4' (($sp | Where-Object { $_.OriginalName -eq 'B1_T00-1.mp4' }).NewName) 'the 4-minute token-less file is an EXTRA (judged against the Disc 1 title, not alone)'
     Assert-Equal 'Boys from the Black Stuff-S01-E01.mp4' (($sp | Where-Object { $_.OriginalName -like '*Disc 1*' }).NewName) 'the Disc 1 title is E01'
     Assert-Equal 'Boys from the Black Stuff-S01-E02.mp4,Boys from the Black Stuff-S01-E03.mp4' (@($s.Results[1].Result.Plan | ForEach-Object { $_.NewName }) -join ',') '"-Disc 2" folder continues the season at E02'
     Assert-Equal 'Boys from the Black Stuff-S01-E04.mp4,Boys from the Black Stuff-S01-E05.mp4' (@($s.Results[2].Result.Plan | ForEach-Object { $_.NewName }) -join ',') '"-Disc 3" folder continues at E04'
@@ -368,7 +371,7 @@ try {
     Assert-Equal 6 @($s.Results[0].Result.Plan | Where-Object { $_.Kind -eq 'Episode' }).Count 'the six 30-minute titles are episodes'
 
     # ---------------------------------------------------------------------------
-    Write-Host "`nSpecials (S00): flagged when much too long, made only on request" -ForegroundColor Cyan
+    Write-Host "`nSeason 0 (S00): flagged when much too long, made only on request" -ForegroundColor Cyan
 
     $sp = Join-Path $tempRoot 'Black Stuff'
     $sp1 = Join-Path $sp 'Season 1'
@@ -386,8 +389,8 @@ try {
 
     $s = Invoke-SeriesRetroRename -Root $sp -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     $p1 = @($s.Results[0].Result.Plan)
-    Assert-Equal '..\Specials\Black Stuff-S00-E01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Special' }).NewName) '-MarkKinds Special: <Title>-S00-E01 in the series Specials folder'
-    Assert-Equal '..\Specials\Black Stuff-S01-Extra01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the short title is still an extra'
+    Assert-Equal '..\Season 0\Black Stuff-S00-E01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Special' }).NewName) '-MarkKinds Special: <Title>-S00-E01 in the series Season 0 folder'
+    Assert-Equal '..\Season 0\Black Stuff-S01-Extra01.mp4' (($p1 | Where-Object { $_.Kind -eq 'Extra' }).NewName) 'the short title is still an extra'
     Assert-Equal 'Black Stuff-S01-E01.mp4,Black Stuff-S01-E02.mp4' (@($s.Results[1].Result.Plan | ForEach-Object { $_.NewName }) -join ',') 'a special uses no episode number: Disc 2 starts at E01'
 
     # An episode missing from the rip: -StartEpisode on the folder after the gap wins over the suggestion.
@@ -396,26 +399,26 @@ try {
 
     # Apply the special, check undo brings it back and retires the manifest.
     $null = Invoke-SeriesRetroRename -Root $sp1 -Apply -Yes -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration -UndoScriptSource $undoPath 6>&1
-    Assert-Equal 'Black Stuff-S00-E01.mp4,Black Stuff-S01-Extra01.mp4' (Get-RelNames (Join-Path $sp 'Specials')) 'apply: special and extra both in Specials'
+    Assert-Equal 'Black Stuff-S00-E01.mp4,Black Stuff-S01-Extra01.mp4' (Get-RelNames (Join-Path $sp 'Season 0')) 'apply: special and extra both in Season 0'
     Assert-Equal 'Special' (@(Import-Csv -LiteralPath (Join-Path $sp1 'rename-manifest.csv') | Where-Object { $_.NewName -like '*S00-E01*' })[0].Kind) 'manifest records Kind Special'
     $s = Invoke-SeriesRetroRename -Root $sp2 -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
     Assert-Equal 'Black Stuff-S01-E01.mp4' (@($s.Results[0].Result.Plan)[0].NewName) 'a renamed special is not counted as an earlier episode'
     & (Join-Path $sp1 'undo-rename.ps1') *> $null
     Assert-Equal $beforeSp1 (Get-RelNames $sp1) 'undo: special and extra back under their original names'
 
-    # A second special in the same Specials folder takes S00-E02.
-    New-Item -ItemType Directory -Path (Join-Path $sp 'Specials') -Force | Out-Null
-    New-Item -ItemType File -Path (Join-Path $sp 'Specials\Black Stuff-S00-E01.mp4') | Out-Null
+    # A second special in the same Season 0 folder takes S00-E02.
+    New-Item -ItemType Directory -Path (Join-Path $sp 'Season 0') -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $sp 'Season 0\Black Stuff-S00-E01.mp4') | Out-Null
     $s = Invoke-SeriesRetroRename -Root $sp1 -NoTmdb -MarkKinds @{ '*Disc 1 - E01*' = 'Special' } -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
-    Assert-Equal '..\Specials\Black Stuff-S00-E02.mp4' ((@($s.Results[0].Result.Plan) | Where-Object { $_.Kind -eq 'Special' }).NewName) 'an existing S00-E01 in Specials pushes the new special to S00-E02'
-    Remove-Item -LiteralPath (Join-Path $sp 'Specials') -Recurse -Force
+    Assert-Equal '..\Season 0\Black Stuff-S00-E02.mp4' ((@($s.Results[0].Result.Plan) | Where-Object { $_.Kind -eq 'Special' }).NewName) 'an existing S00-E01 in Season 0 pushes the new special to S00-E02'
+    Remove-Item -LiteralPath (Join-Path $sp 'Season 0') -Recurse -Force
 
     # Edit at the prompt: "e" then "2s" makes row 2 a special.
     $answers = New-Object System.Collections.Queue
     'e', '2s', 'y' | ForEach-Object { $answers.Enqueue($_) }
     $readEdit = { param($p) if ($answers.Count -gt 0) { $answers.Dequeue() } else { $null } }.GetNewClosure()
     $null = Invoke-SeriesRetroRename -Root $sp1 -Apply -NoTmdb -GetDuration $getDuration -UndoScriptSource $undoPath -ReadInput $readEdit 6>&1
-    Assert-True (Test-Path -LiteralPath (Join-Path $sp 'Specials\Black Stuff-S00-E01.mp4')) 'prompt edit "2s": row 2 renamed as special S00-E01'
+    Assert-True (Test-Path -LiteralPath (Join-Path $sp 'Season 0\Black Stuff-S00-E01.mp4')) 'prompt edit "2s": row 2 renamed as special S00-E01'
     & (Join-Path $sp1 'undo-rename.ps1') *> $null
 
     # ---------------------------------------------------------------------------

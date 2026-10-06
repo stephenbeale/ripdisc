@@ -4,7 +4,7 @@
 # Dot-sourced by rename-series.ps1 AFTER SeriesEpisodes.ps1. It adds no naming, no
 # classification and no manifest logic of its own: every folder goes through the same
 # Invoke-SeriesEpisodeRename a live -Series rip uses (episode vs extra criteria, TMDb
-# runtimes, <Title>-S##-E## / Specials\<Title>-S##-D#-Extra## names, the confirmation table,
+# runtimes, <Title>-S##-E## / Season 0\<Title>-S##-D#-Extra## names, the confirmation table,
 # rename-manifest.csv written BEFORE any file moves, undo-rename.ps1 copied next to it,
 # never overwriting). This file only works out WHICH folders to run it on, in what order,
 # and where each folder's episode numbering starts.
@@ -41,8 +41,10 @@ function Get-DiscNumberFromFileName {
 }
 
 # Finds the folders to process. Only season / Disc folders become units, so a folder
-# named "Specials" or "extras" (already-moved extras) is never treated as one and its
-# files are never renamed here.
+# named "Season 0" (the extras/specials folder), "Specials" (its PR #152 name) or "extras"
+# (already-moved extras) is never treated as one and its files are never renamed here.
+# "Season 0" matches the season-folder pattern as season number 0, so season 0 is
+# excluded explicitly: it is never a season to rename.
 #
 # A season folder with no Disc subfolders holds its files directly and is ONE unit, even
 # when the names carry "Disc N" tokens (older rips put several discs in one folder): one
@@ -105,6 +107,8 @@ function Get-SeriesRenameUnits {
             $t = if ($Title) { $Title } else { $parentLeaf }
         }
         $units.Add([pscustomobject]@{ Directory = $Root; Title = $t; Season = $s; Disc = $leafDisc; SeasonDir = $parent })
+    } elseif ($leafSeason -eq 0 -and $null -ne $leafSeason) {
+        # The Season 0 extras folder itself: nothing to rename.
     } elseif ($null -ne $leafSeason) {
         $t = if ($Title) { $Title } else { $parentLeaf }
         $found = & $addDiscUnits $Root $t $leafSeason
@@ -113,7 +117,7 @@ function Get-SeriesRenameUnits {
         # A series folder: season children (and/or Disc children when there is no season folder).
         $t = if ($Title) { $Title } else { $leaf }
         $seasonDirs = @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $null -ne (Get-SeasonFolderNumber $_.Name) } |
+            Where-Object { $n = Get-SeasonFolderNumber $_.Name; $null -ne $n -and $n -gt 0 } |
             Sort-Object { Get-SeasonFolderNumber $_.Name })
         foreach ($sd in $seasonDirs) {
             $s = Get-SeasonFolderNumber $sd.Name
