@@ -19,6 +19,65 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-06 - rename-series.ps1 Fixes (branch `fix/rename-series-folder-classification`)
+
+Fixed three #151 bugs, plus -WhatIf:
+- **One unit per folder.** A Season folder holding files directly is one table and one
+  classification, even when names carry "Disc N" tokens. The FileFilter/ReservedExtras
+  per-disc units are gone. Only the play-all check still runs per disc (`-GroupOf` ->
+  `Get-SeriesTitleClassification -Groups`). Fixes the lone 4:27 extra becoming an episode.
+- **`<Show>-Disc N` folders.** These are now recognised (`Get-DiscFolderNumber`,
+  `Get-SuggestedStartEpisode`). Disc folders beside exactly one Season folder join that
+  season, and season 0 shares S01's numbering.
+- **Numeric sort.** Files are sorted with numbers compared as numbers, so `(2)` comes
+  before `(10)`. This also applies to live rips.
+- **-WhatIf.** `rename-series.ps1` now accepts -WhatIf (`SupportsShouldProcess`), and it
+  always means a dry run.
+
+**Tests:** 472/472 pass (`Test-SeriesRetroRename.ps1` 107).
+
+**Real-file test:** run on the copy `C:\Video\Series\Boys From the Black Stuff`.
+- Apply gave the extra to Season 0 and E01-E05 across Season 1, -Disc 2 and -Disc 3.
+- Undo fully restored the original names. The copy is left at original names.
+- Still open: the 1:42:26 Disc 1 title becomes E01. It may be the 1980 play, which needs
+  S00/too-long handling (not done).
+- F: not touched. **Before running on F:**, delete the stale `rename-manifest.csv` and
+  `undo-rename.ps1` in `F:\...\Boys From the Black Stuff\Season 1`. If they stay, the
+  apply appends to them, and undo would replay the old rows (manifest-append bug, still open).
+
+**Added later the same day (also on PR #153), 491/491 tests pass (`Test-SeriesRetroRename.ps1` 126):**
+1. **Season 0 (S00).** New Kind `Special`, named `<Title>-S00-E##` in the series-level
+   `Season 0` folder. Numbering skips existing S00 files and specials already planned by
+   earlier folders in the same run. A title at least 1.6x the expected length (TMDb runtime,
+   else the median) is FLAGGED "a special?" but stays an episode, because double episodes
+   look the same by length. To make a special: `rename-series.ps1 -MarkSpecial`, `-MarkExtra`
+   or `-MarkEpisode` (wildcards on original names), or the prompt's edit option, which takes
+   `2s` / `2x` / `2e`. `Get-SuggestedStartEpisode` ignores Special rows.
+2. **Explicit `-StartEpisode` wins** for the first folder of each season, even over the
+   start suggested from earlier discs.
+3. **Manifest-after-undo fixed.** When `undo-rename.ps1` undoes every row it renames the
+   manifest to `rename-manifest.undone-<stamp>[-n].csv`, so the next apply starts fresh.
+4. **EOF at the confirmation prompt now declines** (it used to accept).
+
+**Next (F: Boys From the Black Stuff, once #153 merges; dry-run each first):**
+1. Rename the stale `Season 1\rename-manifest.csv` to `rename-manifest.undone-old.csv` (keep it).
+2. `.\rename-series.ps1 "F:\Series\Boys From the Black Stuff\Season 1" -MarkSpecial "*Disc 1 - E01*" -Apply`
+   (the 1:42:26 title is "The Black Stuff", 1980 Play for Today, so S00-E01; the 4:27 `B1_T00-1.mp4` is an extra).
+3. `... "...\Boys from the Black Stuff-Disc 2" -StartEpisode 1 -Apply`
+4. `... "...\Boys from the Black Stuff-Disc 3" -StartEpisode 4 -Apply`
+- E03 "Shop Thy Neighbour" (60 min) was never ripped; re-rip it. Runtimes: E1 54, E2 57, E3 60, E4 68, E5 68.
+- TMDb key is not set, so detection is length-only.
+
+### 2026-10-06 - Extras folder renamed `Specials` to `Season 0` (on PR #153)
+
+**Decision (user, 2026-10-06):** `Season 0` is the best name for the series-level extras and
+specials folder, so new extras go to `<Series>\Season 0\` (manifest NewName `..\..\Season 0\<name>`
+or `..\Season 0\<name>`). The `Specials` name from PR #152 is only read now: `undo-rename.ps1`
+still accepts `..\Specials\` rows and legacy `extras\`, and number reservation still reads an
+existing `Specials` folder and `DiscN\extras`. "Season 0" matches the season-folder pattern
+as season 0, so `Get-SeriesRenameUnits` skips season-0 folders (never a unit to rename).
+Existing on-disk `Specials` folders are NOT migrated. The `-Specials` option idea below is unrelated.
+
 ### 2026-10-05 - rename-series.ps1 (PR #151, merged 71a74c0)
 
 `rename-series.ps1` + `SeriesRetroRename.ps1` rename already-ripped series folders to
@@ -33,23 +92,23 @@ lexical sort of `(1)..(12)` filenames. PR #152 (extras to Specials) was rebased 
 ### 2026-10-05 - Series Extras Move to `<Series>\Specials` (PR #152)
 
 **Decision:** Jellyfin did not pick up PR #143's `DiscN\extras\` (Silicon Valley S03); its docs
-only recognise extras folders at series or season level. The user chose `<Series>\Specials\`
+only recognise extras folders at series or season level. The user chose `<Series>\Season 0\`
 beside the Season folders. S##-E## renaming (PR #140) was confirmed working on a real disc.
 
 **What changed (PR #152, `fix/series-extras-specials`, worktree `ripdisc-specials`, 77d3b2f):**
 extras are named `<Title>-S##-D#-Extra##[-label]` (disc part avoids collisions in the shared
-folder). The manifest stays in `DiscN` with NewName `..\..\Specials\<name>`. `undo-rename.ps1`
-accepts that and legacy `extras\<name>`, and removes Specials only when empty. Re-runs reserve
-numbers from Specials and legacy `DiscN\extras`. 411/411 PowerShell tests pass.
+folder). The manifest stays in `DiscN` with NewName `..\..\Season 0\<name>`. `undo-rename.ps1`
+accepts that and legacy `extras\<name>`, and removes Season 0 only when empty. Re-runs reserve
+numbers from Season 0 and legacy `DiscN\extras`. 411/411 PowerShell tests pass.
 
 **PR history:** #152 was stacked on #151, then rebased onto main after #151 squash-merged.
 The Specials layout has NOT been retested on the C: Joking Apart copy (do that before F:).
 
 **Next steps:**
-1. Retest Specials on the C: Joking Apart copy before running rename-series.ps1 on F:.
-2. Real series rip with extras; confirm they land in Specials.
-3. Check how Jellyfin lists the `-S##-D#-Extra##` files in Specials.
-4. Migrate old `DiscN\extras` folders into Specials via rename-series.ps1 (not migrated).
+1. Retest Season 0 on the C: Joking Apart copy before running rename-series.ps1 on F:.
+2. Real series rip with extras; confirm they land in Season 0.
+3. Check how Jellyfin lists the `-S##-D#-Extra##` files in Season 0.
+4. Migrate old `DiscN\extras` folders into Season 0 via rename-series.ps1 (not migrated).
 5. Housekeeping: stale worktrees `ripdisc-docs-roadmap` and `ripdisc-core-extraction`
    (branches merged) and a stray `nul` file in the ripdisc root.
 

@@ -4,7 +4,7 @@
 # Dot-sourced by rename-series.ps1 AFTER SeriesEpisodes.ps1. It adds no naming, no
 # classification and no manifest logic of its own: every folder goes through the same
 # Invoke-SeriesEpisodeRename a live -Series rip uses (episode vs extra criteria, TMDb
-# runtimes, <Title>-S##-E## / Specials\<Title>-S##-D#-Extra## names, the confirmation table,
+# runtimes, <Title>-S##-E## / Season 0\<Title>-S##-D#-Extra## names, the confirmation table,
 # rename-manifest.csv written BEFORE any file moves, undo-rename.ps1 copied next to it,
 # never overwriting). This file only works out WHICH folders to run it on, in what order,
 # and where each folder's episode numbering starts.
@@ -12,7 +12,9 @@
 # Layout it understands (the one rip-disc.ps1 produces):
 #   <root>\<Title>\Season N\DiscN\*.mkv|mp4
 #   <root>\<Title>\DiscN\...            (a series ripped without -Season: S01 fallback)
-# and accepts the root at any level: the series folder, one Season folder, or one DiscN.
+# plus older layouts: "Disc 2" / "<Title>-Disc 2" folders, and a Season folder holding
+# the files directly. It accepts the root at any level: the series folder, one Season
+# folder, or one Disc folder.
 
 # Season number from a folder name, or $null. Accepts "Season 2", "Series 1", and a
 # trailing form after any prefix: "Joking Apart-Series 1", "Joking Apart Series 1",
@@ -23,10 +25,11 @@ function Get-SeasonFolderNumber {
     return $null
 }
 
-# Disc number from a Disc folder name ("Disc1" or "Disc 1"), or $null.
+# Disc number from a Disc folder name, or $null. Accepts "Disc1", "Disc 1" and a trailing
+# form after any prefix: "Boys from the Black Stuff-Disc 2", "Show Disc 3".
 function Get-DiscFolderNumber {
     param([string]$Name)
-    if ($Name -match '(?i)^disc\s*(\d+)$') { return [int]$Matches[1] }
+    if ($Name -match '(?i)(?:^|[\s\-_.])disc\s*(\d+)$') { return [int]$Matches[1] }
     return $null
 }
 
@@ -38,13 +41,19 @@ function Get-DiscNumberFromFileName {
 }
 
 # Finds the folders to process. Only season / Disc folders become units, so a folder
-# named "Specials" or "extras" (already-moved extras) is never treated as one and its
-# files are never renamed here.
+# named "Season 0" (the extras/specials folder), "Specials" (its PR #152 name) or "extras"
+# (already-moved extras) is never treated as one and its files are never renamed here.
+# "Season 0" matches the season-folder pattern as season number 0, so season 0 is
+# excluded explicitly: it is never a season to rename.
 #
-# A season folder with no Disc subfolders holds its files directly. When their names carry
-# a "Disc N" token (older rips put several discs in one folder), each disc becomes its own
-# unit - same folder, a FileFilter picking that disc's files - so numbering continues
-# across them. Nothing is moved into new Disc folders.
+# A season folder with no Disc subfolders holds its files directly and is ONE unit, even
+# when the names carry "Disc N" tokens (older rips put several discs in one folder): one
+# table, one classification over all its files, numbered in disc-then-name order. The
+# play-all check still runs per disc (GroupOf). Nothing is moved into new Disc folders.
+#
+# Disc folders sitting directly under the series folder NEXT TO a single Season folder
+# (Boys from the Black Stuff: Season 1 holding disc 1, then "<Title>-Disc 2", "-Disc 3")
+# belong to that season, so numbering carries on from it.
 function Get-SeriesRenameUnits {
     param(
         [string]$Root,
@@ -70,40 +79,15 @@ function Get-SeriesRenameUnits {
                 Season    = $UnitSeason
                 Disc      = (Get-DiscFolderNumber $d.Name)
                 SeasonDir = $ParentDir
-                FileFilter = $null
             })
         }
         return $discs.Count
     }
 
-    # A season folder with no Disc subfolders: one unit, or one per "Disc N" file-name token.
-    $addFlatSeasonUnits = {
+    # A season folder with no Disc subfolders: one unit for all its files.
+    $addFlatSeasonUnit = {
         param([string]$Dir, [string]$UnitTitle, [int]$UnitSeason)
-        $pattern = Get-SeriesNamePattern -Title $UnitTitle -Season $UnitSeason
-        $videos = @(Get-ChildItem -LiteralPath $Dir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -match '^\.(mp4|mkv)$' -and $_.Name -notmatch $pattern })
-        $tokens = @($videos | ForEach-Object { Get-DiscNumberFromFileName $_.Name } | Where-Object { $null -ne $_ } | Sort-Object -Unique)
-        if ($tokens.Count -eq 0) {
-            $units.Add([pscustomobject]@{ Directory = $Dir; Title = $UnitTitle; Season = $UnitSeason; Disc = 0; SeasonDir = $Dir; FileFilter = $null })
-            return
-        }
-        # Files with no token (if any) come first as their own unit, then each disc in order.
-        if (@($videos | Where-Object { $null -eq (Get-DiscNumberFromFileName $_.Name) }).Count -gt 0) {
-            $units.Add([pscustomobject]@{
-                Directory = $Dir; Title = $UnitTitle; Season = $UnitSeason; Disc = 0; SeasonDir = $Dir
-                FileFilter = { param($n) $null -eq (Get-DiscNumberFromFileName $n) }
-            })
-        }
-        # GetNewClosure() binds the filter to a new dynamic module, which cannot see functions
-        # dot-sourced into rename-series.ps1's script scope - so capture the function itself.
-        $discOf = ${function:Get-DiscNumberFromFileName}
-        foreach ($t in $tokens) {
-            $wanted = [int]$t
-            $units.Add([pscustomobject]@{
-                Directory = $Dir; Title = $UnitTitle; Season = $UnitSeason; Disc = $wanted; SeasonDir = $Dir
-                FileFilter = { param($n) (& $discOf $n) -eq $wanted }.GetNewClosure()
-            })
-        }
+        $units.Add([pscustomobject]@{ Directory = $Dir; Title = $UnitTitle; Season = $UnitSeason; Disc = 0; SeasonDir = $Dir })
     }
 
     $leaf = Split-Path $Root -Leaf
@@ -122,23 +106,28 @@ function Get-SeriesRenameUnits {
             $s = $Season
             $t = if ($Title) { $Title } else { $parentLeaf }
         }
-        $units.Add([pscustomobject]@{ Directory = $Root; Title = $t; Season = $s; Disc = $leafDisc; SeasonDir = $parent; FileFilter = $null })
+        $units.Add([pscustomobject]@{ Directory = $Root; Title = $t; Season = $s; Disc = $leafDisc; SeasonDir = $parent })
+    } elseif ($leafSeason -eq 0 -and $null -ne $leafSeason) {
+        # The Season 0 extras folder itself: nothing to rename.
     } elseif ($null -ne $leafSeason) {
         $t = if ($Title) { $Title } else { $parentLeaf }
         $found = & $addDiscUnits $Root $t $leafSeason
-        if ($found -eq 0) { & $addFlatSeasonUnits $Root $t $leafSeason }
+        if ($found -eq 0) { & $addFlatSeasonUnit $Root $t $leafSeason }
     } else {
         # A series folder: season children (and/or Disc children when there is no season folder).
         $t = if ($Title) { $Title } else { $leaf }
         $seasonDirs = @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $null -ne (Get-SeasonFolderNumber $_.Name) } |
+            Where-Object { $n = Get-SeasonFolderNumber $_.Name; $null -ne $n -and $n -gt 0 } |
             Sort-Object { Get-SeasonFolderNumber $_.Name })
         foreach ($sd in $seasonDirs) {
             $s = Get-SeasonFolderNumber $sd.Name
             $found = & $addDiscUnits $sd.FullName $t $s
-            if ($found -eq 0) { & $addFlatSeasonUnits $sd.FullName $t $s }
+            if ($found -eq 0) { & $addFlatSeasonUnit $sd.FullName $t $s }
         }
-        [void](& $addDiscUnits $Root $t $Season)
+        # Disc folders beside the season folder(s): with exactly one season, they continue it.
+        $rootSeason = $Season
+        if ($rootSeason -eq 0 -and $seasonDirs.Count -eq 1) { $rootSeason = Get-SeasonFolderNumber $seasonDirs[0].Name }
+        [void](& $addDiscUnits $Root $t $rootSeason)
     }
 
     $out = @()
@@ -177,6 +166,9 @@ function Invoke-SeriesRetroRename {
         # With -Apply: accept every folder's confirmation table without asking.
         [switch]$Yes,
         [switch]$NoTmdb,
+        # Wildcard on original file names -> 'Episode'|'Extra'|'Special' (rename-series.ps1
+        # -MarkEpisode / -MarkExtra / -MarkSpecial).
+        [hashtable]$MarkKinds = @{},
         [string]$HandBrakePath = "",
         [string]$UndoScriptSource = "",
         [scriptblock]$ReadInput = { param($p) Read-Host $p },
@@ -196,16 +188,17 @@ function Invoke-SeriesRetroRename {
     Write-Host "$($units.Count) folder(s) to process under $Root" -ForegroundColor Gray
 
     $nextBySeason = @{}
+    $startUsed = @{}
+    $plannedSpecials = @()
     $tmdbBySeason = @{}
-    $reservedExtrasByDir = @{}
     $results = @()
     foreach ($u in $units) {
         $seasonText = if ($u.Season -gt 0) { "Season $($u.Season)" } else { "no season (S01)" }
-        $discText = if ($u.FileFilter) { if ($u.Disc -gt 0) { " - files for Disc $($u.Disc)" } else { " - files with no disc number" } } else { "" }
-        Write-Host "`n=== $($u.Title) - $seasonText - $(Split-Path $u.Directory -Leaf)$discText ===" -ForegroundColor Cyan
+        Write-Host "`n=== $($u.Title) - $seasonText - $(Split-Path $u.Directory -Leaf) ===" -ForegroundColor Cyan
         Write-Host "  $($u.Directory)" -ForegroundColor Gray
 
-        $key = "$($u.Season)"
+        # Season 0 is named S01, so it shares S01's numbering.
+        $key = "$([math]::Max(1, $u.Season))"
         $start = 0
         $fromWhere = ""
         if ($nextBySeason.ContainsKey($key)) { $start = $nextBySeason[$key]; $fromWhere = "continuing after the previous folder" }
@@ -213,20 +206,17 @@ function Invoke-SeriesRetroRename {
             $suggested = Get-SuggestedStartEpisode -SeasonDir $u.SeasonDir -Disc $u.Disc
             if ($suggested -and [int]$suggested -gt $start) { $start = [int]$suggested; $fromWhere = "after the episodes on earlier discs" }
         }
-        if ($u.FileFilter -and $u.Disc -ge 2) {
-            # Several discs share this folder: carry on after any already-renamed episodes in it.
-            $inFolder = Get-SeriesFolderMaxEpisode -Directory $u.Directory -Title $u.Title -Season $u.Season
-            if ($inFolder + 1 -gt $start) { $start = $inFolder + 1; $fromWhere = "after the episodes already renamed in this folder" }
+        if ($StartEpisode -ge 1 -and -not $startUsed.ContainsKey($key)) {
+            # Said on the command line: wins for the first folder of each season, even over
+            # earlier discs (an episode missing from the rip leaves a gap they cannot know).
+            $start = $StartEpisode
+            $fromWhere = "-StartEpisode"
         }
+        $startUsed[$key] = $true
         if ($start -eq 0) {
-            if ($StartEpisode -ge 1) {
-                $start = $StartEpisode
-                $fromWhere = "-StartEpisode"
-            } else {
-                $start = 1
-                if ($u.Disc -ge 2) {
-                    Write-Host "  WARNING: no episodes found on earlier discs - numbering starts at E01. Pass -StartEpisode N if this disc continues a season." -ForegroundColor Yellow
-                }
+            $start = 1
+            if ($u.Disc -ge 2) {
+                Write-Host "  WARNING: no episodes found on earlier discs - numbering starts at E01. Pass -StartEpisode N if this disc continues a season." -ForegroundColor Yellow
             }
         }
         if ($fromWhere) { Write-Host ("  Starting at E{0:D2} ({1})" -f $start, $fromWhere) -ForegroundColor Gray }
@@ -250,11 +240,11 @@ function Invoke-SeriesRetroRename {
             ReadInput        = $ReadInput
             AutoAccept       = [bool]$Yes
             DryRun           = (-not $Apply)
+            GroupOf          = ${function:Get-DiscNumberFromFileName}
+            MarkKinds        = $MarkKinds
+            ReservedSpecials = [int[]]$plannedSpecials
         }
         if ($GetDuration) { $renameArgs.GetDuration = $GetDuration }
-        if ($u.FileFilter) { $renameArgs.FileFilter = $u.FileFilter }
-        $dirKey = $u.Directory.ToLowerInvariant()
-        if ($reservedExtrasByDir.ContainsKey($dirKey)) { $renameArgs.ReservedExtras = [int[]]@($reservedExtrasByDir[$dirKey]) }
         $r = Invoke-SeriesEpisodeRename @renameArgs
         $results += [pscustomobject]@{ Unit = $u; Result = $r }
 
@@ -264,12 +254,9 @@ function Invoke-SeriesRetroRename {
             $m = [regex]::Match($p.NewName, '-E(\d+)\.[^.\\]+$')
             if ($m.Success -and [int]$m.Groups[1].Value -gt $planMax) { $planMax = [int]$m.Groups[1].Value }
         }
-        foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Extra' -and -not $_.Skip })) {
-            $em = [regex]::Match($p.NewName, '-Extra(\d+)')
-            if ($em.Success) {
-                if (-not $reservedExtrasByDir.ContainsKey($dirKey)) { $reservedExtrasByDir[$dirKey] = @() }
-                $reservedExtrasByDir[$dirKey] += [int]$em.Groups[1].Value
-            }
+        foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Special' -and -not $_.Skip })) {
+            $sm = [regex]::Match($p.NewName, '-S00-E(\d+)\.[^.\\]+$')
+            if ($sm.Success) { $plannedSpecials += [int]$sm.Groups[1].Value }
         }
         $folderMax = Get-SeriesFolderMaxEpisode -Directory $u.Directory -Title $u.Title -Season $u.Season
         $next = [math]::Max($planMax, $folderMax) + 1

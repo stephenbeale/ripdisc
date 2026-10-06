@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-06 - Extras Folder Renamed `Specials` to `Season 0`
+
+### Changed
+- New extras and specials go to `<Series>\Season 0\` instead of `<Series>\Specials\` (user decision, 2026-10-06). Manifest `NewName` is now `..\..\Season 0\<name>` (`..\Season 0\<name>` with no Season or DiscN level). Jellyfin reads `Season 0` as Season 00.
+- `undo-rename.ps1` still accepts manifests recorded with `..\Specials\` and legacy `extras\` paths, as well as `Season 0`.
+- A re-run reserves extra and special numbers from an existing `Specials` folder and legacy `DiscN\extras\` as well as `Season 0`, so numbers never collide. Existing `Specials` folders are not moved.
+- `rename-series.ps1` never treats a `Season 0` folder as a season to rename (it matches the season-folder pattern as season number 0, so it is skipped explicitly).
+
 ## 2026-10-05 (continued) - Series Extras Move to `<Series>\Specials\`
 
 ### Changed

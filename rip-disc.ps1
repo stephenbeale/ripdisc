@@ -2715,9 +2715,9 @@ if ($script:IsGenreSeries) {
     $finalOutputDir = $genreSeriesTargetDir
     $script:LastWorkingDirectory = $finalOutputDir
 } elseif ($Series) {
-    # ========== SERIES MODE: Rename to <Title>-S##-E## (extras <Series>\Specials\<Title>-S##-D#-Extra##) ==========
+    # ========== SERIES MODE: Rename to <Title>-S##-E## (extras <Series>\Season 0\<Title>-S##-D#-Extra##) ==========
     # Episodes stay in this disc's Disc$Disc folder - the folder already says which disc
-    # they came from, so the name carries no disc number (extras go to <Series>\Specials). Episodes vs extras, the
+    # they came from, so the name carries no disc number (extras go to <Series>\Season 0). Episodes vs extras, the
     # confirmation prompt, rename-manifest.csv and undo-rename.ps1 all live in
     # SeriesEpisodes.ps1 (shared with continue-rip.ps1).
     # Read the title-folder name back from disk rather than trusting $safeTitle as text.
