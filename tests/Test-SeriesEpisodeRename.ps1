@@ -360,6 +360,20 @@ try {
     $names = Get-RelNames (Join-Path $tempRoot 'Series\Prompt')
     Assert-Equal 'Disc1\Prompt-S01-E01.mp4,Disc1\Prompt-S01-E02.mp4,Season 0\Prompt-S01-D1-Extra01.mp4' $names '"e" then row 2 switches that title to an extra and renumbers the rest'
 
+    # Edit-prompt wording: the help block and Note hint must describe what the parser really does.
+    $helpDir = Join-Path $tempRoot 'Series\Help\Disc1'
+    New-Item -ItemType Directory -Path $helpDir -Force | Out-Null
+    'title_t00.mp4', 'title_t01.mp4', 'title_t02.mp4' | ForEach-Object { Set-Content -Path (Join-Path $helpDir $_) -Value $_ }
+    $helpDur = @{ 'title_t00.mp4' = 1500; 'title_t01.mp4' = 1500; 'title_t02.mp4' = 4000 }
+    $result = Invoke-SeriesEpisodeRename -Directory $helpDir -Title 'Help' -Season 1 -ReadInput (New-InputQueue @('e', '3s 1x', '')) -GetDuration { param($p) $helpDur[(Split-Path -Leaf $p)] } 6>&1 | Out-String
+    Assert-True ($result -match 'a special\?\s+To mark it: \[e\]dit, then type 3s - check') 'the Note hint names the flagged row''s own number'
+    Assert-True ($result -notmatch '\{row\}') 'no unreplaced {row} placeholder reaches the screen'
+    Assert-True ($result -match 'e = episode\s+s = special\s+x = extra') 'the edit help lists the three letters'
+    Assert-True ($result -match '3s\s+make row 3 a special') 'the edit help gives concrete examples using the flagged row'
+    Assert-True ($result -match 'no letter: switch row 3 between episode and extra') 'the edit help explains a bare number toggles episode/extra'
+    $names = Get-RelNames (Join-Path $tempRoot 'Series\Help')
+    Assert-True (($names -split ',') -contains 'Season 0\Help-S00-E01.mp4') 'typing "3s 1x" makes row 3 a special in Season 0'
+
     $collideDir = Join-Path $tempRoot 'Series\Collide\Disc1'
     New-Item -ItemType Directory -Path $collideDir -Force | Out-Null
     Set-Content -Path (Join-Path $collideDir 'title_t00.mp4') -Value 'new'

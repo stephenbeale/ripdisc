@@ -445,7 +445,7 @@ function Get-SeriesTitleClassification {
                 $item.Note = 'matches TMDb'
             } elseif ($item.DurationSec -ge ($expected * $LongRatio)) {
                 $item.Kind = 'Episode'
-                $item.Note = "much longer than E{0:D2} (TMDb ~{1}) - a special? [e]dit, then Ns - check" -f $nextEpisode, (Format-SeriesDuration $expected)
+                $item.Note = "much longer than E{0:D2} (TMDb ~{1}) - a special? To mark it: [e]dit, then type {{row}}s - check" -f $nextEpisode, (Format-SeriesDuration $expected)
                 $item.Mismatch = $true
             } elseif ($item.DurationSec -lt ($expected * $ShortRatio)) {
                 $item.Kind = 'Extra'
@@ -462,7 +462,7 @@ function Get-SeriesTitleClassification {
                 $item.Note = "short (under 60% of typical {0})" -f (Format-SeriesDuration $medianSec)
             } elseif ($null -ne $medianSec -and $item.DurationSec -ge ($medianSec * $LongRatio)) {
                 $item.Kind = 'Episode'
-                $item.Note = "much longer than typical {0} - a special? [e]dit, then Ns - check" -f (Format-SeriesDuration $medianSec)
+                $item.Note = "much longer than typical {0} - a special? To mark it: [e]dit, then type {{row}}s - check" -f (Format-SeriesDuration $medianSec)
                 $item.Mismatch = $true
             } else {
                 $item.Kind = 'Episode'
@@ -590,11 +590,37 @@ function Show-SeriesRenamePlan {
         $p = $Plan[$i]
         $expected = if ($p.ExpectedSec) { Format-SeriesDuration $p.ExpectedSec } else { '-' }
         $color = if ($p.Skip) { 'Red' } elseif ($p.Kind -eq 'Extra') { 'DarkYellow' } elseif ($p.Kind -eq 'Special') { 'Cyan' } elseif ($p.Note -match 'check') { 'Yellow' } else { 'White' }
-        Write-Host ($row -f ($i + 1), $p.OriginalName.PadRight($nameWidth), (Format-SeriesDuration $p.DurationSec), $expected, $p.Kind, $p.Source, $p.NewName.PadRight($newWidth), $p.Note) -ForegroundColor $color
+        Write-Host ($row -f ($i + 1), $p.OriginalName.PadRight($nameWidth), (Format-SeriesDuration $p.DurationSec), $expected, $p.Kind, $p.Source, $p.NewName.PadRight($newWidth), ($p.Note -replace '\{row\}', ($i + 1))) -ForegroundColor $color
     }
     foreach ($w in $Classification.Warnings) {
         Write-Host "  WARNING: $w" -ForegroundColor Yellow
     }
+}
+
+# Help block shown before the "Row(s) to change" prompt. Mirrors exactly what the parser in
+# Confirm-SeriesRenamePlan accepts: tokens separated by spaces/commas, each a row number
+# optionally followed by s / x / e (any case); a bare number toggles episode <-> extra.
+# Examples use real row numbers from the table (first flagged row when there is one).
+function Write-SeriesEditHelp {
+    param([object[]]$Plan)
+
+    $count = $Plan.Count
+    $a = 1
+    for ($i = 0; $i -lt $count; $i++) { if ($Plan[$i].Note -match 'check') { $a = $i + 1; break } }
+    $b = if ($a -lt $count) { $a + 1 } else { [math]::Max(1, $a - 1) }
+    Write-Host ""
+    Write-Host "Type the row number (the # column) of the file to change, then a letter for what it is:" -ForegroundColor Cyan
+    Write-Host "    e = episode      s = special      x = extra" -ForegroundColor Cyan
+    Write-Host "  Examples:" -ForegroundColor Cyan
+    Write-Host "    ${a}s          make row $a a special" -ForegroundColor Gray
+    if ($count -gt 1) {
+        Write-Host "    ${a}s ${b}s       make rows $a and $b specials (separate several with spaces)" -ForegroundColor Gray
+        Write-Host "    ${a}s ${b}x       make row $a a special and row $b an extra" -ForegroundColor Gray
+    }
+    Write-Host "    ${a}x          make row $a an extra" -ForegroundColor Gray
+    Write-Host "    ${a}e          make row $a an episode" -ForegroundColor Gray
+    Write-Host "    $a           no letter: switch row $a between episode and extra" -ForegroundColor Gray
+    Write-Host "  Press Enter with nothing typed to change nothing." -ForegroundColor Cyan
 }
 
 # Shows the plan and asks: Enter/Y accepts (the default), N leaves every file with its
@@ -639,7 +665,8 @@ function Confirm-SeriesRenamePlan {
             '^(|y|yes)$' { return @{ Classification = $classification; Plan = $plan } }
             '^(n|no)$'   { return $null }
             '^(e|edit)$' {
-                $rows = & $ReadInput "Row number(s) to change (2 5 switches episode/extra; 2s = special, 2x = extra, 2e = episode)"
+                Write-SeriesEditHelp -Plan $plan
+                $rows = & $ReadInput "Row(s) to change"
                 foreach ($token in ("$rows" -split '[\s,]+' | Where-Object { $_ })) {
                     if ($token -match '^(\d+)([sxe]?)$' -and [int]$Matches[1] -ge 1 -and [int]$Matches[1] -le $plan.Count) {
                         $row = $plan[[int]$Matches[1] - 1]
@@ -650,7 +677,7 @@ function Confirm-SeriesRenamePlan {
                             default { if ($row.Kind -eq 'Episode') { 'Extra' } else { 'Episode' } }
                         }
                     } else {
-                        Write-Host "  Ignoring '$token' - not a row number" -ForegroundColor Red
+                        Write-Host "  Ignoring '$token' - expected a row number 1-$($plan.Count), optionally followed by s, x or e (e.g. 3x)" -ForegroundColor Red
                     }
                 }
             }

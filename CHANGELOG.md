@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-10 - Series rename edit prompt: clearer wording
+
+### Changed
+- The `[e]dit` option of the series rename confirmation now prints a help block first: type the row number, then a letter (`e` episode, `s` special, `x` extra), with worked examples built from real row numbers (`19s`, `19s 20s`, `19s 20x`, `19x`, `19e`, and a bare `19` to switch episode/extra). Blank input changes nothing. Parsing is unchanged.
+- The "a special?" Note hint now names the row: "... - a special? To mark it: [e]dit, then type 19s - check" (was "[e]dit, then Ns - check").
+- The "Ignoring '<token>'" message says what is accepted.
+
 ## 2026-10-06 (PR #153) - rename-series.ps1: Per-Folder Classification, S00 Specials, `-Disc N` Folders
 
 ### Added
