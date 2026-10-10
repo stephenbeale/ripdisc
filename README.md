@@ -732,9 +732,14 @@ decide episode vs extra.
   names) to a kind. Specials become `<Title>-S00-E##` in `Season 0`; extras become
   `<Title>-S##-Extra##` (or `-D#-Extra##`) in `Season 0`; episodes stay `S##-E##`.
 - **Prompt edit codes** - at a folder's confirmation prompt, Enter accepts, `n` declines (so does end-of-input),
-  `e` edits. In the edit, enter a row number followed by a code: `2s` = special, `2x` = extra, `2e` = episode.
+  `e` edits. In the edit, type the row number (the # column) followed by a letter for what the file is:
+  `e` = episode, `s` = special, `x` = extra. For example `19s` makes row 19 a special, `19x` an extra and
+  `19e` an episode; separate several with spaces or commas (`19s 20x`). A row number with no letter switches
+  an episode to an extra, and an extra or special back to an episode. Enter on its own changes nothing. The
+  prompt prints these examples using the row numbers of the table on screen.
 - **Flagged, not converted** - a title at least 1.6x the expected length is flagged "a special?" but stays an
-  episode, because double episodes look the same by length. Use `-MarkSpecial` or `2s` to move it.
+  episode, because double episodes look the same by length. Its Note spells out
+  what to type (`[e]dit, then type 19s` for row 19); use that or `-MarkSpecial` to move it.
 - **`Season 0` folder** - extras and specials of all seasons go to one `<Series>\Season 0\` folder, which
   Jellyfin reads as Season 00. It is never itself treated as a season to rename.
 - **Layouts understood** - `Series N`, `Season N`, `<Title>-Series N`, `Disc N` (with a space), `<Show>-Disc N`
