@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-11 - watch-drives.ps1: start a rip when a disc is inserted
+
+### Added
+- `watch-drives.ps1`: listens for Windows' volume-arrival event (`Win32_VolumeChangeEvent`, no polling, no admin) and opens a new console running `rip-disc.ps1 -Drive X:` when a DVD or Blu-ray is inserted. `rip-disc.ps1` is unchanged and still asks its usual questions in the new window.
+- `-Drive` limits it to named drives, `-RipArguments` passes extra arguments to every rip, `-WhatIf` reports without opening anything.
+- Audio CDs, data discs and unreadable discs are skipped with a reason. A drive whose rip is still running is not started again. Only one watcher can run at a time.
+- `tests/Test-DriveWatcher.ps1` (38 tests).
+
+### Notes
+- The new window is started with plain arguments (`-File watch-drives.ps1 -RunRipFor X: -LockPath ...`), never an encoded command. The first draft used `-EncodedCommand`, and AVG's behaviour shield deleted the test file that exercised it and then blocked that file name (`tests\Test-WatchDrives.ps1`) from being created again on this machine.
+
+**Testing status:** 38/38 logic tests pass and the listener starts and registers unelevated. **Not tested with a real disc insertion.**
+
 ## 2026-10-10 - Series rename edit prompt: clearer wording
 
 ### Changed
