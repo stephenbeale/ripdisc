@@ -193,6 +193,65 @@ try {
     $c = Get-SeriesTitleClassification -Titles (New-Titles 22, 23, 22, 45)
     Assert-Equal 'E1,E2,E3,E4' (Get-Kinds $c) 'long titles (double episodes) are never demoted to extras'
 
+    # ---------------------------------------------------------------------------
+    Write-Host "`nEpisode numbers already in the file names" -ForegroundColor Cyan
+
+    foreach ($case in @(
+            @('Parks and Recreation S04E21 Bus Tour.mp4', 'S4E21'),
+            @('Parks And Recreation S01 Ep02.mp4', 'S1E2'),
+            @('Parks And Recreation S06 Ep1.mp4', 'S6E1'),
+            @('show.s1.e3.mkv', 'S1E3'),
+            @('Show S02 Episode 4.mkv', 'S2E4'),
+            @('Show-S03-E05.mkv', 'S3E5'),
+            @('Show 4x21 Title.mkv', 'S4E21'))) {
+        $r = Get-SeriesEpisodeFromFileName $case[0]
+        Assert-Equal $case[1] $(if ($r) { "S$($r.Season)E$($r.Episode)" } else { 'none' }) "episode from name: $($case[0])"
+    }
+    foreach ($name in @('title_t03.mkv', 'B1_T00-1.mp4', 'Joking Apart-Series 2 Disc 1-B1_t06.mp4', 'Silicon Valley S03 Disc2.mkv', 'Mr Sex1.mkv', '1080x720.mkv')) {
+        Assert-True ($null -eq (Get-SeriesEpisodeFromFileName $name)) "no episode number read from: $name"
+    }
+
+    function New-NamedTitles { param([string[]]$Names, [double]$Minutes = 21) foreach ($n in $Names) { [pscustomobject]@{ Name = $n; DurationSec = $Minutes * 60 } } }
+
+    # Parks and Recreation S4 on F: has no E20: E21 must stay E21, not shift to E20.
+    $c = Get-SeriesTitleClassification -Season 4 -Titles (New-NamedTitles 'P S04E19 Live Ammo.mp4', 'P S04E21 Bus Tour.mp4', 'P S04E22 Win Lose or Draw.mp4')
+    Assert-Equal 'E19,E21,E22' (Get-Kinds $c) 'numbers in the names are kept: a missing E20 leaves a gap instead of shifting E21/E22 down'
+    Assert-Equal 'Name' $c.Items[1].Source 'source column says the number came from the name'
+    Assert-True (-not $c.Items[1].Mismatch) 'a named episode of normal length is not flagged'
+
+    $c = Get-SeriesTitleClassification -Season 1 -Titles (New-NamedTitles 'S01 Ep02.mp4', 'title_t00.mkv', 'S01 Ep04.mp4', 'title_t01.mkv')
+    Assert-Equal 'E2,E1,E4,E3' (Get-Kinds $c) 'files without a number fill the numbers the named files leave free'
+
+    $c = Get-SeriesTitleClassification -Season 2 -Titles (New-NamedTitles 'S01E05.mp4', 'S02E01.mp4')
+    Assert-Equal 'E2,E1' (Get-Kinds $c) 'a name from another season is not used: numbered in sequence'
+    Assert-True ($c.Items[0].Mismatch -and $c.Items[0].Note -match 'not season 2') '...and flagged with what the name said'
+
+    $c = Get-SeriesTitleClassification -Season 1 -Titles (New-NamedTitles 'a S01E03.mp4', 'b S01E03.mp4')
+    Assert-Equal 'E1,E2' (Get-Kinds $c) 'two files claiming the same number: neither gets it, both numbered in sequence'
+    Assert-True ($c.Items[0].Mismatch -and $c.Items[1].Mismatch) '...and both are flagged'
+
+    $c = Get-SeriesTitleClassification -Season 1 -TakenEpisodes 3 -Titles (New-NamedTitles 'S01E03.mp4')
+    Assert-Equal 'E1' (Get-Kinds $c) 'a name number already used by a renamed file is not reused'
+    Assert-True ($c.Items[0].Note -match 'already used') '...and the note says so'
+
+    $c = Get-SeriesTitleClassification -Season 1 -Titles (@(New-NamedTitles 'S01E01.mp4', 'S01E02.mp4', 'S01E03.mp4') + @(New-NamedTitles 'S01E04.mp4' -Minutes 4))
+    Assert-Equal 'E1,E2,E3,E4' (Get-Kinds $c) 'a short file with an episode number in its name stays that episode...'
+    Assert-True ($c.Items[3].Mismatch -and $c.Items[3].Note -match 'an extra\?') '...but is flagged as a possible extra'
+
+    # 21, 21, 4: by length alone the 21 is a play-all (about 21+4); its name says otherwise.
+    $c = Get-SeriesTitleClassification -Season 1 -Titles (@(New-NamedTitles 'S01E01.mp4', 'S01E02.mp4') + @(New-NamedTitles 'S01E03.mp4' -Minutes 4))
+    Assert-Equal 'E1,E2,E3' (Get-Kinds $c) 'a named episode is never taken for a play-all'
+    Assert-True ($c.Items[1].Note -notmatch 'play-all') '...and carries no play-all note'
+
+    $c = Get-SeriesTitleClassification -Season 1 -Overrides @{ 'S01E02.mp4' = 'Extra' } -Titles (New-NamedTitles 'S01E01.mp4', 'S01E02.mp4', 'title_t00.mkv')
+    Assert-Equal 'E1,X1,E2' (Get-Kinds $c) 'a named file set to Extra at the prompt frees its number for the others'
+
+    $c = Get-SeriesTitleClassification -Season 1 -StartEpisode 10 -Titles (New-NamedTitles 'S01E01.mp4', 'title_t00.mkv')
+    Assert-Equal 'E1,E10' (Get-Kinds $c) 'the name beats -StartEpisode; unnumbered files still start there'
+
+    $c = Get-SeriesTitleClassification -Season 1 -AllExtras -Titles (New-NamedTitles 'S01E01.mp4')
+    Assert-Equal 'X1' (Get-Kinds $c) '-Extras still makes everything an extra'
+
     $c = Get-SeriesTitleClassification -Titles (New-Titles 44, 44, 44, 5) -TakenEpisodes @(1, 2) -TakenExtras @(1)
     Assert-Equal 'E3,E4,E5,X2' (Get-Kinds $c) 'numbers already used in the folder are skipped (re-run after a part-way failure)'
 

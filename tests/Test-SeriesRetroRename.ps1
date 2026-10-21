@@ -106,6 +106,28 @@ try {
     $units = @(Get-SeriesRenameUnits -Root $flat)
     Assert-Equal 'Flat|3|0' ("$($units[0].Title)|$($units[0].Season)|$($units[0].Disc)") 'Season folder with files and no Disc folders is itself the unit'
 
+    # Parks and Recreation on F:: "S1", "S01", "Season 4" and "season 5" folders side by side.
+    $parks = Join-Path $tempRoot 'Parks'
+    New-DiscFolder (Join-Path $parks 'Parks S1') @{ 'a.mp4' = 21 }
+    New-DiscFolder (Join-Path $parks 'Parks S02') @{ 'a.mp4' = 21 }
+    New-DiscFolder (Join-Path $parks 'Parks Season 4') @{ 'a.mp4' = 21 }
+    New-DiscFolder (Join-Path $parks 'Parks season 5') @{ 'a.mp4' = 21 }
+    New-DiscFolder (Join-Path $parks 'S6') @{ 'a.mp4' = 21 }
+    $units = @(Get-SeriesRenameUnits -Root $parks)
+    Assert-Equal 'S1D0,S2D0,S4D0,S5D0,S6D0' (($units | ForEach-Object { "S$($_.Season)D$($_.Disc)" }) -join ',') 'series root: "<Title> S1", "<Title> S02", "S6" short season folders found beside "Season 4" / "season 5"'
+    $units = @(Get-SeriesRenameUnits -Root (Join-Path $parks 'Parks S1'))
+    Assert-Equal 'Parks|1|0' ("$($units[0].Title)|$($units[0].Season)|$($units[0].Disc)") 'an "S1" folder given directly is a season folder'
+    Assert-Equal '..\Season 0' (Get-SeriesSpecialsRelativeDir -Directory (Join-Path $parks 'Parks S1')) 'extras from an "S1" folder go to the series-level Season 0, not S1\Season 0'
+    Assert-True ($null -eq (Get-SeasonFolderNumber 'Parks and Recs')) 'a name ending in "s" with no number is not a season'
+    Assert-True ($null -eq (Get-SeasonFolderNumber 'Studios 54')) 'a word ending in s then a spaced number is not a season'
+    Assert-True ($null -eq (Get-SeasonFolderNumber 'Show S 1')) '"S 1" (space after S) is not read as a season'
+
+    # macOS "._" AppleDouble files beside the real videos are not videos and get no name.
+    $apple = Join-Path $tempRoot 'Apple\Season 1'
+    New-DiscFolder $apple @{ 'Ep One.mp4' = 21; 'Ep Two.mp4' = 21; '._Ep One.mp4' = 0; '._Ep Two.mp4' = 0 }
+    $s = Invoke-SeriesRetroRename -Root $apple -NoTmdb -GetDuration $getDuration 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 'Ep One.mp4,Ep Two.mp4' (@($s.Results[0].Result.Plan | ForEach-Object { $_.OriginalName }) -join ',') '"._" AppleDouble files are left out of the plan'
+
     # ---------------------------------------------------------------------------
     Write-Host "`nDry run changes nothing and numbers across discs" -ForegroundColor Cyan
 

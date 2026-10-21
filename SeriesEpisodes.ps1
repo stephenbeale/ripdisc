@@ -38,8 +38,8 @@ function Get-SeriesSpecialsRelativeDir {
     $dir = $Directory.TrimEnd('\', '/')
     $ups = 0
     if ((Split-Path $dir -Leaf) -match '^Disc\s*\d+$') { $dir = Split-Path $dir -Parent; $ups++ }
-    # Same season-folder forms rename-series.ps1 accepts: Season 2, Series 1, <Title>-Series 1.
-    if ($dir -and (Split-Path $dir -Leaf) -match '(?i)(?:^|[\s\-_.])(?:series|season)\s*([1-9]\d*|0+[1-9]\d*)$') { $ups++ }
+    # Same season-folder forms rename-series.ps1 accepts: Season 2, Series 1, <Title>-Series 1, <Title> S1.
+    if ($dir -and (Split-Path $dir -Leaf) -match '(?i)(?:^|[\s\-_.])(?:(?:series|season)\s*|s)([1-9]\d*|0+[1-9]\d*)$') { $ups++ }
     $prefix = ('..\' * $ups)
     return "$prefix$Folder"
 }
@@ -278,6 +278,22 @@ function Get-Median {
     return ([double]$sorted[$mid - 1] + [double]$sorted[$mid]) / 2
 }
 
+# Episode number written in a file name by whoever named it before - "S04E21",
+# "S01 Ep02", "s1.e3", "S02 Episode 4", "4x21" - as @{ Season; Episode }, or $null.
+# The S / x forms must stand alone (not inside a word), so MakeMKV names (title_t00),
+# "Disc 2" and "Series 2" tokens never match.
+function Get-SeriesEpisodeFromFileName {
+    param([string]$Name)
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Name)
+    if ($base -match '(?i)(?<![a-z0-9])s(?<s>\d{1,2})[\s._-]*e(?:p(?:isode)?)?[\s._-]*(?<e>\d{1,3})(?![a-z0-9])') {
+        return @{ Season = [int]$Matches['s']; Episode = [int]$Matches['e'] }
+    }
+    if ($base -match '(?i)(?<![a-z0-9])(?<s>\d{1,2})x(?<e>\d{2,3})(?![a-z0-9])') {
+        return @{ Season = [int]$Matches['s']; Episode = [int]$Matches['e'] }
+    }
+    return $null
+}
+
 # ---------------------------------------------------------------------------
 # Episode / extra classification
 # ---------------------------------------------------------------------------
@@ -303,6 +319,13 @@ function Get-Median {
 # named extra. Its episode numbers are reserved up front so the sequential numbering of
 # any file TheDiscDB does not cover skips them. A TheDiscDB episode number that is
 # already taken falls back to the steps above instead of being used twice.
+#
+# Next come episode numbers already in the file names (Get-SeriesEpisodeFromFileName:
+# "S04E21", "S01 Ep02"): such a file is an episode with that number, so a missing
+# episode leaves a gap instead of shifting every later number down. Used only when the
+# name's season matches -Season, the number is free, and no other file in the folder
+# claims it - otherwise the file is numbered in sequence and flagged. These numbers are
+# reserved up front too, so files without one fill the numbers left over.
 #
 # -Overrides (OriginalName -> 'Episode'|'Extra'|'Special') comes from the confirmation prompt's
 # edit option and always wins. Numbers in -TakenEpisodes / -TakenExtras (files already
@@ -400,6 +423,37 @@ function Get-SeriesTitleClassification {
         foreach ($n in $reserved.Keys) { $takenEp[$n] = $true }
     }
 
+    # --- 0b. episode numbers already in the file names, also reserved up front ---
+    $nameEpisode = @{}
+    $nameNote = @{}
+    if (-not $AllExtras) {
+        $claims = @{}
+        foreach ($item in $items) {
+            if ($Overrides.ContainsKey($item.Name) -and $Overrides[$item.Name] -ne 'Episode') { continue }
+            # A file looking like a play-all by length is still the episode its name says.
+            if ($discDbEpisode.ContainsKey($item.Name)) { continue }
+            $fromName = Get-SeriesEpisodeFromFileName $item.Name
+            if (-not $fromName -or $fromName.Episode -lt 1) { continue }
+            $said = "S{0:D2}E{1:D2}" -f $fromName.Season, $fromName.Episode
+            if ($Season -gt 0 -and $fromName.Season -ne $Season) {
+                $nameNote[$item.Name] = "file name says $said, not season $Season - check"
+            } elseif ($takenEp.ContainsKey($fromName.Episode)) {
+                $nameNote[$item.Name] = "file name says $said, already used - check"
+            } else {
+                if (-not $claims.ContainsKey($fromName.Episode)) { $claims[$fromName.Episode] = @() }
+                $claims[$fromName.Episode] += $item.Name
+            }
+        }
+        foreach ($n in $claims.Keys) {
+            if ($claims[$n].Count -eq 1) {
+                $nameEpisode[$claims[$n][0]] = $n
+                $takenEp[$n] = $true
+            } else {
+                foreach ($name in $claims[$n]) { $nameNote[$name] = "file name says E{0:D2}, as does another file - check" -f $n }
+            }
+        }
+    }
+
     foreach ($item in $items) {
         while ($takenEp.ContainsKey($nextEpisode)) { $nextEpisode++ }
         $expected = if ($runtimeByEpisode.ContainsKey($nextEpisode)) { $runtimeByEpisode[$nextEpisode] } else { $null }
@@ -429,6 +483,20 @@ function Get-SeriesTitleClassification {
             $item.Source = 'TheDiscDB'
             $item.Label = $ddExtraLabel
             $item.Note = "TheDiscDB: $($dd.ItemType)"
+        } elseif ($nameEpisode.ContainsKey($item.Name)) {
+            # The name wins on the number and the kind; length only adds a flag.
+            $item.Kind = 'Episode'
+            $item.Source = 'Name'
+            $item.Note = ""
+            $n = $nameEpisode[$item.Name]
+            $typical = if ($runtimeByEpisode.ContainsKey($n)) { $runtimeByEpisode[$n] } else { $medianSec }
+            if ($null -ne $item.DurationSec -and $null -ne $typical -and $item.DurationSec -lt ($typical * $ShortRatio)) {
+                $item.Note = "short (under 60% of typical {0}) - an extra? - check" -f (Format-SeriesDuration $typical)
+                $item.Mismatch = $true
+            } elseif ($null -ne $item.DurationSec -and $null -ne $typical -and $item.DurationSec -ge ($typical * $LongRatio)) {
+                $item.Note = "much longer than typical {0} - a special? To mark it: [e]dit, then type {{row}}s - check" -f (Format-SeriesDuration $typical)
+                $item.Mismatch = $true
+            }
         } elseif ($item.Kind -eq 'Extra') {
             # composite, already decided
             $item.Source = 'Length'
@@ -479,11 +547,21 @@ function Get-SeriesTitleClassification {
             $item.Note = (@($item.Note, 'not matched in TheDiscDB - check') | Where-Object { $_ }) -join '; '
             $item.Mismatch = $true
         }
+        # A number in the name that could not be used: say why it was numbered in sequence.
+        if ($nameNote.ContainsKey($item.Name)) {
+            $item.Note = (@($item.Note, $nameNote[$item.Name]) | Where-Object { $_ }) -join '; '
+            $item.Mismatch = $true
+        }
 
         if ($item.Kind -eq 'Episode' -and $item.Source -eq 'TheDiscDB') {
             # Published number - does not use up the sequential counter.
             $item.EpisodeNumber = $discDbEpisode[$item.Name]
             $item.ExpectedSec = $dd.DurationSec
+        } elseif ($item.Kind -eq 'Episode' -and $nameEpisode.ContainsKey($item.Name)) {
+            # Number from the file name (also when set to Episode at the prompt).
+            $n = $nameEpisode[$item.Name]
+            $item.EpisodeNumber = $n
+            $item.ExpectedSec = if ($runtimeByEpisode.ContainsKey($n)) { $runtimeByEpisode[$n] } else { $null }
         } elseif ($item.Kind -eq 'Episode') {
             $item.EpisodeNumber = $nextEpisode
             $item.ExpectedSec = $expected
@@ -800,7 +878,9 @@ function Invoke-SeriesEpisodeRename {
 
     $pattern = Get-SeriesNamePattern -Title $Title -Season $Season
     # Numbers in names compare as numbers, so "Show (2)" comes before "Show (10)".
-    $videoFiles = @(Get-ChildItem -LiteralPath $Directory -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' } |
+    # "._" files are macOS AppleDouble metadata (resource forks), not video.
+    $videoFiles = @(Get-ChildItem -LiteralPath $Directory -File |
+        Where-Object { $_.Extension -match '^\.(mp4|mkv)$' -and -not $_.Name.StartsWith('._') } |
         Sort-Object { [regex]::Replace($_.Name, '\d+', { param($m) $m.Value.PadLeft(10, '0') }) })
 
     $takenEpisodes = @()
