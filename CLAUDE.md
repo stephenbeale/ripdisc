@@ -19,6 +19,24 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-21 - rename-series handles `S1` folders, file-name episode numbers, `._` files (PR #157, merged 45369cf)
+
+Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of 6 season folders (`Parks and Recreation S1/S2/S3/S6`, `Season 4`, `season 5`) and macOS `._` AppleDouble files were numbered as episodes ahead of the real files.
+
+**Fixed in #157 (541/541 tests: Test-SeriesEpisodeRename 162, Test-SeriesRetroRename 135):**
+- `Get-SeasonFolderNumber` (SeriesRetroRename.ps1) and `Get-SeriesSpecialsRelativeDir` (SeriesEpisodes.ps1) accept `<Title> S1`, `S01` and bare `S6`.
+- `._` files ignored in `Invoke-SeriesEpisodeRename`.
+- New `Get-SeriesEpisodeFromFileName` (S04E21, S01 Ep02, s1.e3, S02 Episode 4, 4x21). `Get-SeriesTitleClassification` keeps episode numbers from file names (Source `Name`), reserved up front, so a missing episode leaves a gap (Parks S4 has no E20) rather than shifting later numbers. A name number is ignored and flagged when it belongs to another season, is already used, or is claimed by two files. A named file is never a play-all.
+- CHANGELOG and rename-series.ps1 help updated.
+
+**Real F: result:** the series was ALREADY renamed at 18:47-18:54 on 2026-10-21 (by the user, from the fix branch build) and the S1/S2/S3/S6 folders became `Parks and Recreation Season 1/2/3/6`. The post-merge `-Apply -Yes` renamed 0 (all 112 already final). Every `rename-manifest.csv` row in all 6 folders was checked: NewName matches the S##/E## in OriginalName, no mismatches; Season 4 ends E19, E21, E22. Each folder has a manifest and `undo-rename.ps1`.
+
+**Open on `F:\Series\Parks and Recreation` (need user decision; media drive NOT touched):**
+- (a) Orphaned Jellyfin `*-thumb.jpg` under old names (S2 25, S3 17, S4 21, S5 22) no longer match the renamed videos.
+- (b) `._` AppleDouble files remain in Season 4 (21) and season 5 (22).
+- (c) Folder `Parks and Recreation season 5` is lowercase (cosmetic).
+- (d) Season 6 long episodes flagged "a special?" but kept as episodes: Ep1 43:05, Ep16 1:04:47, Ep19 1:04:35, Ep20 53:03 (probably double/extended; unverified, TMDb key still unset).
+
 ### 2026-10-06 - rename-series.ps1 Fixes (branch `fix/rename-series-folder-classification`)
 
 Fixed three #151 bugs, plus -WhatIf:
