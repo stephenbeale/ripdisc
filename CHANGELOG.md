@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-21 - rename-series.ps1: `S1` / `S01` Season Folders, Episode Numbers From File Names, `._` Files Ignored
+
+### Added
+- Season folders named `<Title> S1`, `<Title> S01` or `S6` are recognised beside `Season N` / `Series N`. Extras from them go to the series-level `Season 0`. Found on `F:\Series\Parks and Recreation`, where `S1`-`S3` and `S6` were skipped and only `Season 4` / `season 5` were processed.
+- Episode numbers already in file names (`S04E21`, `S01 Ep02`, `s1.e3`, `S02 Episode 4`, `4x21`) are kept (Source column `Name`). A missing episode now leaves a gap instead of shifting every later number down (Parks S4 has no E20; E21/E22 had become E20/E21). The name's number is ignored and the row flagged when it is for another season, already used, or claimed by two files. Files without a number fill the numbers left free. A named file is never taken for a play-all; one under 60% / over 1.6x the typical length is flagged but keeps its number.
+
+### Fixed
+- macOS `._` AppleDouble files (`._Show S04E01.mp4`) are no longer treated as videos. They had been numbered as episodes ahead of the real files.
+
 ## 2026-10-10 - Series rename edit prompt: clearer wording
 
 ### Changed
