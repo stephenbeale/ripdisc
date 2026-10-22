@@ -108,6 +108,12 @@ $script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "T
 $script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
 $script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
 
+# -Documentary together with an EXPLICIT -Disc N (no -Series, no -Extras) means one part of a
+# multi-disc documentary: the disc's feature is named "<Title>-Part N" and stays in the title
+# folder (Documentaries\<Title>) like a Feature file does, rather than being treated as a
+# Special Features disc. Without an explicit -Disc, -Documentary behaves exactly as before.
+$script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
+
 # ========== STEP TRACKING ==========
 # Define the 4 processing steps
 $script:AllSteps = @(
@@ -147,6 +153,8 @@ function Get-TitleSummary {
         }
     } elseif ($Extras) {
         $summary += " (Extras)"
+    } elseif ($script:DocumentaryPart) {
+        $summary += " (Part $Disc)"
     } elseif ($Disc -gt 1) {
         $summary += " (Disc $Disc - Special Features)"
     }
@@ -1240,7 +1248,7 @@ if ($Series) {
     $windowTitle += " Disc $Disc"
 } else {
     $windowTitle = "$title"
-    if ($Extras -or $Disc -gt 1) { $windowTitle += "-extras" }
+    if ($Extras -or ($Disc -gt 1 -and -not $script:DocumentaryPart)) { $windowTitle += "-extras" }
 }
 $host.UI.RawUI.WindowTitle = $windowTitle
 
@@ -1364,7 +1372,7 @@ $script:LogFile = Join-Path $logDir "${safeTitle}_${logDiscLabel}_${logTimestamp
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Type: $(if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
-Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
+Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($script:DocumentaryPart) { " (Part $Disc)" } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
 }
@@ -1438,7 +1446,7 @@ function Get-ContinueRipCommand {
     $parts.Add("-FromStep $($stepToFromStep[$firstRemaining])")
     if ($Series) { $parts.Add("-Series") }
     if ($Season -gt 0) { $parts.Add("-Season $Season") }
-    if ($Disc -ne 1) { $parts.Add("-Disc $Disc") }
+    if ($Disc -ne 1 -or $script:DocumentaryPart) { $parts.Add("-Disc $Disc") }
     if ($OutputDrive) { $parts.Add("-OutputDrive $OutputDrive") }
     if ($Extras) { $parts.Add("-Extras") }
     if ($Bluray) { $parts.Add("-Bluray") }
@@ -1549,7 +1557,7 @@ function Stop-WithError {
                     Write-Host "    Format: $title-originalname.mp4" -ForegroundColor Gray
                 } else {
                     if ($isMainFeatureDisc) {
-                        Write-Host "    Format: $title-Feature$(if ($Bluray) { '-BluRay' }).mp4 (largest file)" -ForegroundColor Gray
+                        Write-Host "    Format: $title$featureSuffix.mp4 (largest file)" -ForegroundColor Gray
                         Write-Host "    Move extras to: $extrasDir" -ForegroundColor Gray
                     } else {
                         Write-Host "    Format: $title-Special Features-originalname.mp4" -ForegroundColor Gray
@@ -1612,7 +1620,19 @@ function Stop-WithError {
 $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
 # Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 # unless combined with -Series (genre series / box sets), which are organized like Series: every file is an episode, none is "the Feature"
-$isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
+$isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
+# Naming of the main file: "<Title>-Feature[-BluRay]" normally, "<Title>-Part N" for a documentary part.
+# $featureExcludePattern keeps earlier parts (same folder) from being picked as this disc's largest
+# file or swept into extras; (?!) never matches, so it is inert for ordinary movies.
+if ($script:DocumentaryPart) {
+    $featurePattern = "-Part $Disc\.[^.]+$"
+    $featureSuffix = "-Part $Disc"
+    $featureExcludePattern = '-Part \d+\.[^.]+$'
+} else {
+    $featurePattern = '-Feature(-BluRay)?\.[^.]+$'
+    $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
+    $featureExcludePattern = '(?!)'
+}
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # For disc 2+, ensure parent dir and extras folder exist upfront (disc 1 may still be running)
@@ -1656,7 +1676,7 @@ if ($Series) {
     }
     Write-Host "Disc: $Disc" -ForegroundColor White
 } else {
-    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1) { ' (Special Features)' })" -ForegroundColor White
+    Write-Host "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($script:DocumentaryPart) { " (Part $Disc)" } elseif ($Disc -gt 1) { ' (Special Features)' })"-ForegroundColor White
 }
 Write-Host "MakeMKV Output: $makemkvOutputDir" -ForegroundColor White
 Write-Host "Final Output: $finalOutputDir" -ForegroundColor White
@@ -2860,13 +2880,13 @@ if ($script:IsGenreSeries) {
     # Movie disc 1 only: add 'Feature' suffix to largest file
     if ($isMainFeatureDisc) {
         Write-Host "`nChecking for Feature file..." -ForegroundColor Yellow
-        $featureExists = Get-ChildItem -File | Where-Object { $_.Name -match '-Feature(-BluRay)?\.[^.]+$' }
+        $featureExists = Get-ChildItem -File | Where-Object { $_.Name -match $featurePattern }
         if (!$featureExists) {
-            $largestFile = Get-ChildItem -File | Sort-Object Length -Descending | Select-Object -First 1
+            $largestFile = Get-ChildItem -File | Where-Object { $_.Name -notmatch $featureExcludePattern } | Sort-Object Length -Descending | Select-Object -First 1
             if ($largestFile) {
                 Write-Host "Largest file: $($largestFile.Name) ($([math]::Round($largestFile.Length/1GB, 2)) GB)" -ForegroundColor White
                 # -Bluray rips get "-Feature-BluRay" so Jellyfin can tell the Blu-ray version
-                $newName = $largestFile.Directory.Name + "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" }) + $largestFile.Extension
+                $newName = $largestFile.Directory.Name + $featureSuffix + $largestFile.Extension
                 Write-Host "Renaming to: $newName" -ForegroundColor Yellow
                 $maxRetries = 10
                 $retryDelay = 5
@@ -2898,7 +2918,7 @@ if ($script:IsGenreSeries) {
     if ($isMainFeatureDisc) {
         # Disc 1: move non-feature videos to extras
         Write-Host "`nChecking for non-feature videos..." -ForegroundColor Yellow
-        $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" }
+        $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" -and $_.Name -notmatch $featureExcludePattern }
         if ($nonFeatureVideos) {
             Write-Host "Non-feature videos found: $($nonFeatureVideos.Count)" -ForegroundColor White
             $nonFeatureVideos | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }

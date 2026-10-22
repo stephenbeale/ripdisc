@@ -146,7 +146,8 @@ Both versions use the same command-line parameters:
 -extras                 Flag for extras-only disc
 -queue                  Queue encoding instead of running immediately
 -bluray                 Blu-ray mode (outputs to Bluray folder, forced subtitle scan)
--documentary            Documentary mode (outputs to Documentaries folder)
+-documentary            Documentary mode (outputs to Documentaries folder); with an explicit -disc N,
+                        names the main file <Title>-Part N in the title folder
 -tutorial               Tutorial mode (outputs to Tutorials folder)
 -fitness                Fitness mode (outputs to Fitness folder)
 -music                  Music mode (outputs to Music folder)
@@ -163,6 +164,22 @@ Both versions use the same command-line parameters:
                         listings) — a convenience for checking what the physical disc might
                         be worth, not part of the rip itself
 ```
+
+### Multi-disc documentary (`-documentary -disc N`, no `-series`)
+
+For a documentary that is one long piece spread over several discs, pass `-documentary` with an
+explicit `-disc N`. Each disc's main (largest) file is named `<Title>-Part N` and stays in the title
+folder (`Documentaries\<Title>\`), not in a `DiscN` folder or `extras`; any other titles on the disc go
+to `extras`. `-disc` is the part number, so rip them in any order.
+
+```powershell
+.ip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 1   # Metal A Headbangers Journey-Part 1.mp4
+.ip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 2   # Metal A Headbangers Journey-Part 2.mp4
+```
+
+Without an explicit `-disc`, `-documentary` is unchanged (`<Title>-Feature`). `-documentary -series` and
+`-extras` are also unchanged. Keep `-title` identical on every disc. The C# `RipDisc.exe` has no
+`-documentary` support yet, so this is PowerShell only.
 
 ### Documentary / genre series (multi-disc box sets)
 
@@ -543,6 +560,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | Window title management | Yes | Yes |
 | Session logging | Yes | Yes |
 | `-Documentary` flag | Yes | No |
+| `-Documentary -Disc N` part naming (`<Title>-Part N`) | Yes | No |
 | `-Tutorial` / `-Fitness` / `-Music` / `-Surf` flags | Yes | No |
 | Genre series (`-Documentary`/etc. combined with `-Series`) | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
