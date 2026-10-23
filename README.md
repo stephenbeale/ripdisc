@@ -2,6 +2,14 @@
 
 PowerShell and C# tools for automated DVD and Blu-ray disc ripping using MakeMKV and HandBrake.
 
+## Video walkthrough
+
+Watch how to use RipDisc:
+
+[![How to use RipDisc - video walkthrough](https://img.youtube.com/vi/n2yGnC5RDSg/hqdefault.jpg)](https://www.youtube.com/watch?v=n2yGnC5RDSg)
+
+▶️ [Watch on YouTube](https://www.youtube.com/watch?v=n2yGnC5RDSg)
+
 ## Overview
 
 This repository contains two implementations of the same disc ripping workflow:
@@ -81,6 +89,8 @@ Without a TMDb key, the script still works — it uses the cleaned disc name as 
 ## Getting Started
 
 ### New to this? Start here:
+
+Prefer to watch? See the [video walkthrough](https://www.youtube.com/watch?v=n2yGnC5RDSg).
 
 1. **Download** — Click the green **Code** button above, then **Download ZIP**. Extract it somewhere (e.g. `C:\RipDisc\`).
 2. **Double-click `Start.bat`** — This launches the setup wizard, which will:
