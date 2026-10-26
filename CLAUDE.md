@@ -19,6 +19,25 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-26 - Pause-and-retry on mid-rip drive disconnect (PR #161, OPEN, NOT merged)
+
+**NEXT SESSION: do the cable-pull test for PR #161 before merging. The user asked to be reminded.**
+
+1. `git checkout feature/pause-on-drive-disconnect`.
+2. Start a rip on a junk disc.
+3. Pull the drive's USB cable partway through.
+4. Confirm the beep, the tray notification and the PAUSED prompt.
+5. Reconnect, press R, and confirm the rip completes and the partial MKV was removed.
+6. Tick the last test-plan box on PR #161, then merge.
+
+Trigger: a Cream documentary rip failed when the user knocked the USB cable (MakeMKV `STATUS_DEVICE_NOT_CONNECTED`; Step 1 failed "The drive disconnected ... while MakeMKV was saving titles"). Nothing completed, so nothing is resumable.
+
+**Built (9aa7690, branch off main 87293d4, PowerShell only, C# RipDisc.Core unchanged):** rip-disc.ps1 Step 1 beeps and shows a tray notification (user confirmed it appears), removes that attempt's MKVs, asks [R]etry/[A]bort. R is accepted only once Windows sees a readable disc. Re-queries MakeMKV's disc:N with the drive cache cleared, re-rips the whole disc, max 3 attempts. New tests/Test-DriveDisconnectRetry.ps1 27/27; full suite 568 tests across 12 files. Loop exercised against a fake makemkvcon (renumbered drive, abort, 3 disconnects in a row, -DriveIndex mode). **Untested: a real drive unplug.**
+
+**Also open:**
+- Re-rip Cream (Documentary); it still needs doing.
+- Possible follow-ups: retry only unfinished titles; C# parity.
+
 ### 2026-10-21 - rename-series handles `S1` folders, file-name episode numbers, `._` files (PR #157, merged 45369cf)
 
 Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of 6 season folders (`Parks and Recreation S1/S2/S3/S6`, `Season 4`, `season 5`) and macOS `._` AppleDouble files were numbered as episodes ahead of the real files.
