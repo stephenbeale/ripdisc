@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-26 - rip-disc.ps1: Pause and Retry When the Drive Disconnects Mid-Rip
+
+### Added
+- Step 1 no longer fails outright when the optical drive disconnects mid-rip (MakeMKV reports `STATUS_DEVICE_NOT_CONNECTED` / "device does not exist"). It beeps, shows a Windows tray notification, sets the window title to `<title> - DRIVE DISCONNECTED`, removes the MKV files that attempt wrote, and asks `[R] Retry / [A] Abort`. R is refused until Windows sees a readable disc in the drive again. In drive-letter mode the MakeMKV `disc:N` index is looked up again with the drive cache cleared, because a replugged USB drive can be renumbered. A retry re-rips the whole disc (MakeMKV cannot resume). Up to 3 attempts; abort, end of input or a third disconnect falls through to the existing failure report. Prompted by a knocked cable ending a Cream documentary rip.
+- `tests/Test-DriveDisconnectRetry.ps1` (27 tests): disconnect detection, drive-index lookup from fixture output and a fake `makemkvcon`, and the Retry/Abort prompt.
+
+### Changed
+- The two disconnect checks in Step 1's error analysis now share `Test-MakeMkvDriveDisconnected` with the retry loop.
+
+**Not tested with a real drive being unplugged.** The retry loop was run against a fake `makemkvcon` (disconnect then retry with a renumbered drive, abort, three disconnects in a row, `-DriveIndex`). The tray notification and beeps were fired once for real and appeared.
+
 ## 2026-10-21 - rename-series.ps1: `S1` / `S01` Season Folders, Episode Numbers From File Names, `._` Files Ignored
 
 ### Added

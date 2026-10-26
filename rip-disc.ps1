@@ -548,6 +548,104 @@ function Wait-ProcessWithTimeout {
     return $true
 }
 
+# MakeMKV's own signature for the drive vanishing mid-rip (USB cable knocked out, hub reset,
+# disc ejected): Windows reports STATUS_DEVICE_NOT_CONNECTED, or "device which does not
+# exist". Shared by Step 1's pause-and-retry loop and its final error analysis.
+function Test-MakeMkvDriveDisconnected {
+    param([string]$OutputText)
+    return ($OutputText -match "STATUS_DEVICE_NOT_CONNECTED" -or $OutputText -match "device (which )?does not exist")
+}
+
+# Finds MakeMKV's disc:N index for a drive letter in `makemkvcon -r info disc:9999` output.
+# Needed again after a drive is unplugged and reconnected mid-rip, because Windows/MakeMKV can
+# re-enumerate it under a different index (and the 5-minute drive cache is stale by then).
+# Returns -1 when the letter is not listed. Empty slots (flag 256+) are skipped, like the
+# startup lookup does.
+function Get-MakeMkvDriveIndexFromOutput {
+    param(
+        [string[]]$Lines,
+        [string]$DriveLetter
+    )
+    foreach ($line in $Lines) {
+        if ("$line".Trim() -match '^DRV:(\d+),(\d+),\d+,\d+,"[^"]*","[^"]*","([^"]*)"') {
+            if ([int]$Matches[2] -lt 256 -and $Matches[3] -eq $DriveLetter) {
+                return [int]$Matches[1]
+            }
+        }
+    }
+    return -1
+}
+
+# Re-queries MakeMKV's drive list (bounded by Wait-ProcessWithTimeout, same as the startup
+# lookup) and returns the drive letter's current disc:N index, or -1 if the query hung,
+# failed, or the drive is not listed.
+function Find-MakeMkvDriveIndex {
+    param(
+        [string]$MakeMkvPath,
+        [string]$DriveLetter,
+        [double]$TimeoutSec = 60
+    )
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo.FileName = $MakeMkvPath
+    $p.StartInfo.Arguments = "-r info disc:9999"
+    $p.StartInfo.UseShellExecute = $false
+    $p.StartInfo.RedirectStandardOutput = $true
+    $p.StartInfo.RedirectStandardError = $false
+    $p.StartInfo.CreateNoWindow = $true
+    try { $p.Start() | Out-Null } catch { return -1 }
+    if (-not (Wait-ProcessWithTimeout -Process $p -TimeoutSec $TimeoutSec)) { return -1 }
+    $lines = @($p.StandardOutput.ReadToEnd() -split "`r?`n")
+    return Get-MakeMkvDriveIndexFromOutput -Lines $lines -DriveLetter $DriveLetter
+}
+
+# Gets the user's attention when the drive drops out mid-rip: three beeps plus a Windows
+# tray notification, since a rip is usually left running unattended. Best effort - every part
+# is wrapped so a missing console/notification area never turns a recoverable pause into a
+# crash. Returns the tray icon (or $null) so the caller can dispose it once answered; disposing
+# straight away would take the notification down with it.
+function Send-DriveDisconnectAlert {
+    param([string]$Title, [string]$Message)
+    for ($i = 0; $i -lt 3; $i++) {
+        try { [console]::Beep(880, 300) } catch {}
+    }
+    try {
+        Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+        $icon = New-Object System.Windows.Forms.NotifyIcon
+        $icon.Icon = [System.Drawing.SystemIcons]::Warning
+        $icon.Visible = $true
+        $icon.ShowBalloonTip(30000, $Title, $Message, [System.Windows.Forms.ToolTipIcon]::Warning)
+        return $icon
+    } catch {
+        return $null
+    }
+}
+
+# Pauses Step 1 after the drive disconnected mid-rip until the user has fixed it. Returns
+# $true to retry the rip, $false to abort (which falls through to the normal failure report).
+# When the drive letter is known, "R" is only accepted once Windows sees a readable disc in it
+# again - retrying while it is still unplugged would just fail the same way. End of input
+# (closed stdin) counts as abort, matching rename-series' confirmation prompt.
+function Wait-DriveReconnect {
+    param(
+        [string]$DriveLetter,
+        [bool]$CheckDriveLetter = $true,
+        [scriptblock]$IsMediaReady = { param($Root) try { (New-Object System.IO.DriveInfo $Root).IsReady } catch { $false } }
+    )
+    $root = ($DriveLetter.TrimEnd('\').TrimEnd(':')) + ":\"
+    while ($true) {
+        $answer = Read-Host "[R] Retry once the drive is reconnected and the disc is seated / [A] Abort"
+        if ($null -eq $answer) { return $false }
+        switch ($answer.Trim().ToUpperInvariant()) {
+            'R' {
+                if (-not $CheckDriveLetter -or (& $IsMediaReady $root)) { return $true }
+                Write-Host "Drive $DriveLetter still has no readable disc - reconnect it, reseat the disc, wait for Windows to pick it up, then press R again." -ForegroundColor Yellow
+            }
+            'A' { return $false }
+            default { Write-Host "Please enter R or A." -ForegroundColor Yellow }
+        }
+    }
+}
+
 # Windows-side fallback for the disc's volume label. MakeMKV's DRV: line leaves the disc
 # name empty for some drives (reproducibly so on the USB DVD units here), but Windows still
 # reports the label fine. Returns "" when the drive has no letter (i.e. under -DriveIndex),
@@ -1751,6 +1849,17 @@ if ($skipMakeMkvRip) {
     Complete-CurrentStep
 } else {
 
+# Pause-and-retry: if the drive disconnects mid-rip (a knocked USB cable, a hub reset), alert
+# the user and wait for them to reconnect it instead of failing the whole run. MakeMKV cannot
+# resume a rip, so each retry re-rips the whole disc after removing the dropped attempt's
+# files. Only a disconnect is retried; any other failure goes straight to the analysis below.
+# The loop body is left unindented, like this else-block's.
+$ripAttempt = 0
+$maxRipAttempts = 3
+while ($true) {
+$ripAttempt++
+$mkvFilesBeforeAttempt = @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+
 Write-Host "`nExecuting MakeMKV command..." -ForegroundColor Yellow
 Write-Host "Command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120 --progress=-same" -ForegroundColor Gray
 Write-Log "MakeMKV command: makemkvcon mkv $discSource all `"$makemkvOutputDir`" --minlength=120 --progress=-same"
@@ -1927,6 +2036,64 @@ if ($wasKilledForStuck -and $salvagedFiles.Count -gt 0) {
 
 $makemkvOutputText = $makemkvFullOutput -join "`n"
 
+if (-not (Test-MakeMkvDriveDisconnected -OutputText $makemkvOutputText)) { break }
+Write-Log "MakeMKV attempt $ripAttempt/$maxRipAttempts - drive disconnected mid-rip"
+if ($ripAttempt -ge $maxRipAttempts) {
+    Write-Host "`nThe drive disconnected again - giving up after $maxRipAttempts attempts." -ForegroundColor Red
+    break
+}
+
+# The title being written when the drive dropped is truncated, and the retry re-rips every
+# title anyway, so clear out everything this attempt produced.
+$droppedFiles = @(Get-ChildItem -Path $makemkvOutputDir -Filter "*.mkv" -ErrorAction SilentlyContinue | Where-Object { $mkvFilesBeforeAttempt -notcontains $_.Name })
+foreach ($f in $droppedFiles) {
+    try {
+        Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+        Write-Log "Removed $($f.Name) from the disconnected attempt"
+    } catch {
+        Write-Host "WARNING: could not remove $($f.Name) - $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+$disconnectDrive = if ($DriveIndex -ge 0) { $discSource } else { $driveLetter }
+Write-Host "`n========================================" -ForegroundColor Yellow
+Write-Host "PAUSED - DRIVE DISCONNECTED ($disconnectDrive)" -ForegroundColor Yellow
+Write-Host "========================================" -ForegroundColor Yellow
+Write-Host "The drive dropped out partway through the rip (attempt $ripAttempt of $maxRipAttempts)." -ForegroundColor White
+Write-Host "Check its USB/power cable and that the disc is still seated. The rip will start again" -ForegroundColor White
+Write-Host "from the beginning of the disc once you choose Retry." -ForegroundColor White
+$host.UI.RawUI.WindowTitle = "$windowTitle - DRIVE DISCONNECTED"
+$alertIcon = Send-DriveDisconnectAlert -Title "rip-disc: drive disconnected" -Message "$(Get-TitleSummary) - reconnect $disconnectDrive and return to the rip window to retry."
+
+$retryRip = $false
+while ($true) {
+    if (-not (Wait-DriveReconnect -DriveLetter $driveLetter -CheckDriveLetter ($DriveIndex -lt 0))) { break }
+    if ($DriveIndex -ge 0) { $retryRip = $true; break }
+    # MakeMKV can renumber a replugged drive, so look its index up again (never from the cache).
+    $drvCacheFile = Join-Path $env:TEMP "makemkv-drive-cache.txt"
+    if (Test-Path $drvCacheFile) { Remove-Item $drvCacheFile -Force -ErrorAction SilentlyContinue }
+    Write-Host "Looking up drive $driveLetter in MakeMKV again..." -ForegroundColor Gray
+    $newIndex = Find-MakeMkvDriveIndex -MakeMkvPath $makemkvconPath -DriveLetter $driveLetter
+    if ($newIndex -ge 0) {
+        if ("disc:$newIndex" -ne $discSource) {
+            Write-Host "Drive $driveLetter is now disc:$newIndex (was $discSource)" -ForegroundColor Yellow
+            Write-Log "Drive $driveLetter re-enumerated as disc:$newIndex (was $discSource)"
+        }
+        $discSource = "disc:$newIndex"
+        $retryRip = $true
+        break
+    }
+    Write-Host "MakeMKV cannot see drive $driveLetter yet - give it a few seconds, then press R again." -ForegroundColor Yellow
+}
+if ($alertIcon) { try { $alertIcon.Dispose() } catch {} }
+$host.UI.RawUI.WindowTitle = $windowTitle
+if (-not $retryRip) {
+    Write-Log "User aborted after drive disconnect"
+    break
+}
+Write-Log "Retrying MakeMKV rip (attempt $($ripAttempt + 1)/$maxRipAttempts) after drive reconnect"
+}
+
 # Check if MakeMKV succeeded - provide specific error messages for common issues
 if ($makemkvExitCode -ne 0) {
     # Analyze output to determine the specific error
@@ -1936,7 +2103,7 @@ if ($makemkvExitCode -ne 0) {
     # own unmistakable Windows error text and, unlike the checks below, means the disc WAS read
     # fine; something interrupted writing partway through, so "drive/disc not found" would be
     # actively misleading here.
-    if ($makemkvOutputText -match "STATUS_DEVICE_NOT_CONNECTED" -or $makemkvOutputText -match "device (which )?does not exist") {
+    if (Test-MakeMkvDriveDisconnected -OutputText $makemkvOutputText) {
         $errorMessage = "The drive disconnected (or the disc was ejected) partway through the rip - check the drive's USB/power connection and that the disc is still seated, then try again"
         Write-Host "`nERROR: $errorMessage" -ForegroundColor Red
     }
@@ -2057,7 +2224,7 @@ if ($null -eq $rippedFiles -or $rippedFiles.Count -eq 0) {
     # Matching that bare "0 titles" substring (as this used to) misreported a drive that
     # disconnected mid-save - which MakeMKV had already read 21 titles from moments earlier -
     # as if no disc were present at all.
-    if ($makemkvOutputText -match "STATUS_DEVICE_NOT_CONNECTED" -or $makemkvOutputText -match "device (which )?does not exist") {
+    if (Test-MakeMkvDriveDisconnected -OutputText $makemkvOutputText) {
         $errorMessage = "The drive disconnected (or the disc was ejected) while MakeMKV was saving titles - the disc itself was read fine, but nothing could be written. Check the drive's USB/power connection and try again."
     } elseif ($makemkvOutputText -match "no valid title" -or $makemkvOutputText -match "no titles found") {
         $errorMessage = "No disc detected in drive - MakeMKV could not find any valid titles"
