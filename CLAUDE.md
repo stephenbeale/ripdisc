@@ -19,13 +19,24 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
-### 2026-10-28 - Movie folder naming `Title (Year)` (branch `feature/movie-folder-year`, stacked on `feature/infer-title-from-disc` / PR #162)
+### 2026-10-28 - NEXT SESSION items (main = 9f1b240, 790/790 tests, 16 files)
+
+All PRs below are MERGED: #162 e362198, #164 c919c5b (replaced #163, auto-closed when its stacked base branch was deleted), #156 8621a43, #161 dbbb24c, #159 9f1b240. #156, #161, #159 were merged without real-hardware tests.
+
+1. **Cable-pull test for #161 is still owed on main** (junk disc, pull USB mid-rip, check beep + tray notification + PAUSED prompt, reconnect, R, rip completes, partial MKV removed).
+2. Fix README.md (from #159): two example lines contain a literal carriage return in the middle of the rip-disc.ps1 path (the backslash-r of `.\rip-disc.ps1` was turned into a CR).
+3. Fix #159's `Write-Host "Disc: ..."` spacing defect in rip-disc.ps1 (no space before `-ForegroundColor`).
+4. Real-drive tests not yet done: audio-CD stop prompt and `[D]` restart; SCARFACE pick-list flow; setup step 6 and the year prompt; Disc 2 reusing a dated folder; #156 watch-drives with a real insert; #159 multi-disc documentary rip.
+5. Slow Dance DVD is a 2014 surf film; IMDb tt3453042 (a short) is NOT confirmed as the same film.
+6. ripaudio/ripdisc direction (project-manager advice, user has not chosen): backlog cleared; next build a front-door `rip.ps1` launcher in ripdisc dispatching on disc type, later a shared RipCommon module (drives, disconnect/retry, logging, config). Do NOT fully merge ripaudio into ripdisc. ripaudio has no tests. Proposed for ripaudio, not started: text-search pick list when MusicBrainz has no disc-ID match (rip-audio.ps1 ~line 1373), richer multi-release picker (~line 402), -album vs disc sanity check.
+
+### 2026-10-28 - Movie folder naming `Title (Year)` (PR #164, merged c919c5b)
 
 User chose option 3: only `Title` / `Title (Year)`, no IMDb id yet. Setup step 6 saves `movieFolderNaming` (`title` / `title-year`); `-Year` on both scripts. Precedence: `-Year`, then exactly one existing `<title>`/`<title> (YYYY)` folder, then (title-year) the discovery pick's year or the `Read-FolderYear` prompt (Enter/EOF = no year, never aborts). Only the 7 movie/genre-film `$finalOutputDir` lines use `$script:MediaFolderName`; series untouched. Tests: Test-MovieFolderNaming 50/50, full suite 670/670 (13 files). Load-Config read checked against real config files (title-year / bogus / none). **Not run on a real disc.**
 
 **Deferred:** `[imdbid-tt...]` naming needs a bracket audit first (wildcards in `-like` and `-Path`: Get-Item/Test-Path/New-Item/Get-ChildItem on `$finalOutputDir`, the movie-mode prefix `-like` checks in both scripts).
 
-### 2026-10-28 - Title suggestions from the disc (branch `feature/infer-title-from-disc`, off main 87293d4)
+### 2026-10-28 - Title suggestions from the disc (PR #162, merged e362198)
 
 Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive F` while the drive listing already showed `[Slow Dance]`. They asked for the title to be inferred from the disc, with API suggestions, years and IMDb ids.
 
@@ -39,18 +50,18 @@ Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive 
 
 **Not done:** no real-disc run of the pick list. TMDb key still unset, so the TMDb path is mocked only. IMDb endpoint verified live 2026-10-28 (about 0.4 s; one 8 s cold-start timeout seen once). Year/IMDb id are shown and logged but NOT used in folder/file names (Jellyfin `Title (Year) [imdbid-tt...]` naming is a possible follow-up). C# side unchanged.
 
-**Still open from before:** PR #161 cable-pull test (branch `feature/pause-on-drive-disconnect`).
+**Still open from before:** PR #161 cable-pull test (#161 now merged; test still owed on main).
 
-### 2026-10-26 - Pause-and-retry on mid-rip drive disconnect (PR #161, OPEN, NOT merged)
+### 2026-10-26 - Pause-and-retry on mid-rip drive disconnect (PR #161, MERGED dbbb24c)
 
-**NEXT SESSION: do the cable-pull test for PR #161 before merging. The user asked to be reminded.**
+**NEXT SESSION: do the cable-pull test for PR #161 on main (merged without it at the user's choice). The user asked to be reminded.**
 
-1. `git checkout feature/pause-on-drive-disconnect`.
+1. `git checkout main && git pull`.
 2. Start a rip on a junk disc.
 3. Pull the drive's USB cable partway through.
 4. Confirm the beep, the tray notification and the PAUSED prompt.
 5. Reconnect, press R, and confirm the rip completes and the partial MKV was removed.
-6. Tick the last test-plan box on PR #161, then merge.
+6. Tick the last test-plan box on PR #161.
 
 Trigger: a Cream documentary rip failed when the user knocked the USB cable (MakeMKV `STATUS_DEVICE_NOT_CONNECTED`; Step 1 failed "The drive disconnected ... while MakeMKV was saving titles"). Nothing completed, so nothing is resumable.
 
