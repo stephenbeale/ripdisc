@@ -58,7 +58,7 @@ When `-title` is omitted, the PowerShell script automatically discovers disc met
    - **The disc label**, cleaned.
    - **TMDb**, searched on the label. Needs a key. Each hit's IMDb id is fetched too.
    - **IMDb's search suggestions**. No key needed. Gives IMDb ids and years. This is an unofficial endpoint, so it may stop working; a failure only removes it from the list.
-4. **Shows one numbered list** of suggestions. Each row has the year, the kind (`[Movie]`, `[Short]`, `[TV mini-series]`...) and the IMDb id. A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
+4. **Shows one numbered list** of suggestions. Each row has the year, the IMDb id and, unless it is a normal film, the kind (`[Short]`, `[Video]`, `[TV mini-series]`...). A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
    ```
    [2] Slow Dance (2014) [Short] tt3453042 - IMDb
        with Belinda Rodrigues, Darius G Rodrigues | https://www.imdb.com/title/tt3453042/
@@ -68,6 +68,8 @@ When `-title` is omitted, the PowerShell script automatically discovers disc met
 6. **Prompts for confirmation** — accept, edit, or abort
 
 The plain disc label is never merged with a search hit of the same name. A label `Slow Dance` on a surf film is not IMDb's 2005 TV series *Slow Dance*. The label stays its own row with no year, and each search hit gets its own row.
+
+If the drive holds an **audio CD**, ripdisc stops before any of this. It prints the ripaudio command, and offers to start `rip-audio.ps1` or to rip a video disc from another drive instead. With other discs in the drives, the pick list also has `[D] Use a different drive`, which restarts `rip-disc.ps1` on that drive with the same options.
 
 If `-title` is provided, discovery is skipped. The disc label from the drive listing is still compared with the title at no cost. If they differ, a `NOTE: the disc label reads "..."` line is shown and logged. Nothing is prompted.
 
