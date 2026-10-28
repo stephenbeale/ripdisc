@@ -40,7 +40,7 @@ function Import-FunctionFromScript {
 }
 
 . $sharedPath
-foreach ($name in @('Clean-DiscName', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
+foreach ($name in @('Clean-DiscName', 'New-TitleCandidate', 'Get-ShortText', 'Get-TitleCandidateUrl', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
                     'Get-DiscTitleCandidates', 'Read-TitleChoice', 'Get-DiscLabelTitleCheck')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath $name)))
 }
@@ -108,7 +108,7 @@ function Invoke-ImdbSuggestRequest {
 # Shape of a real response (fetched 2026-10-28 for "30 rock"), trimmed, plus one of
 # each kind that must be dropped.
 $rockImdbJson = @{ d = @(
-    @{ id = 'tt0496424'; l = '30 Rock'; y = 2006; q = 'TV series'; qid = 'tvSeries' },
+    @{ id = 'tt0496424'; l = '30 Rock'; y = 2006; q = 'TV series'; qid = 'tvSeries'; s = 'Tina Fey, Alec Baldwin' },
     @{ id = 'tt1860375'; l = '30 Rock'; y = 1983; q = 'TV series'; qid = 'tvSeries' },
     @{ id = 'tt7306384'; l = 'Keri Hilson: 30 Rock'; y = 2009; q = 'musicVideo'; qid = 'musicVideo' },
     @{ id = 'nm0000001'; l = 'Some Person'; s = 'Actor' },
@@ -116,7 +116,7 @@ $rockImdbJson = @{ d = @(
     @{ id = 'tt2866584'; l = '30 Rock: The Webisodes'; q = 'video'; qid = 'video' }
 ) } | ConvertTo-Json -Depth 5
 $slowDanceJson = @{ results = @(
-    @{ media_type = 'movie'; title = 'Slow Dance'; release_date = '2013-05-01'; id = 101 },
+    @{ media_type = 'movie'; title = 'Slow Dance'; release_date = '2013-05-01'; id = 101; overview = 'Two surfers chase a winter swell along the coast of Portugal, and the film follows them for weeks through storms and flat spells alike.' },
     @{ media_type = 'person'; name = 'Slow Dancer' ; id = 7 },
     @{ media_type = 'tv'; name = 'Slow Dance Club'; first_air_date = '2019-02-02'; id = 202 },
     @{ media_type = 'movie'; title = 'Slow Dance'; release_date = '1998-01-01'; id = 303 },
@@ -155,6 +155,8 @@ try {
     Assert-True ($script:TmdbUrls[0] -match 'search/multi\?query=Slow%20Dance&api_key=k$') 'title URL-encoded into a multi search'
     Assert-True ($script:TmdbUrls[1] -match '/movie/101/external_ids\?api_key=k$' -and $script:TmdbUrls[2] -match '/tv/202/external_ids') 'external_ids asked per candidate with the right media type'
     Assert-Equal 101 $c[0].TmdbId 'TMDb id kept for later season lookups'
+    Assert-Equal 'Two surfers chase a winter swell along the coast of Portugal, and the film follows them...' $c[0].Description 'TMDb overview shortened at a word boundary'
+    Assert-Equal 'Movie|TV' "$($c[0].Kind)|$($c[1].Kind)" 'TMDb kind shown as Movie / TV'
     $c = Get-TMDbTitleCandidates -SearchTitle 'Slow Dance' -Max 2 6>$null
     Assert-Equal 2 @($c).Count '-Max caps the list'
 
@@ -173,6 +175,9 @@ $script:ImdbBody = $rockImdbJson | ConvertFrom-Json
 $c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
 Assert-Equal '30 Rock|2006|tv|tt0496424|IMDb;30 Rock|1983|tv|tt1860375|IMDb;The 30 Foot Bride of Candy Rock|1959|movie|tt0052529|IMDb;30 Rock: The Webisodes||movie|tt2866584|IMDb' (Format-Candidates $c) 'titles kept with id/year/kind; music videos and people dropped; missing year left blank'
 Assert-Equal 'https://v2.sg.media-imdb.com/suggestion/3/30%20rock.json' $script:ImdbUrls[-1] 'URL: lowercased query under its first character'
+Assert-Equal 'with Tina Fey, Alec Baldwin' $c[0].Description 'IMDb cast becomes the description'
+Assert-Equal 'TV series|Movie|Video' "$($c[0].Kind)|$($c[2].Kind)|$($c[3].Kind)" 'IMDb kind kept (TV series / Movie / Video), not lumped into Movie'
+Assert-Equal '30 Rock (2006) [TV series] tt0496424 - IMDb' (Format-TitleCandidate $c[0]) 'menu line uses the IMDb kind'
 $null = Get-ImdbTitleCandidates -SearchTitle '"Weird" Al' 6>$null
 Assert-True ($script:ImdbUrls[-1] -match '/suggestion/x/') 'a query not starting with a letter/digit goes under x'
 $c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' -Max 1 6>$null
@@ -270,6 +275,32 @@ $pick = Read-TitleChoice -Candidates @() -ReadInput (New-InputQueue @('Slow Danc
 Assert-Equal 'Slow Dance|typed' "$($pick.Title)|$($pick.Source)" 'no suggestions: asks for the title straight away'
 $pick = Read-TitleChoice -Candidates @() -ReadInput (New-InputQueue @('')) 6>$null
 Assert-True ($null -eq $pick) 'no suggestions and blank: abort'
+
+# ---------------------------------------------------------------------------
+Write-Host "`nDescriptions, links and search again" -ForegroundColor Cyan
+
+Assert-Equal 'https://www.imdb.com/title/tt0113277/' (Get-TitleCandidateUrl (New-TitleCandidate -Title 'Heat' -ImdbId 'tt0113277' -TmdbId 949 -Source 'IMDb')) 'IMDb page when the id is known'
+Assert-Equal 'https://www.themoviedb.org/tv/4608' (Get-TitleCandidateUrl (New-TitleCandidate -Title '30 Rock' -MediaType 'tv' -TmdbId 4608 -Source 'TMDb')) 'TMDb page when only the TMDb id is known'
+Assert-Equal 'https://www.imdb.com/find/?q=Slow%20Dance&s=tt' (Get-TitleCandidateUrl (New-TitleCandidate -Title 'Slow Dance' -Source 'disc label')) 'disc label row links to an IMDb title search'
+Assert-Equal 'short text' (Get-ShortText '  short   text ') 'short text only tidied'
+$c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE'
+Assert-Equal 'as printed on the disc' $c[0].Description 'label row says where it came from'
+$dd3 = [pscustomobject]@{ MediaTitle = 'Heat'; MediaType = 'Movie'; Year = 1995; Description = 'Heat (1995) - Blu-ray, disc 1'; Titles = @() }
+$c = Get-DiscTitleCandidates -DiscDbDisc $dd3 -ImdbCandidates @(New-TitleCandidate -Title 'Heat' -Year '1995' -MediaType 'movie' -Kind 'Movie' -Description 'with Al Pacino' -ImdbId 'tt0113277' -Source 'IMDb')
+Assert-Equal 'this exact disc: Heat (1995) - Blu-ray, disc 1|tt0113277' "$($c[0].Description)|$($c[0].ImdbId)" 'TheDiscDB keeps its own description and borrows the IMDb id'
+
+$script:SearchedFor = @()
+$searchStub = { param($q) $script:SearchedFor += $q; @(New-TitleCandidate -Title 'Slow Dance' -Year '2014' -MediaType 'movie' -Kind 'Short' -ImdbId 'tt3453042' -Source 'IMDb') }
+$first = @(New-TitleCandidate -Title 'Slow Dance' -Source 'disc label')
+$pick = Read-TitleChoice -Candidates $first -Search $searchStub -ReadInput (New-InputQueue @('r', 'slow dance 2014', '1')) 6>$null
+Assert-Equal 'slow dance 2014' ($script:SearchedFor -join ';') 'R runs the search with the typed text'
+Assert-Equal 'Slow Dance|2014|tt3453042' "$($pick.Title)|$($pick.Year)|$($pick.ImdbId)" 'the new list replaces the old one and can be picked from'
+$pick = Read-TitleChoice -Candidates $first -Search $searchStub -ReadInput (New-InputQueue @('r', '', '')) 6>$null
+Assert-Equal 'disc label' $pick.Source 'R then blank keeps the old list'
+$pick = Read-TitleChoice -Candidates @() -Search { param($q) @() } -ReadInput (New-InputQueue @('r', 'nothing', 'a')) 6>$null
+Assert-True ($null -eq $pick) 'no suggestions with search: R/M/A offered instead of jumping to typing'
+$pick = Read-TitleChoice -Candidates $first -ReadInput (New-InputQueue @('r', '1')) 6>$null
+Assert-Equal 'disc label' $pick.Source 'R without a search is just an invalid choice'
 
 # ---------------------------------------------------------------------------
 Write-Host "`n-title vs disc label" -ForegroundColor Cyan

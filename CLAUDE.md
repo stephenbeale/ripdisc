@@ -23,7 +23,9 @@ behind a feature or fix; only the current notes are kept here.
 
 Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive F` while the drive listing already showed `[Slow Dance]`. They asked for the title to be inferred from the disc, with API suggestions, years and IMDb ids.
 
-**Built:** without `-title`, auto-discovery now shows one numbered pick list from TheDiscDB (hash, no key), the cleaned disc label, TMDb (key, plus `external_ids` for IMDb ids) and IMDb's suggestion feed `v2.sg.media-imdb.com/suggestion/<c>/<q>.json` (no key, UNOFFICIAL). Rows show year, `[Movie]`/`[TV]` and IMDb id. With `-title`, the label from the drive listing is compared with the title (NOTE on mismatch, no prompt). The discovery TheDiscDB lookup is reused by `-Series` naming. `tests/Test-TitleSuggestions.ps1` 63/63; full suite 601/601 across 12 files.
+**Built:** without `-title`, auto-discovery now shows one numbered pick list from TheDiscDB (hash, no key), the cleaned disc label, TMDb (key, plus `external_ids` for IMDb ids) and IMDb's suggestion feed `v2.sg.media-imdb.com/suggestion/<c>/<q>.json` (no key, UNOFFICIAL). Rows show year, `[Movie]`/`[TV]` and IMDb id. With `-title`, the label from the drive listing is compared with the title (NOTE on mismatch, no prompt). The discovery TheDiscDB lookup is reused by `-Series` naming. `tests/Test-TitleSuggestions.ps1` 79/79; full suite 620/620 across 12 files.
+
+**Real-disc run (user, Slow Dance DVD):** the menu worked but the user says the film is 2014 and no 2014 row appeared. IMDb's suggestion feed returns only ~8 hits ranked by popularity, and "slow dance 2014" does find `tt3453042` (a 2014 short; NOT confirmed to be the user's surf film). Added a description line (TMDb overview / IMDb cast) and a check link per row, IMDb's real kind, and `[R] Search again`.
 
 **Found live and fixed before commit:** a year-less label merged into IMDb's first same-name hit (2005 Japanese TV series "Slow Dance"), so Enter would have turned on Series mode for a surf film. The bare label now never absorbs search hits; only TheDiscDB does.
 

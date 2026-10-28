@@ -8,9 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Running `rip-disc.ps1` without `-title` now shows one numbered list of suggested titles. The suggestions come from TheDiscDB (exact disc match by content hash, no key), the cleaned disc label, TMDb (with key) and IMDb's search suggestions (no key, unofficial endpoint). Each row shows year, `[Movie]`/`[TV]` and IMDb id when known. The same title from several sources is listed once. The plain disc label never takes on a same-name search hit's year, type or id, and the session log records the pick.
+- Each suggestion has a second line with a short description (TMDb plot, IMDb cast, or "this exact disc" from TheDiscDB) and a link to check it (IMDb page, else TMDb page, else an IMDb title search). The kind is IMDb's own (`Short`, `TV mini-series`, `Video`...), no longer always `Movie`.
+- `[R] Search again` in the pick list re-runs TMDb + IMDb with your own text. Found on a real disc: IMDb's popularity-ranked list for "slow dance" left out the 2014 title, and "slow dance 2014" found it.
 - With `-title`, the disc label (already read for the drive listing) is compared with the title. A mismatch prints and logs a `NOTE`; there is no prompt and no network call.
 - TMDb candidates get IMDb ids via `/{movie|tv}/{id}/external_ids`. The TheDiscDB lookup done during discovery is reused by plain `-Series` naming rather than repeated.
-- `tests/Test-TitleSuggestions.ps1` (63 tests, TMDb/IMDb mocked).
+- `tests/Test-TitleSuggestions.ps1` (79 tests, TMDb/IMDb mocked).
 
 ### Changed
 - `Search-TMDb` (interactive, TMDb only) is replaced by `Get-TMDbTitleCandidates` + `Get-ImdbTitleCandidates` + `Get-DiscTitleCandidates` + `Read-TitleChoice`. Discovery no longer needs MakeMKV's info scan to succeed. If the scan fails, the label from the drive listing and TheDiscDB are still used.

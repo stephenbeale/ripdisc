@@ -58,7 +58,12 @@ When `-title` is omitted, the PowerShell script automatically discovers disc met
    - **The disc label**, cleaned.
    - **TMDb**, searched on the label. Needs a key. Each hit's IMDb id is fetched too.
    - **IMDb's search suggestions**. No key needed. Gives IMDb ids and years. This is an unofficial endpoint, so it may stop working; a failure only removes it from the list.
-4. **Shows one numbered list** of suggestions with year, `[Movie]`/`[TV]` and IMDb id. The same title found in several places shows once, e.g. `[1] 30 Rock (2006) [TV] tt0496424 - TheDiscDB + TMDb + IMDb`. Enter takes `[1]`, a number picks that row, `M` lets you type a title, `A` aborts.
+4. **Shows one numbered list** of suggestions. Each row has the year, the kind (`[Movie]`, `[Short]`, `[TV mini-series]`...) and the IMDb id. A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
+   ```
+   [2] Slow Dance (2014) [Short] tt3453042 - IMDb
+       with Belinda Rodrigues, Darius G Rodrigues | https://www.imdb.com/title/tt3453042/
+   ```
+   Enter takes `[1]`, a number picks that row, `R` searches again with your own text, `M` lets you type a title, `A` aborts. IMDb's list is short and ranked by popularity, so a less-known film can be missing until you add the year or a word: `R`, then `slow dance 2014`.
 5. **Auto-populates** `-title`, `-Bluray`, `-Series`, `-Season`, and `-Disc` from the pick. Picking a `[TV]` row turns on `-Series`; TheDiscDB's season wins over the label's.
 6. **Prompts for confirmation** — accept, edit, or abort
 

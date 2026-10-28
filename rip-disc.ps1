@@ -699,6 +699,40 @@ function Test-GenericDiscLabel {
     return (-not $k) -or ($k -match '^(dvd(video)?|disc\d*|blank|bdrom|bluray|bdmv|videots|logicalvolumeid|volume\d*|newvolume|untitled|cdrom|\d+)$')
 }
 
+# One suggestion. Kind is the source's own label ("Short", "TV mini-series"...) for
+# display; MediaType ('movie' / 'tv' / $null) is what drives Series mode.
+function New-TitleCandidate {
+    param([string]$Title, [string]$Year = "", [string]$MediaType = $null, [string]$Kind = "", [string]$Description = "",
+          $TmdbId = $null, [string]$ImdbId = $null, [int]$Season = 0, [string]$Source)
+    return [pscustomobject]@{
+        Title = $Title; Year = $Year; MediaType = $(if ($MediaType) { $MediaType } else { $null }); Kind = $Kind
+        Description = $Description; TmdbId = $TmdbId; ImdbId = $(if ($ImdbId) { $ImdbId } else { $null }); Season = $Season; Source = $Source
+    }
+}
+
+# First sentence-ish of a longer text, cut at a word boundary.
+function Get-ShortText {
+    param([string]$Text, [int]$Max = 90)
+    $t = ("$Text" -replace '\s+', ' ').Trim()
+    if ($t.Length -le $Max) { return $t }
+    $cut = $t.Substring(0, $Max)
+    $space = $cut.LastIndexOf(' ')
+    if ($space -gt $Max / 2) { $cut = $cut.Substring(0, $space) }
+    return $cut.TrimEnd(',', ';', ':', '.', ' ') + '...'
+}
+
+# Where to check a suggestion: its IMDb page, else its TMDb page, else an IMDb title
+# search for the name (disc label / typed rows) so there is always somewhere to look.
+function Get-TitleCandidateUrl {
+    param([object]$Candidate)
+    if ($Candidate.ImdbId) { return "https://www.imdb.com/title/$($Candidate.ImdbId)/" }
+    if ($Candidate.TmdbId) {
+        $kind = if ($Candidate.MediaType -eq 'tv') { 'tv' } else { 'movie' }
+        return "https://www.themoviedb.org/$kind/$($Candidate.TmdbId)"
+    }
+    return "https://www.imdb.com/find/?q=$([System.Uri]::EscapeDataString("$($Candidate.Title)"))&s=tt"
+}
+
 # Non-interactive TMDb multi search (movies and TV only). Returns up to -Max candidates,
 # or an empty array when the key is unset or the request fails - never throws. Search
 # results carry no IMDb id, so each candidate costs one external_ids call to get it;
@@ -728,15 +762,9 @@ function Get-TMDbTitleCandidates {
             $ext = Invoke-TMDbRequest -Url "https://api.themoviedb.org/3/$($r.media_type)/$($r.id)/external_ids?api_key=$apiKey"
             if ("$($ext.imdb_id)" -match '^tt\d+$') { $imdbId = "$($ext.imdb_id)" }
         } catch { }
-        [pscustomobject]@{
-            Title     = if ($isMovie) { $r.title } else { $r.name }
-            Year      = ($date -split '-')[0]
-            MediaType = $r.media_type
-            TmdbId    = $r.id
-            ImdbId    = $imdbId
-            Season    = 0
-            Source    = 'TMDb'
-        }
+        New-TitleCandidate -Title $(if ($isMovie) { $r.title } else { $r.name }) -Year ($date -split '-')[0] `
+            -MediaType $r.media_type -Kind $(if ($isMovie) { 'Movie' } else { 'TV' }) -Description (Get-ShortText $r.overview) `
+            -TmdbId $r.id -ImdbId $imdbId -Source 'TMDb'
     })
 }
 
@@ -746,13 +774,15 @@ function Invoke-ImdbSuggestRequest {
     return Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec 8
 }
 
-# IMDb's search-box suggestion feed (v2.sg.media-imdb.com): no key, gives IMDb id, year
-# and kind. It is UNOFFICIAL and undocumented, so it may change or vanish - everything
-# here is fail-soft and an empty array just means one source fewer. Music videos, games,
-# podcasts and single episodes are dropped; shorts and videos stay (surf / skate films
-# are often listed as those).
+# IMDb's search-box suggestion feed (v2.sg.media-imdb.com): no key, gives IMDb id, year,
+# kind and the top-billed cast. It is UNOFFICIAL and undocumented, so it may change or
+# vanish - everything here is fail-soft and an empty array just means one source fewer.
+# It returns only ~8 hits ranked by popularity, so an obscure title can be missing until
+# the search adds a year ("slow dance 2014") - hence [R] in the pick list. Music videos,
+# games, podcasts and single episodes are dropped; shorts and videos stay (surf / skate
+# films are often listed as those).
 function Get-ImdbTitleCandidates {
-    param([string]$SearchTitle, [int]$Max = 5)
+    param([string]$SearchTitle, [int]$Max = 6)
     $q = ("$SearchTitle".ToLowerInvariant() -replace '\s+', ' ').Trim()
     if (-not $q) { return @() }
     $first = if ($q[0] -match '[a-z0-9]') { $q[0] } else { 'x' }
@@ -763,27 +793,25 @@ function Get-ImdbTitleCandidates {
         Write-Host "WARNING: IMDb search failed: $($_.Exception.Message)" -ForegroundColor Yellow
         return @()
     }
+    $kinds = @{ movie = 'Movie'; short = 'Short'; tvSeries = 'TV series'; tvMiniSeries = 'TV mini-series'; tvMovie = 'TV movie'
+                tvSpecial = 'TV special'; tvShort = 'TV short'; video = 'Video' }
     return @(@($response.d) | Where-Object {
             $_ -and "$($_.id)" -match '^tt\d+$' -and $_.l -and
             "$($_.qid)" -notmatch '^(musicVideo|videoGame|podcastSeries|podcastEpisode|tvEpisode)$'
         } | Select-Object -First $Max | ForEach-Object {
-            [pscustomobject]@{
-                Title     = "$($_.l)"
-                Year      = if ($_.y) { "$($_.y)" } else { "" }
-                MediaType = if ("$($_.qid)" -match '^tv(Series|MiniSeries)$') { 'tv' } else { 'movie' }
-                TmdbId    = $null
-                ImdbId    = "$($_.id)"
-                Season    = 0
-                Source    = 'IMDb'
-            }
+            $qid = "$($_.qid)"
+            New-TitleCandidate -Title "$($_.l)" -Year $(if ($_.y) { "$($_.y)" } else { "" }) `
+                -MediaType $(if ($qid -match '^tv(Series|MiniSeries)$') { 'tv' } else { 'movie' }) `
+                -Kind $(if ($kinds.ContainsKey($qid)) { $kinds[$qid] } elseif ($_.q) { "$($_.q)" } else { '' }) `
+                -Description $(if ($_.s) { "with $(Get-ShortText $_.s 70)" } else { "" }) -ImdbId "$($_.id)" -Source 'IMDb'
         })
 }
 
 # Merges the sources into one ordered, de-duplicated list: TheDiscDB first (it
 # identifies this exact pressing), then the cleaned disc label, then TMDb, then IMDb.
 # Entries with the same title key (and no conflicting year or IMDb id) collapse into
-# one, keeping the first position and borrowing year / media type / TMDb and IMDb ids
-# from the later source, e.g. "30 Rock (2006) [TV] tt0496424 - TheDiscDB + TMDb + IMDb".
+# one, keeping the first position and borrowing year / type / description / ids from
+# the later source, e.g. "30 Rock (2006) [TV] tt0496424 - TheDiscDB + TMDb + IMDb".
 # The bare disc label never absorbs a search hit: a shared name is not the same work
 # (label "Slow Dance" on a surf film vs IMDb's 2005 TV series "Slow Dance"), and adopting
 # a [TV] hit would switch Series mode on. Only TheDiscDB, an exact disc match, absorbs it.
@@ -793,21 +821,14 @@ function Get-DiscTitleCandidates {
     $incoming = New-Object System.Collections.Generic.List[object]
     if ($DiscDbDisc -and $DiscDbDisc.MediaTitle) {
         $seasons = @($DiscDbDisc.Titles | Where-Object { $_.ItemType -eq 'Episode' -and $_.Season } | ForEach-Object { $_.Season } | Select-Object -Unique)
-        $incoming.Add([pscustomobject]@{
-            Title     = "$($DiscDbDisc.MediaTitle)"
-            Year      = "$($DiscDbDisc.Year)"
-            MediaType = if ("$($DiscDbDisc.MediaType)" -match '(?i)series|tv|show') { 'tv' } else { 'movie' }
-            TmdbId    = $null
-            ImdbId    = $null
-            Season    = if ($seasons.Count -eq 1) { [int]$seasons[0] } else { 0 }
-            Source    = 'TheDiscDB'
-        })
+        $isTv = "$($DiscDbDisc.MediaType)" -match '(?i)series|tv|show'
+        $incoming.Add((New-TitleCandidate -Title "$($DiscDbDisc.MediaTitle)" -Year "$($DiscDbDisc.Year)" `
+            -MediaType $(if ($isTv) { 'tv' } else { 'movie' }) -Kind $(if ($isTv) { 'TV' } else { 'Movie' }) `
+            -Description $(if ($DiscDbDisc.Description) { "this exact disc: $($DiscDbDisc.Description)" } else { "" }) `
+            -Season $(if ($seasons.Count -eq 1) { [int]$seasons[0] } else { 0 }) -Source 'TheDiscDB'))
     }
     if ($DiscLabel -and -not (Test-GenericDiscLabel $DiscLabel)) {
-        $incoming.Add([pscustomobject]@{
-            Title = (Clean-DiscName -RawName $DiscLabel).CleanedTitle
-            Year = ""; MediaType = $null; TmdbId = $null; ImdbId = $null; Season = 0; Source = 'disc label'
-        })
+        $incoming.Add((New-TitleCandidate -Title (Clean-DiscName -RawName $DiscLabel).CleanedTitle -Description "as printed on the disc" -Source 'disc label'))
     }
     foreach ($t in @($TmdbCandidates) + @($ImdbCandidates)) { if ($t -and $t.Title) { $incoming.Add($t) } }
 
@@ -825,12 +846,14 @@ function Get-DiscTitleCandidates {
         }
         if ($same) {
             if ($same.Source -notmatch [regex]::Escape($c.Source)) { $same.Source = "$($same.Source) + $($c.Source)" }
-            if (-not $same.Year -and $c.Year) { $same.Year = "$($c.Year)" }
-            if (-not $same.MediaType -and $c.MediaType) { $same.MediaType = $c.MediaType }
-            if (-not $same.TmdbId -and $c.TmdbId) { $same.TmdbId = $c.TmdbId }
-            if (-not $same.ImdbId -and $c.ImdbId) { $same.ImdbId = $c.ImdbId }
+            foreach ($f in 'Year', 'MediaType', 'Kind', 'TmdbId', 'ImdbId') {
+                if (-not $same.$f -and $c.$f) { $same.$f = $c.$f }
+            }
+            # TheDiscDB's "this exact disc" line beats a search hit's; a cast list beats nothing
+            if (-not $same.Description -and $c.Description) { $same.Description = $c.Description }
         } else {
-            $merged.Add([pscustomobject]@{ Title = $c.Title; Year = "$($c.Year)"; MediaType = $c.MediaType; TmdbId = $c.TmdbId; ImdbId = $c.ImdbId; Season = [int]$c.Season; Source = $c.Source })
+            $merged.Add((New-TitleCandidate -Title $c.Title -Year "$($c.Year)" -MediaType $c.MediaType -Kind "$($c.Kind)" `
+                -Description "$($c.Description)" -TmdbId $c.TmdbId -ImdbId $c.ImdbId -Season ([int]$c.Season) -Source $c.Source))
         }
     }
     return $merged.ToArray()
@@ -840,46 +863,69 @@ function Get-DiscTitleCandidates {
 function Format-TitleCandidate {
     param([object]$Candidate)
     $year = if ($Candidate.Year) { " ($($Candidate.Year))" } else { "" }
-    $kind = switch ($Candidate.MediaType) { 'tv' { ' [TV]' } 'movie' { ' [Movie]' } default { '' } }
+    $kindText = if ($Candidate.Kind) { $Candidate.Kind } else { switch ($Candidate.MediaType) { 'tv' { 'TV' } 'movie' { 'Movie' } default { '' } } }
+    $kind = if ($kindText) { " [$kindText]" } else { "" }
     $imdb = if ($Candidate.ImdbId) { " $($Candidate.ImdbId)" } else { "" }
     return "$($Candidate.Title)$year$kind$imdb - $($Candidate.Source)"
 }
 
-# Numbered pick list. Enter takes [1]; M types a title; A (or end of input) aborts.
+# Numbered pick list. Each row has a second line with a short description and a link to
+# check it. Enter takes [1]; R searches again (when -Search is given - e.g. adding a year
+# finds titles IMDb's short list left out); M types a title; A (or end of input) aborts.
+# -Search takes the search text and returns a fresh candidate list.
 # Returns the chosen candidate, a Source='typed' candidate, or $null to abort.
 function Read-TitleChoice {
-    param([object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    param([object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null)
 
     $Candidates = @($Candidates | Where-Object { $_ })
-    if ($Candidates.Count -eq 0) {
-        Write-Host "No title suggestions for this disc." -ForegroundColor Yellow
-    } else {
-        Write-Host "`nSuggested titles:" -ForegroundColor Cyan
-        for ($i = 0; $i -lt $Candidates.Count; $i++) {
-            Write-Host "  [$($i + 1)] $(Format-TitleCandidate $Candidates[$i])" -ForegroundColor White
-        }
-        Write-Host "  [M] Type a different title" -ForegroundColor Gray
-        Write-Host "  [A] Abort" -ForegroundColor Gray
-    }
-
+    $show = $true
     while ($true) {
-        if ($Candidates.Count -eq 0) {
+        if ($show) {
+            if ($Candidates.Count -eq 0) {
+                Write-Host "No title suggestions for this disc." -ForegroundColor Yellow
+            } else {
+                Write-Host "`nSuggested titles:" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $Candidates.Count; $i++) {
+                    $c = $Candidates[$i]
+                    Write-Host "  [$($i + 1)] $(Format-TitleCandidate $c)" -ForegroundColor White
+                    $detail = @($c.Description, (Get-TitleCandidateUrl $c)) | Where-Object { $_ }
+                    Write-Host "      $($detail -join ' | ')" -ForegroundColor DarkGray
+                }
+            }
+            if ($Search) { Write-Host "  [R] Search again (e.g. add the year, or a word like `"surf`")" -ForegroundColor Gray }
+            Write-Host "  [M] Type a different title" -ForegroundColor Gray
+            Write-Host "  [A] Abort" -ForegroundColor Gray
+            $show = $false
+        }
+
+        if ($Candidates.Count -eq 0 -and -not $Search) {
             $answer = 'M'
         } else {
-            $answer = & $ReadInput "Pick a title (Enter = 1)"
+            $prompt = if ($Candidates.Count -gt 0) { "Pick a title (Enter = 1)" } else { "R, M or A" }
+            $answer = & $ReadInput $prompt
             if ($null -eq $answer) { return $null }
             $answer = "$answer".Trim()
-            if ($answer -eq '') { return $Candidates[0] }
+            if ($answer -eq '' -and $Candidates.Count -gt 0) { return $Candidates[0] }
             if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $Candidates.Count) { return $Candidates[[int]$answer - 1] }
         }
         switch ($answer.ToUpper()) {
             'M' {
                 $text = & $ReadInput "Enter title (blank to abort)"
                 if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-                return [pscustomobject]@{ Title = "$text".Trim(); Year = ""; MediaType = $null; TmdbId = $null; ImdbId = $null; Season = 0; Source = 'typed' }
+                return (New-TitleCandidate -Title "$text".Trim() -Source 'typed')
+            }
+            'R' {
+                if (-not $Search) { Write-Host "Invalid choice." -ForegroundColor Red; continue }
+                $text = & $ReadInput "Search for (blank to go back)"
+                if ($null -eq $text) { return $null }
+                if (-not [string]::IsNullOrWhiteSpace($text)) { $Candidates = @(& $Search "$text".Trim() | Where-Object { $_ }) }
+                $show = $true
             }
             'A' { return $null }
-            default { Write-Host "Invalid choice. Enter 1-$($Candidates.Count), M or A." -ForegroundColor Red }
+            default {
+                $choices = if ($Candidates.Count -gt 0) { "1-$($Candidates.Count), " } else { "" }
+                Write-Host "Invalid choice. Enter $choices$(if ($Search) { 'R, ' })M or A." -ForegroundColor Red
+            }
         }
     }
 }
@@ -1185,7 +1231,11 @@ if ($title -eq "") {
     if (-not $searchTitle) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
 
     $candidates = Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates
-    $picked = Read-TitleChoice -Candidates $candidates
+    # [R] in the pick list re-runs the online searches with the user's own text (adding
+    # the year often finds what IMDb's short popularity-ranked list left out)
+    $searchAgain = { param($q) Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc `
+        -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+    $picked = Read-TitleChoice -Candidates $candidates -Search $searchAgain
     if (-not $picked) {
         Write-Host "Aborted." -ForegroundColor Yellow
         exit 0
@@ -1215,6 +1265,7 @@ if ($title -eq "") {
     Write-Host "  Title:  $title" -ForegroundColor White
     if ($picked.Year) { Write-Host "  Year:   $($picked.Year)" -ForegroundColor White }
     if ($picked.ImdbId) { Write-Host "  IMDb:   $($picked.ImdbId) (https://www.imdb.com/title/$($picked.ImdbId)/)" -ForegroundColor White }
+    if ($picked.Description) { Write-Host "  About:  $($picked.Description)" -ForegroundColor White }
     Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
     Write-Host "  Type:   $(if ($Series) { 'TV Series' } else { 'Movie' })" -ForegroundColor White
     if ($Series) {
