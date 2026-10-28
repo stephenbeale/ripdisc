@@ -177,7 +177,7 @@ Assert-Equal '30 Rock|2006|tv|tt0496424|IMDb;30 Rock|1983|tv|tt1860375|IMDb;The 
 Assert-Equal 'https://v2.sg.media-imdb.com/suggestion/3/30%20rock.json' $script:ImdbUrls[-1] 'URL: lowercased query under its first character'
 Assert-Equal 'with Tina Fey, Alec Baldwin' $c[0].Description 'IMDb cast becomes the description'
 Assert-Equal 'TV series|Movie|Video' "$($c[0].Kind)|$($c[2].Kind)|$($c[3].Kind)" 'IMDb kind kept (TV series / Movie / Video), not lumped into Movie'
-Assert-Equal '30 Rock (2006) [TV series] tt0496424 - IMDb' (Format-TitleCandidate $c[0]) 'menu line uses the IMDb kind'
+Assert-Equal '30 Rock (2006) [TV series]' (Format-TitleCandidate $c[0]) 'menu line uses the IMDb kind'
 $null = Get-ImdbTitleCandidates -SearchTitle '"Weird" Al' 6>$null
 Assert-True ($script:ImdbUrls[-1] -match '/suggestion/x/') 'a query not starting with a letter/digit goes under x'
 $c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' -Max 1 6>$null
@@ -233,8 +233,12 @@ $c = Get-DiscTitleCandidates -DiscLabel 'HEAT' -ImdbCandidates @(
     [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
     [pscustomobject]@{ Title = 'Heat'; Year = '1986'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0093164'; Season = 0; Source = 'IMDb' })
 Assert-Equal 'Heat||||disc label;Heat|1995|movie|tt0113277|IMDb;Heat|1986|movie|tt0093164|IMDb' (Format-Candidates $c) 'label first, then each same-name film on its own line'
-Assert-Equal 'Heat (1995) tt0113277 - IMDb' (Format-TitleCandidate $c[1]) 'menu line shows year and IMDb id; [Movie] left out as the expected case'
-Assert-Equal 'Slow Dance (2014) [Short] tt3453042 - IMDb' (Format-TitleCandidate (New-TitleCandidate -Title 'Slow Dance' -Year '2014' -MediaType 'movie' -Kind 'Short' -ImdbId 'tt3453042' -Source 'IMDb')) 'other kinds are still flagged'
+Assert-Equal 'Heat (1995)' (Format-TitleCandidate $c[1]) 'menu line: title and year only; no [Movie], no IMDb id or source (the link line has them)'
+Assert-Equal 'Slow Dance (2014) [Short]' (Format-TitleCandidate (New-TitleCandidate -Title 'Slow Dance' -Year '2014' -MediaType 'movie' -Kind 'Short' -ImdbId 'tt3453042' -Source 'IMDb')) 'other kinds are still flagged'
+Assert-Equal 'Heat (1995) - exact disc match' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Year '1995' -MediaType 'movie' -Kind 'Movie' -Source 'TheDiscDB + IMDb')) 'a TheDiscDB row says it is an exact disc match'
+Assert-Equal 'Heat - typed' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Source 'typed')) 'a typed title says so'
+Assert-Equal 'Heat (1995) [IMDb tt0113277, TMDb 949, via TMDb + IMDb]' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Year '1995' -Kind 'Movie' -ImdbId 'tt0113277' -TmdbId 949 -Source 'TMDb + IMDb') -WithIds) '-WithIds (session log) keeps the ids and sources'
+Assert-Equal 'Heat - disc label [via disc label]' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Source 'disc label') -WithIds) '-WithIds with no ids'
 Assert-Equal 'Heat - disc label' (Format-TitleCandidate ([pscustomobject]@{ Title = 'Heat'; Year = ''; MediaType = $null; ImdbId = $null; Source = 'disc label' })) 'menu line with nothing extra known'
 
 # Regression (live run 2026-10-28): label "Slow Dance" on a surf film took the year,

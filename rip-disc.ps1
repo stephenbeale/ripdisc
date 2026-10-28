@@ -930,16 +930,28 @@ function Get-DiscTitleCandidates {
     return $merged.ToArray()
 }
 
-# One menu line, e.g. "Heat (1995) tt0113277 - TheDiscDB + IMDb" or "Slow Dance (2014) [Short] tt3453042 - IMDb"
+# One menu line, e.g. "Scarface (1983)", "Slow Dance (2014) [Short]", "Slow Dance - disc label"
+# or "Heat (1995) - exact disc match". The IMDb id and which search found a row are left
+# out - the link on the line below already shows them. Only rows that are not search hits
+# say where they came from, since that is what tells the user how far to trust them.
+# -WithIds adds the ids back (for the session log).
 function Format-TitleCandidate {
-    param([object]$Candidate)
+    param([object]$Candidate, [switch]$WithIds)
     $year = if ($Candidate.Year) { " ($($Candidate.Year))" } else { "" }
     $kindText = if ($Candidate.Kind) { $Candidate.Kind } else { switch ($Candidate.MediaType) { 'tv' { 'TV' } 'movie' { 'Movie' } default { '' } } }
     # A feature film is the expected case, so [Movie] is noise; only the exceptions
     # ([Short], [Video], [TV series]...) are worth flagging.
     $kind = if ($kindText -and $kindText -ne 'Movie') { " [$kindText]" } else { "" }
-    $imdb = if ($Candidate.ImdbId) { " $($Candidate.ImdbId)" } else { "" }
-    return "$($Candidate.Title)$year$kind$imdb - $($Candidate.Source)"
+    $origin = if ("$($Candidate.Source)" -match 'TheDiscDB') { " - exact disc match" }
+              elseif ("$($Candidate.Source)" -eq 'disc label') { " - disc label" }
+              elseif ("$($Candidate.Source)" -eq 'typed') { " - typed" }
+              else { "" }
+    $ids = ""
+    if ($WithIds) {
+        $idList = @($(if ($Candidate.ImdbId) { "IMDb $($Candidate.ImdbId)" }), $(if ($Candidate.TmdbId) { "TMDb $($Candidate.TmdbId)" })) | Where-Object { $_ }
+        $ids = " [$(@(@($idList) + "via $($Candidate.Source)") -join ', ')]"
+    }
+    return "$($Candidate.Title)$year$kind$origin$ids"
 }
 
 # The numbered rows of a pick list: the title line, then a dim line with the short
@@ -1426,7 +1438,7 @@ if ($title -eq "") {
     }
     $title = $picked.Title
     # The log file is not open yet - written out with the session header
-    $script:PickedTitleNote = "Title picked from disc: $(Format-TitleCandidate $picked)"
+    $script:PickedTitleNote = "Title picked from disc: $(Format-TitleCandidate $picked -WithIds)"
     # Later TMDb season lookups reuse the id instead of searching again
     $tmdbResult = if ($picked.TmdbId) { @{ Title = $picked.Title; Year = $picked.Year; MediaType = $picked.MediaType; Id = $picked.TmdbId } } else { $null }
     if ($picked.MediaType -eq 'tv' -and -not $Series) {

@@ -58,7 +58,7 @@ When `-title` is omitted, the PowerShell script automatically discovers disc met
    - **The disc label**, cleaned.
    - **TMDb**, searched on the label. Needs a key. Each hit's IMDb id is fetched too.
    - **IMDb's search suggestions**. No key needed. Gives IMDb ids and years. This is an unofficial endpoint, so it may stop working; a failure only removes it from the list.
-4. **Shows one numbered list** of suggestions. Each row has the year, the IMDb id and, unless it is a normal film, the kind (`[Short]`, `[Video]`, `[TV mini-series]`...). A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
+4. **Shows one numbered list** of suggestions. Each row has the title, the year and, unless it is a normal film, the kind (`[Short]`, `[Video]`, `[TV mini-series]`...). Rows that are not search hits say so (`- disc label`, `- exact disc match`). A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
    ```
    [2] Slow Dance (2014) [Short] tt3453042 - IMDb
        with Belinda Rodrigues, Darius G Rodrigues | https://www.imdb.com/title/tt3453042/
