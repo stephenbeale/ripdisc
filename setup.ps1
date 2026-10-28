@@ -118,7 +118,7 @@ function Show-ManualDownloadHelp {
 }
 
 # ========== DETECT / INSTALL MAKEMKV ==========
-Write-Host "[1/5] Looking for MakeMKV..." -ForegroundColor White
+Write-Host "[1/6] Looking for MakeMKV..." -ForegroundColor White
 
 $makemkvSearchPaths = @(
     "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
@@ -182,7 +182,7 @@ if ($makemkvPath) {
 }
 
 # ========== DETECT / INSTALL HANDBRAKE CLI ==========
-Write-Host "`n[2/5] Looking for HandBrakeCLI..." -ForegroundColor White
+Write-Host "`n[2/6] Looking for HandBrakeCLI..." -ForegroundColor White
 
 $handbrakeSearchPaths = @(
     "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe",
@@ -243,7 +243,7 @@ if ($handbrakePath) {
 }
 
 # ========== CONFIGURE TEMP ROOT ==========
-Write-Host "`n[3/5] Temp working directory" -ForegroundColor White
+Write-Host "`n[3/6] Temp working directory" -ForegroundColor White
 Write-Host ""
 Write-Host "  MakeMKV rips raw files here before encoding. These files are large" -ForegroundColor Gray
 Write-Host "  (a DVD is ~4-8 GB, a Blu-ray can be 25-50 GB) but are deleted" -ForegroundColor Gray
@@ -264,7 +264,7 @@ if (!(Test-Path $tempRoot)) {
 }
 
 # ========== CONFIGURE DRIVES ==========
-Write-Host "`n[4/5] Default drive letters" -ForegroundColor White
+Write-Host "`n[4/6] Default drive letters" -ForegroundColor White
 Write-Host ""
 Write-Host "  Input drive  = your DVD/Blu-ray disc drive" -ForegroundColor Gray
 Write-Host "  Output drive = where encoded files are saved (e.g. a media hard drive)" -ForegroundColor Gray
@@ -313,7 +313,7 @@ $outputDriveInput = Read-Host "  Press Enter to accept, or type your output driv
 $outputDrive = if ($outputDriveInput) { $outputDriveInput.TrimEnd(":") + ":" } else { $defaultOutputDrive }
 
 # ========== CONFIGURE TMDB API KEY ==========
-Write-Host "`n[5/5] TMDb API key (optional)" -ForegroundColor White
+Write-Host "`n[5/6] TMDb API key (optional)" -ForegroundColor White
 Write-Host ""
 Write-Host "  TMDb (The Movie Database) lets RipDisc auto-detect the title," -ForegroundColor Gray
 Write-Host "  type (movie/series), and season from your disc. Without it," -ForegroundColor Gray
@@ -331,6 +331,30 @@ if ($existingKey) {
     $tmdbKey = $existingKey
 } else {
     $tmdbKey = Read-Host "  TMDb API key (or press Enter to skip)"
+}
+
+# ========== CONFIGURE MOVIE FOLDER NAMING ==========
+Write-Host "`n[6/6] Movie folder naming" -ForegroundColor White
+Write-Host "  How should movie and genre-film folders be named? (Series folders are not changed.)" -ForegroundColor Gray
+Write-Host "  The year comes from the title you pick when ripping without -title, from -Year," -ForegroundColor Gray
+Write-Host "  or from a quick lookup prompt; you can always skip it for one disc." -ForegroundColor Gray
+$existingNaming = 'title'
+if (Test-Path $configPath) {
+    try {
+        $oldCfg = Get-Content $configPath -Raw | ConvertFrom-Json
+        if ("$($oldCfg.movieFolderNaming)" -eq 'title-year') { $existingNaming = 'title-year' }
+    } catch {}
+}
+$namingDefault = if ($existingNaming -eq 'title-year') { '2' } else { '1' }
+Write-Host "    1. Title          e.g. Slow Dance" -ForegroundColor White
+Write-Host "    2. Title (Year)   e.g. Slow Dance (2014)   - helps Jellyfin/Plex match films" -ForegroundColor White
+$movieFolderNaming = $existingNaming
+while ($true) {
+    $namingInput = Read-Host "  Choice [1-2, Enter = $namingDefault]"
+    if ([string]::IsNullOrWhiteSpace($namingInput)) { break }
+    if ($namingInput.Trim() -eq '1') { $movieFolderNaming = 'title'; break }
+    if ($namingInput.Trim() -eq '2') { $movieFolderNaming = 'title-year'; break }
+    Write-Host "  Enter 1 or 2." -ForegroundColor Red
 }
 
 # ========== BUILD DRIVE LABELS ==========
@@ -361,6 +385,7 @@ $config = @{
     defaultOutputDrive = $outputDrive
     driveLabels = $driveLabels
     tmdbApiKey = if ($tmdbKey) { $tmdbKey } else { "" }
+    movieFolderNaming = $movieFolderNaming
 }
 
 $config | ConvertTo-Json -Depth 3 | Set-Content -Path $configPath -Encoding UTF8
@@ -381,6 +406,7 @@ Write-Host "  HandBrakeCLI:  $(if ($handbrakeOk) { $handbrakePath } else { 'NOT 
 Write-Host "  Temp root:     $tempRoot" -ForegroundColor Green
 Write-Host "  Input drive:   $inputDrive" -ForegroundColor Green
 Write-Host "  Output drive:  $outputDrive" -ForegroundColor Green
+Write-Host "  Movie folders: $(if ($movieFolderNaming -eq 'title-year') { 'Title (Year)' } else { 'Title' })" -ForegroundColor Green
 Write-Host "  TMDb API key:  $(if ($tmdbKey) { 'Configured' } else { 'Not set (auto-discovery disabled)' })" -ForegroundColor $(if ($tmdbKey) { "Green" } else { "Yellow" })
 Write-Host ""
 

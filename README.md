@@ -21,7 +21,7 @@ The PowerShell version is the primary implementation and has the most features. 
 
 ## Features
 
-- **Auto-discovery of disc metadata** via MakeMKV + TMDb (title, format, series detection)
+- **Auto-discovery of disc metadata**: title suggestions from TheDiscDB, the disc label, TMDb and IMDb, with years and IMDb ids, plus format and series detection
 - **Automated ripping and encoding** using MakeMKV and HandBrake
 - **4-step processing workflow** with progress tracking
 - **Movie, TV Series, and genre-based support** (Documentary, Tutorial, Fitness, Music, Surf) with different organization strategies
@@ -46,6 +46,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
 - **eBay sold-price check** — prints a clickable eBay UK sold-listings search URL for the ripped title, optional via `-CheckEbayPrice`
 - **Disc type shown per drive** in the drive listing (Audio CD, Blu-ray, DVD-Video, or a size-based guess for a data disc) — a quick check to catch the wrong disc before a rip even starts
+- **Insert-to-start** — leave `watch-drives.ps1` running and a rip window opens by itself when a DVD or Blu-ray goes in (see [watch-drives.ps1](#watch-drivesps1-start-a-rip-when-a-disc-is-inserted))
 
 ## Auto-Discovery
 
@@ -53,20 +54,34 @@ When `-title` is omitted, the PowerShell script automatically discovers disc met
 
 1. **Reads disc info** via MakeMKV's info mode (disc name, type, title count)
 2. **Cleans the disc name** (strips suffixes like `_D1`, `_WS`, replaces underscores, title-cases)
-3. **Searches TMDb** (The Movie Database) for the cleaned title
-4. **Auto-populates** `-title`, `-Bluray`, `-Series`, `-Season`, and `-Disc` based on results
-5. **Prompts for confirmation** — accept, edit, or abort
+3. **Looks the disc up** in up to four places:
+   - **TheDiscDB**: an exact match on this pressing, from the disc's file sizes. No key needed. Mostly Blu-ray coverage. Skip it with `-NoDiscDb`.
+   - **The disc label**, cleaned.
+   - **TMDb**, searched on the label. Needs a key. Each hit's IMDb id is fetched too.
+   - **IMDb's search suggestions**. No key needed. Gives IMDb ids and years. This is an unofficial endpoint, so it may stop working; a failure only removes it from the list.
+4. **Shows one numbered list** of suggestions. Each row has the title, the year and, unless it is a normal film, the kind (`[Short]`, `[Video]`, `[TV mini-series]`...). Rows that are not search hits say so (`- disc label`, `- exact disc match`). A second line gives a short description (the plot from TMDb, the cast from IMDb) and a link to check it. Rows with no id link to an IMDb title search. The same title found in several places shows once:
+   ```
+   [2] Slow Dance (2014) [Short] tt3453042 - IMDb
+       with Belinda Rodrigues, Darius G Rodrigues | https://www.imdb.com/title/tt3453042/
+   ```
+   Enter takes `[1]`, a number picks that row, `R` searches again with your own text, `M` lets you type a title, `A` aborts. IMDb's list is short and ranked by popularity, so a less-known film can be missing until you add the year or a word: `R`, then `slow dance 2014`.
+5. **Auto-populates** `-title`, `-Bluray`, `-Series`, `-Season`, and `-Disc` from the pick. Picking a `[TV]` row turns on `-Series`; TheDiscDB's season wins over the label's.
+6. **Prompts for confirmation** — accept, edit, or abort
 
-If `-title` is provided, discovery is skipped (only disc format auto-detection for `-Bluray` runs).
+The plain disc label is never merged with a search hit of the same name. A label `Slow Dance` on a surf film is not IMDb's 2005 TV series *Slow Dance*. The label stays its own row with no year, and each search hit gets its own row.
+
+If the drive holds an **audio CD**, ripdisc stops before any of this. It prints the ripaudio command, and offers to start `rip-audio.ps1` or to rip a video disc from another drive instead. With other discs in the drives, the pick list also has `[D] Use a different drive`, which restarts `rip-disc.ps1` on that drive with the same options.
+
+If `-title` is provided, discovery is skipped. The disc label from the drive listing is still compared with the title at no cost. If they differ, a `NOTE: the disc label reads "..."` line is shown and logged. Nothing is prompted.
 
 ### What Gets Auto-Detected
 
 | Parameter | Auto-detected? | Source |
 |-----------|---------------|--------|
-| `-title` | Yes | TMDb search, cleaned disc name, or manual fallback |
+| `-title` | Yes | Pick list: TheDiscDB, cleaned disc name, TMDb, IMDb; or typed |
 | `-Bluray` | Yes | MakeMKV disc type (`Blu-ray disc`) |
-| `-Series` | Yes | TMDb media type (`tv`) |
-| `-Season` | Partial | Regex from disc name (e.g. `S01`, `Season 1`) |
+| `-Series` | Yes | Picking a `[TV]` row (TheDiscDB, TMDb or IMDb) |
+| `-Season` | Partial | TheDiscDB episode season, else regex from disc name (e.g. `S01`, `Season 1`) |
 | `-Disc` | Partial | Regex from disc name (e.g. `D2`, `Disc 2`) |
 | Genre flags | No | Always manual (`-Documentary`, `-Music`, etc.) |
 | `-Extras` | No | Always manual |
@@ -84,7 +99,7 @@ To enable TMDb searching, either:
 
 Get a free API key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api).
 
-Without a TMDb key, the script still works — it uses the cleaned disc name as the title and falls back to manual input if the name is too generic.
+Without a TMDb key, the script still works: TheDiscDB, the disc label and IMDb still give suggestions, and you can always type a title.
 
 ## Getting Started
 
@@ -104,7 +119,7 @@ Prefer to watch? See the [video walkthrough](https://www.youtube.com/watch?v=n2y
 .\rip-disc.ps1 -title "The Matrix"
 ```
 
-Or let it auto-detect the disc title (requires a free TMDb API key — setup will explain):
+Or leave out `-title` and pick from suggested titles (works without any key; a free TMDb key adds more suggestions — setup will explain):
 
 ```powershell
 .\rip-disc.ps1
@@ -141,6 +156,22 @@ Copy-Item ripdisc-config.sample.json ripdisc-config.json
 
 If no config file exists, the scripts auto-detect tool locations by searching the PATH, Windows registry, and common install directories.
 
+### Movie folder naming
+
+`setup.ps1` (step 6) asks how movie and genre-film folders are named. The choice is saved as `movieFolderNaming` in `ripdisc-config.json`:
+
+| Choice | `movieFolderNaming` | Folder |
+|--------|---------------------|--------|
+| 1. Title (default) | `title` | `E:\Surf\Slow Dance\` |
+| 2. Title (Year) | `title-year` | `E:\Surf\Slow Dance (2014)\` (helps Jellyfin/Plex match films) |
+
+The year is decided in this order:
+1. `-Year 2014` on the command line is always used, even with style 1.
+2. An existing `Slow Dance` or `Slow Dance (2014)` folder is reused when there is exactly one. A Disc 2 or extras run therefore lands beside Disc 1.
+3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year.
+
+File names follow the folder (`Slow Dance (2014)-title_t00.mp4`). Series folders never get a year. The retry command for a failed run carries `-Year`, so `continue-rip.ps1` rebuilds the same path.
+
 ## Usage
 
 Both versions use the same command-line parameters:
@@ -161,6 +192,8 @@ Both versions use the same command-line parameters:
 -fitness                Fitness mode (outputs to Fitness folder)
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
+-year <YYYY>            Year in the movie / genre-film folder name: "Slow Dance (2014)"
+                        (see Movie folder naming; series folders are unchanged)
 -startEpisode <int>     Starting episode number for series (default: 1). For plain -series
                         Disc 2+, you are asked at the start of the run if this is omitted
 -noSound                Skip the completion fanfare (Console.Beep melody)
@@ -387,6 +420,8 @@ E:\DVDs\MovieName\
     ├── MovieName-trailer.mp4
     └── MovieName-deleted-scenes.mp4
 ```
+
+With `movieFolderNaming: title-year` (or `-Year`) the folder and file names carry the year: `E:\DVDs\MovieName (1999)\MovieName (1999)-Feature.mp4`.
 
 ### TV Series (with season)
 
@@ -724,6 +759,34 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 - **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
 - **SeriesRetroRename.ps1** - Folder discovery and numbering across discs for `rename-series.ps1`, dot-sourced, not run directly
 - **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
+- **watch-drives.ps1** - Opens `rip-disc.ps1` in a new window when a DVD or Blu-ray is inserted. Full usage in [watch-drives.ps1](#watch-drivesps1-start-a-rip-when-a-disc-is-inserted) below.
+
+### watch-drives.ps1 (start a rip when a disc is inserted)
+
+Leave it running in its own window. When a DVD or Blu-ray goes into an optical drive, it opens a new
+console running `rip-disc.ps1 -Drive X:`. The rip itself is unchanged: `rip-disc.ps1` still asks its
+usual questions (title, start episode, rename plan) in that new window.
+
+```powershell
+.\watch-drives.ps1                                               # every optical drive
+.\watch-drives.ps1 -Drive D:                                     # only D:
+.\watch-drives.ps1 -RipArguments "-OutputDrive F: -NoSound"      # extra arguments for every rip
+.\watch-drives.ps1 -WhatIf                                       # say what would start, open nothing
+```
+
+- **How it knows** - Windows announces every newly mounted volume (`Win32_VolumeChangeEvent`); the
+  script listens for that. Nothing is polled, no admin rights are needed, and MakeMKV is never run by
+  the watcher, so it cannot disturb a rip already running on another drive.
+- **What starts a rip** - only a disc with a `BDMV` (Blu-ray) or `VIDEO_TS` (DVD) folder. Audio CDs
+  (use ripaudio's `rip-audio.ps1`), data discs and unreadable discs are skipped with a line saying why.
+- **One rip per drive** - a disc inserted while `rip-disc.ps1` is still running for that drive is not
+  started. Once the rip has finished, the next disc starts a new window even if the old one is still open.
+- **Disc already in the drive** - listed when the watcher starts, but not ripped. Eject and re-insert it.
+- **One watcher** - a second `watch-drives.ps1` refuses to start.
+- **Stop** - Ctrl+C. Rip windows already open carry on.
+- **Not tested with a real disc yet (2026-10-11)** - the decisions and the new-window command are covered
+  by `tests\Test-DriveWatcher.ps1`, and the listener starts cleanly, but no disc has been inserted with
+  it running. Whether Windows raises the event for an audio CD is also unconfirmed.
 
 ### rename-series.ps1 (rename series already ripped on disk)
 
@@ -793,6 +856,7 @@ ripdisc/
 ├── rename-series.ps1      # Retroactive series rename of already-ripped folders (dry run by default)
 ├── SeriesRetroRename.ps1  # Folder discovery/orchestration for rename-series.ps1 (dot-sourced)
 ├── undo-rename.ps1        # Reverses a -Series rename from a rename-manifest.csv
+├── watch-drives.ps1       # Opens rip-disc.ps1 in a new window when a disc is inserted
 ├── series-cleanup.ps1     # Series cleanup utility
 ├── CHANGELOG.md           # Release history
 ├── Roadmap.md             # Open feature requests and backlog

@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-28 - Movie Folder Naming: `Title` or `Title (Year)`
+
+### Added
+- `setup.ps1` step 6 asks for the movie / genre-film folder style: `Title` (default) or `Title (Year)`. It is saved as `movieFolderNaming` (`title` / `title-year`) in `ripdisc-config.json`; any other value is read as `title`.
+- `-Year <YYYY>` on `rip-disc.ps1` and `continue-rip.ps1`. When given, it is always used.
+- With `title-year`: the year comes from the auto-discovery pick (if the title was not edited afterwards). Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. You can pick a row, type a year, search again or skip; skipping or end of input gives a plain folder and never aborts.
+- An existing `<title>` / `<title> (YYYY)` folder is reused when there is exactly one. Disc 2, extras and `continue-rip.ps1` runs therefore land in the folder the first run made. The retry command carries `-Year`.
+- Shared helpers in `Load-Config.ps1`: `Get-MovieParentFolder`, `Get-MediaFolderName`, `Find-ExistingMediaFolder`. New `tests/Test-MovieFolderNaming.ps1` (50 tests).
+
+### Not changed
+- Series and genre-series folders. An IMDb id in the name (`[imdbid-tt...]`) was left out on purpose: square brackets are PowerShell wildcard characters, and about 20 `-Path` / `-like` uses would need fixing first.
+
+## 2026-10-28 - Title Suggestions From the Disc (TheDiscDB, Disc Label, TMDb, IMDb)
+
+### Added
+- Running `rip-disc.ps1` without `-title` now shows one numbered list of suggested titles. The suggestions come from TheDiscDB (exact disc match by content hash, no key), the cleaned disc label, TMDb (with key) and IMDb's search suggestions (no key, unofficial endpoint). Each row shows year, `[Movie]`/`[TV]` and IMDb id when known. The same title from several sources is listed once. The plain disc label never takes on a same-name search hit's year, type or id, and the session log records the pick.
+- An audio CD in the chosen drive now stops `rip-disc.ps1` straight after the drive listing. It prints the ripaudio command and offers `[R]` to start `rip-audio.ps1` (when `..\ripaudio` exists) or `[D]` to rip a video disc from another drive. Before, it reached auto-discovery and was offered film titles for the label "Audio CD" (real run, 2026-10-28). "Audio CD" also counts as a generic label now.
+- `[D] Use a different drive` in the pick list lists the other non-busy drives that hold a disc, then restarts `rip-disc.ps1` on the chosen one with the same options (`-DriveIndex` dropped). Not available with `-DriveIndex`, where no drive list is built.
+- Suggestion lines are just title, year and an unusual kind (`[Short]`, `[Video]`, `[TV series]`...): no `[Movie]`, no IMDb id and no "- IMDb"/"- TMDb" source, since the link line below already shows them. Only `- disc label`, `- exact disc match` (TheDiscDB) and `- typed` are kept. The session log still records the ids.
+- Each suggestion has a second line with a short description (TMDb plot, IMDb cast, or "this exact disc" from TheDiscDB) and a link to check it (IMDb page, else TMDb page, else an IMDb title search). The kind is IMDb's own (`Short`, `TV mini-series`, `Video`...), no longer always `Movie`.
+- `[R] Search again` in the pick list re-runs TMDb + IMDb with your own text. Found on a real disc: IMDb's popularity-ranked list for "slow dance" left out the 2014 title, and "slow dance 2014" found it.
+- With `-title`, the disc label (already read for the drive listing) is compared with the title. A mismatch prints and logs a `NOTE`; there is no prompt and no network call.
+- TMDb candidates get IMDb ids via `/{movie|tv}/{id}/external_ids`. The TheDiscDB lookup done during discovery is reused by plain `-Series` naming rather than repeated.
+- `tests/Test-TitleSuggestions.ps1` (79 tests, TMDb/IMDb mocked).
+
+### Changed
+- `Search-TMDb` (interactive, TMDb only) is replaced by `Get-TMDbTitleCandidates` + `Get-ImdbTitleCandidates` + `Get-DiscTitleCandidates` + `Read-TitleChoice`. Discovery no longer needs MakeMKV's info scan to succeed. If the scan fails, the label from the drive listing and TheDiscDB are still used.
+
 ## 2026-10-26 - rip-disc.ps1: Pause and Retry When the Drive Disconnects Mid-Rip
 
 ### Added
@@ -23,6 +51,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - macOS `._` AppleDouble files (`._Show S04E01.mp4`) are no longer treated as videos. They had been numbered as episodes ahead of the real files.
+
+## 2026-10-11 - watch-drives.ps1: start a rip when a disc is inserted
+
+### Added
+- `watch-drives.ps1`: listens for Windows' volume-arrival event (`Win32_VolumeChangeEvent`, no polling, no admin) and opens a new console running `rip-disc.ps1 -Drive X:` when a DVD or Blu-ray is inserted. `rip-disc.ps1` is unchanged and still asks its usual questions in the new window.
+- `-Drive` limits it to named drives, `-RipArguments` passes extra arguments to every rip, `-WhatIf` reports without opening anything.
+- Audio CDs, data discs and unreadable discs are skipped with a reason. A drive whose rip is still running is not started again. Only one watcher can run at a time.
+- `tests/Test-DriveWatcher.ps1` (38 tests).
+
+### Notes
+- The new window is started with plain arguments (`-File watch-drives.ps1 -RunRipFor X: -LockPath ...`), never an encoded command. The first draft used `-EncodedCommand`, and AVG's behaviour shield deleted the test file that exercised it and then blocked that file name (`tests\Test-WatchDrives.ps1`) from being created again on this machine.
+
+**Testing status:** 38/38 logic tests pass and the listener starts and registers unelevated. **Not tested with a real disc insertion.**
 
 ## 2026-10-10 - Series rename edit prompt: clearer wording
 
