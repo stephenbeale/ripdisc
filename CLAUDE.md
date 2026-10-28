@@ -19,6 +19,47 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-28 - Movie folder naming `Title (Year)` (branch `feature/movie-folder-year`, stacked on `feature/infer-title-from-disc` / PR #162)
+
+User chose option 3: only `Title` / `Title (Year)`, no IMDb id yet. Setup step 6 saves `movieFolderNaming` (`title` / `title-year`); `-Year` on both scripts. Precedence: `-Year`, then exactly one existing `<title>`/`<title> (YYYY)` folder, then (title-year) the discovery pick's year or the `Read-FolderYear` prompt (Enter/EOF = no year, never aborts). Only the 7 movie/genre-film `$finalOutputDir` lines use `$script:MediaFolderName`; series untouched. Tests: Test-MovieFolderNaming 50/50, full suite 670/670 (13 files). Load-Config read checked against real config files (title-year / bogus / none). **Not run on a real disc.**
+
+**Deferred:** `[imdbid-tt...]` naming needs a bracket audit first (wildcards in `-like` and `-Path`: Get-Item/Test-Path/New-Item/Get-ChildItem on `$finalOutputDir`, the movie-mode prefix `-like` checks in both scripts).
+
+### 2026-10-28 - Title suggestions from the disc (branch `feature/infer-title-from-disc`, off main 87293d4)
+
+Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive F` while the drive listing already showed `[Slow Dance]`. They asked for the title to be inferred from the disc, with API suggestions, years and IMDb ids.
+
+**Built:** without `-title`, auto-discovery now shows one numbered pick list from TheDiscDB (hash, no key), the cleaned disc label, TMDb (key, plus `external_ids` for IMDb ids) and IMDb's suggestion feed `v2.sg.media-imdb.com/suggestion/<c>/<q>.json` (no key, UNOFFICIAL). Rows show year, `[Movie]`/`[TV]` and IMDb id. With `-title`, the label from the drive listing is compared with the title (NOTE on mismatch, no prompt). The discovery TheDiscDB lookup is reused by `-Series` naming. `tests/Test-TitleSuggestions.ps1` 79/79; full suite 620/620 across 12 files.
+
+**Real-disc run (user, Slow Dance DVD):** the menu worked but the user says the film is 2014 and no 2014 row appeared. IMDb's suggestion feed returns only ~8 hits ranked by popularity, and "slow dance 2014" does find `tt3453042` (a 2014 short; NOT confirmed to be the user's surf film). Added a description line (TMDb overview / IMDb cast) and a check link per row, IMDb's real kind, and `[R] Search again`.
+
+**Second real-disc run:** an audio CD in D: (label "Audio CD") was offered film titles. Fixed: an AUDIO CD GUARD right after the drive match (reuses `Get-DiscTypeLabel`, checked live: D: -> Audio CD, G: -> DVD-Video) prints the ripaudio command and offers [R] start rip-audio.ps1 / [D] rip another drive's video disc. Also `[D] Use a different drive` in the pick list (restarts the script via `Get-RelaunchParams` splat - verified with a throwaway script that switches and exit codes survive), and `[Movie]` hidden (user request). Test-TitleSuggestions 99/99 at that point; the guard and [D] restart have NOT been run end-to-end on a real drive.
+
+**Found live and fixed before commit:** a year-less label merged into IMDb's first same-name hit (2005 Japanese TV series "Slow Dance"), so Enter would have turned on Series mode for a surf film. The bare label now never absorbs search hits; only TheDiscDB does.
+
+**Not done:** no real-disc run of the pick list. TMDb key still unset, so the TMDb path is mocked only. IMDb endpoint verified live 2026-10-28 (about 0.4 s; one 8 s cold-start timeout seen once). Year/IMDb id are shown and logged but NOT used in folder/file names (Jellyfin `Title (Year) [imdbid-tt...]` naming is a possible follow-up). C# side unchanged.
+
+**Still open from before:** PR #161 cable-pull test (branch `feature/pause-on-drive-disconnect`).
+
+### 2026-10-26 - Pause-and-retry on mid-rip drive disconnect (PR #161, OPEN, NOT merged)
+
+**NEXT SESSION: do the cable-pull test for PR #161 before merging. The user asked to be reminded.**
+
+1. `git checkout feature/pause-on-drive-disconnect`.
+2. Start a rip on a junk disc.
+3. Pull the drive's USB cable partway through.
+4. Confirm the beep, the tray notification and the PAUSED prompt.
+5. Reconnect, press R, and confirm the rip completes and the partial MKV was removed.
+6. Tick the last test-plan box on PR #161, then merge.
+
+Trigger: a Cream documentary rip failed when the user knocked the USB cable (MakeMKV `STATUS_DEVICE_NOT_CONNECTED`; Step 1 failed "The drive disconnected ... while MakeMKV was saving titles"). Nothing completed, so nothing is resumable.
+
+**Built (9aa7690, branch off main 87293d4, PowerShell only, C# RipDisc.Core unchanged):** rip-disc.ps1 Step 1 beeps and shows a tray notification (user confirmed it appears), removes that attempt's MKVs, asks [R]etry/[A]bort. R is accepted only once Windows sees a readable disc. Re-queries MakeMKV's disc:N with the drive cache cleared, re-rips the whole disc, max 3 attempts. New tests/Test-DriveDisconnectRetry.ps1 27/27; full suite 568 tests across 12 files. Loop exercised against a fake makemkvcon (renumbered drive, abort, 3 disconnects in a row, -DriveIndex mode). **Untested: a real drive unplug.**
+
+**Also open:**
+- Re-rip Cream (Documentary); it still needs doing.
+- Possible follow-ups: retry only unfinished titles; C# parity.
+
 ### 2026-10-21 - rename-series handles `S1` folders, file-name episode numbers, `._` files (PR #157, merged 45369cf)
 
 Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of 6 season folders (`Parks and Recreation S1/S2/S3/S6`, `Season 4`, `season 5`) and macOS `._` AppleDouble files were numbered as episodes ahead of the real files.
@@ -36,6 +77,25 @@ Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of
 - (b) `._` AppleDouble files remain in Season 4 (21) and season 5 (22).
 - (c) Folder `Parks and Recreation season 5` is lowercase (cosmetic).
 - (d) Season 6 long episodes flagged "a special?" but kept as episodes: Ep1 43:05, Ep16 1:04:47, Ep19 1:04:35, Ep20 53:03 (probably double/extended; unverified, TMDb key still unset).
+
+### 2026-10-11 - watch-drives.ps1, insert-to-start (branch `feature/watch-drives-insert-to-start`)
+
+`watch-drives.ps1` listens for `Win32_VolumeChangeEvent` (EventType 2) via
+`Register-CimIndicationEvent` and opens `rip-disc.ps1 -Drive X:` in a new window for a
+DVD-Video or Blu-ray. Idea borrowed from Automatic Ripping Machine (udev on Linux).
+`rip-disc.ps1` itself is untouched and still interactive.
+
+- **Antivirus (AVG is the active AV here; Defender is off):** do NOT start PowerShell with
+  `-EncodedCommand`, least of all windowless, from scripts or tests. The first draft did;
+  AVG's behaviour shield deleted `tests\Test-WatchDrives.ps1` mid-run and that exact path
+  now gives "access denied" on create. The tests live in `tests\Test-DriveWatcher.ps1` and
+  start no child PowerShell. The new window is launched as
+  `-NoExit -File watch-drives.ps1 -RunRipFor X: -LockPath <file>`; extra rip arguments
+  travel in the lock file, which `-RunRipFor` deletes when `rip-disc.ps1` returns
+  (that deletion is how the watcher knows the drive is free again).
+- **Tests:** `Test-DriveWatcher.ps1` 38/38. Listener registers unelevated (smoke-tested).
+- **Not done:** no real disc inserted with it running; audio-CD event behaviour unknown;
+  the real new-window launch has not been seen on screen.
 
 ### 2026-10-06 - rename-series.ps1 Fixes (branch `fix/rename-series-folder-classification`)
 

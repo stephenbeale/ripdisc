@@ -13,6 +13,7 @@
       $script:Config_DefaultOutputDrive - Default output drive letter (default E:)
       $script:Config_DriveLabels     - Hashtable of drive index -> label
       $script:Config_TmdbApiKey      - TMDb API key (may be empty)
+      $script:Config_MovieFolderNaming - 'title' or 'title-year' (movie / genre-film folders)
 #>
 
 $configFilePath = Join-Path $PSScriptRoot "ripdisc-config.json"
@@ -112,6 +113,43 @@ if ($cfg -and $cfg.tmdbApiKey) {
     $script:Config_TmdbApiKey = $cfg.tmdbApiKey
 } elseif ($env:TMDB_API_KEY) {
     $script:Config_TmdbApiKey = $env:TMDB_API_KEY
+}
+
+# Movie / genre-film folder naming (setup.ps1 step 6): 'title' = "Slow Dance",
+# 'title-year' = "Slow Dance (2014)". Series folders are never changed.
+$script:Config_MovieFolderNaming = if ($cfg -and "$($cfg.movieFolderNaming)" -in @('title', 'title-year')) { "$($cfg.movieFolderNaming)" } else { 'title' }
+
+# ========== FOLDER NAMING HELPERS (shared by rip-disc.ps1 and continue-rip.ps1) ==========
+# Folder under the output drive that holds a movie / genre film.
+function Get-MovieParentFolder {
+    param([switch]$Documentary, [switch]$Tutorial, [switch]$Fitness, [switch]$Music, [switch]$Surf, [switch]$Bluray)
+    if ($Documentary) { return 'Documentaries' }
+    if ($Tutorial) { return 'Tutorials' }
+    if ($Fitness) { return 'Fitness' }
+    if ($Music) { return 'Music' }
+    if ($Surf) { return 'Surf' }
+    if ($Bluray) { return 'Bluray' }
+    return 'DVDs'
+}
+
+# "Slow Dance" + "2014" -> "Slow Dance (2014)". No valid 4-digit year, no change.
+# Parentheses are not PowerShell wildcard characters, so -Path / -like keep working.
+function Get-MediaFolderName {
+    param([string]$SafeTitle, [string]$Year = "")
+    if ("$Year" -match '^\d{4}$') { return "$SafeTitle ($Year)" }
+    return $SafeTitle
+}
+
+# The one existing folder for this title under $ParentDir, plain or with a year, so a
+# Disc 2 / extras / continue-rip run lands in the folder the first run made. $null when
+# there is none, or more than one (e.g. two films of the same name) - the caller decides.
+function Find-ExistingMediaFolder {
+    param([string]$ParentDir, [string]$SafeTitle)
+    if (-not $ParentDir -or -not (Test-Path -LiteralPath $ParentDir -PathType Container)) { return $null }
+    $pattern = '^' + [regex]::Escape($SafeTitle) + '( \(\d{4}\))?$'
+    $hits = @(Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $pattern })
+    if ($hits.Count -eq 1) { return $hits[0].Name }
+    return $null
 }
 
 # ========== FIRST-RUN CHECK ==========
