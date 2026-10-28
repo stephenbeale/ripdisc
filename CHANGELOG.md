@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-28 - Movie Folder Naming: `Title` or `Title (Year)`
+
+### Added
+- `setup.ps1` step 6 asks for the movie / genre-film folder style: `Title` (default) or `Title (Year)`. It is saved as `movieFolderNaming` (`title` / `title-year`) in `ripdisc-config.json`; any other value is read as `title`.
+- `-Year <YYYY>` on `rip-disc.ps1` and `continue-rip.ps1`. When given, it is always used.
+- With `title-year`: the year comes from the auto-discovery pick (if the title was not edited afterwards). Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. You can pick a row, type a year, search again or skip; skipping or end of input gives a plain folder and never aborts.
+- An existing `<title>` / `<title> (YYYY)` folder is reused when there is exactly one. Disc 2, extras and `continue-rip.ps1` runs therefore land in the folder the first run made. The retry command carries `-Year`.
+- Shared helpers in `Load-Config.ps1`: `Get-MovieParentFolder`, `Get-MediaFolderName`, `Find-ExistingMediaFolder`. New `tests/Test-MovieFolderNaming.ps1` (50 tests).
+
+### Not changed
+- Series and genre-series folders. An IMDb id in the name (`[imdbid-tt...]`) was left out on purpose: square brackets are PowerShell wildcard characters, and about 20 `-Path` / `-like` uses would need fixing first.
+
 ## 2026-10-28 - Title Suggestions From the Disc (TheDiscDB, Disc Label, TMDb, IMDb)
 
 ### Added

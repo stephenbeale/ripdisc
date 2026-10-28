@@ -8,5 +8,6 @@
     "0": "Internal drive",
     "1": "External drive"
   },
-  "tmdbApiKey": ""
+  "tmdbApiKey": "",
+  "movieFolderNaming": "title"
 }

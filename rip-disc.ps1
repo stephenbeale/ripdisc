@@ -71,7 +71,14 @@
     # end of the FILE SUMMARY - not run automatically, since it's a convenience for
     # deciding what a physical disc might be worth, not part of the rip itself.
     [Parameter()]
-    [switch]$CheckEbayPrice
+    [switch]$CheckEbayPrice,
+
+    # Release year for the movie / genre-film folder name: "Slow Dance (2014)". Given
+    # here it is always used; otherwise the folder-naming style from setup.ps1 decides
+    # (and may ask). Series folders never get a year.
+    [Parameter()]
+    [ValidatePattern('^(\d{4})?$')]
+    [string]$Year = ""
 )
 
 # ========== LOAD CONFIG ==========
@@ -947,6 +954,18 @@ function Format-TitleCandidate {
     return "$($Candidate.Title)$year$kind$origin$ids"
 }
 
+# The numbered rows of a pick list: the title line, then a dim line with the short
+# description and a link to check it.
+function Show-TitleCandidates {
+    param([object[]]$Candidates)
+    for ($i = 0; $i -lt $Candidates.Count; $i++) {
+        $c = $Candidates[$i]
+        Write-Host "  [$($i + 1)] $(Format-TitleCandidate $c)" -ForegroundColor White
+        $detail = @($c.Description, (Get-TitleCandidateUrl $c)) | Where-Object { $_ }
+        Write-Host "      $($detail -join ' | ')" -ForegroundColor DarkGray
+    }
+}
+
 # Numbered pick list. Each row has a second line with a short description and a link to
 # check it. Enter takes [1]; R searches again (when -Search is given - e.g. adding a year
 # finds titles IMDb's short list left out); M types a title; A (or end of input) aborts.
@@ -966,12 +985,7 @@ function Read-TitleChoice {
                 Write-Host "No title suggestions for this disc." -ForegroundColor Yellow
             } else {
                 Write-Host "`nSuggested titles:" -ForegroundColor Cyan
-                for ($i = 0; $i -lt $Candidates.Count; $i++) {
-                    $c = $Candidates[$i]
-                    Write-Host "  [$($i + 1)] $(Format-TitleCandidate $c)" -ForegroundColor White
-                    $detail = @($c.Description, (Get-TitleCandidateUrl $c)) | Where-Object { $_ }
-                    Write-Host "      $($detail -join ' | ')" -ForegroundColor DarkGray
-                }
+                Show-TitleCandidates $Candidates
             }
             if ($Search) { Write-Host "  [R] Search again (e.g. add the year, or a word like `"surf`")" -ForegroundColor Gray }
             if ($OtherDrives.Count -gt 0) {
@@ -1018,6 +1032,46 @@ function Read-TitleChoice {
                 Write-Host "Invalid choice. Enter $choices$(if ($Search) { 'R, ' })$(if ($OtherDrives.Count -gt 0) { 'D, ' })M or A." -ForegroundColor Red
             }
         }
+    }
+}
+
+# The year for a "Title (Year)" folder when nothing has supplied one yet. Lists the search
+# hits that have a year; a row number takes that row's year, a typed 4-digit year is used
+# as-is, R searches again. Enter / S / end of input mean "no year" - never an abort, the
+# rip goes ahead with a plain "Title" folder. Returns the year string, or $null.
+function Read-FolderYear {
+    param([string]$Title, [object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null)
+
+    $Candidates = @($Candidates | Where-Object { $_ -and $_.Year })
+    $show = $true
+    while ($true) {
+        if ($show) {
+            Write-Host "`nFolder names include the year (setup.ps1) - which year is `"$Title`"?" -ForegroundColor Cyan
+            if ($Candidates.Count -eq 0) {
+                Write-Host "  No matches with a year found." -ForegroundColor Yellow
+            } else {
+                Show-TitleCandidates $Candidates
+            }
+            Write-Host "  [YYYY] Type the year (e.g. 2014)" -ForegroundColor Gray
+            if ($Search) { Write-Host "  [R] Search again (e.g. add a word like `"surf`")" -ForegroundColor Gray }
+            Write-Host "  [S] or Enter: no year - folder `"$Title`"" -ForegroundColor Gray
+            $show = $false
+        }
+        $answer = & $ReadInput "Row, year, or Enter for no year"
+        if ($null -eq $answer) { return $null }
+        $answer = "$answer".Trim()
+        if ($answer -eq '' -or $answer -ieq 'S') { return $null }
+        if ($answer -match '^(18|19|20)\d{2}$') { return $answer }
+        if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $Candidates.Count) { return "$($Candidates[[int]$answer - 1].Year)" }
+        if ($answer -ieq 'R' -and $Search) {
+            $text = & $ReadInput "Search for (blank to go back)"
+            if ($null -eq $text) { return $null }
+            if (-not [string]::IsNullOrWhiteSpace($text)) { $Candidates = @(& $Search "$text".Trim() | Where-Object { $_ -and $_.Year }) }
+            $show = $true
+            continue
+        }
+        $rows = if ($Candidates.Count -gt 0) { "1-$($Candidates.Count), " } else { "" }
+        Write-Host "Invalid choice. Enter $rows a year like 2014,$(if ($Search) { ' R,' }) or S." -ForegroundColor Red
     }
 }
 
@@ -1514,6 +1568,36 @@ if ($titleWarnings.Count -gt 0) {
 # mean the folder/filenames actually written can differ from $title.
 $safeTitle = Get-SafeTitle $title
 
+# ========== MOVIE FOLDER NAME (movies and genre films; series folders unchanged) ==========
+# "Slow Dance" or "Slow Dance (2014)". Precedence: -Year; else an existing folder for this
+# title (so Disc 2 / extras land beside Disc 1); else, with the 'title-year' style from
+# setup.ps1, the year of the title picked in auto-discovery, or a lookup prompt.
+$script:MediaFolderName = $safeTitle
+$script:FolderYear = ""
+if (-not $Series) {
+    $movieParentDir = Join-Path (Get-NormalizedDriveLetter $OutputDrive) (Get-MovieParentFolder -Documentary:$Documentary `
+        -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Bluray:$Bluray)
+    $existingFolder = Find-ExistingMediaFolder -ParentDir $movieParentDir -SafeTitle $safeTitle
+    if ($Year) {
+        $script:FolderYear = $Year
+        $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $Year
+    } elseif ($existingFolder) {
+        $script:MediaFolderName = $existingFolder
+        if ($existingFolder -match ' \((\d{4})\)$') { $script:FolderYear = $Matches[1] }
+        if ($existingFolder -ne $safeTitle) { Write-Host "Using the existing folder `"$existingFolder`"" -ForegroundColor Gray }
+    } elseif ($script:Config_MovieFolderNaming -eq 'title-year') {
+        # The discovery pick's year only counts if the title was not edited afterwards
+        if ($picked -and $picked.Year -and $picked.Title -eq $title) {
+            $script:FolderYear = "$($picked.Year)"
+        } else {
+            $yearLookup = { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+            $chosenYear = Read-FolderYear -Title $title -Candidates @(& $yearLookup $title) -Search $yearLookup
+            if ($chosenYear) { $script:FolderYear = $chosenYear }
+        }
+        $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear
+    }
+}
+
 # ========== SERIES EPISODE NUMBERING (plain -Series only) ==========
 # Asked here, before the rip, not at the end - so nobody has to come back to a prompt
 # after a long rip, and so a failed run's continue-rip.ps1 command already carries the
@@ -1562,6 +1646,9 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "Ready to rip: $title" -ForegroundColor White
 if ($safeTitle -ne $title) {
     Write-Host "Folder/file name will be sanitized to: `"$safeTitle`"" -ForegroundColor Yellow
+}
+if ($script:MediaFolderName -ne $safeTitle) {
+    Write-Host "Folder name: `"$($script:MediaFolderName)`"" -ForegroundColor White
 }
 if ($script:IsGenreSeries) {
     if ($Season -gt 0) {
@@ -1657,15 +1744,15 @@ if ($script:IsGenreSeries) {
     # -Series uses one). Step 3 moves the numbered episodes up and removes it afterwards.
     $finalOutputDir = Join-Path $genreSeriesSeasonDir "Disc$Disc"
 } elseif ($Documentary) {
-    $finalOutputDir = "$outputDriveLetter\Documentaries\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Documentaries\$($script:MediaFolderName)"
 } elseif ($Tutorial) {
-    $finalOutputDir = "$outputDriveLetter\Tutorials\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Tutorials\$($script:MediaFolderName)"
 } elseif ($Fitness) {
-    $finalOutputDir = "$outputDriveLetter\Fitness\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Fitness\$($script:MediaFolderName)"
 } elseif ($Music) {
-    $finalOutputDir = "$outputDriveLetter\Music\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Music\$($script:MediaFolderName)"
 } elseif ($Surf) {
-    $finalOutputDir = "$outputDriveLetter\Surf\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Surf\$($script:MediaFolderName)"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$safeTitle"
     if ($Season -gt 0) {
@@ -1681,9 +1768,9 @@ if ($script:IsGenreSeries) {
     # Use per-disc subdirectory to isolate concurrent disc rips (prevents rename conflicts)
     $finalOutputDir = Join-Path $seriesSeasonDir "Disc$Disc"
 } elseif ($Bluray) {
-    $finalOutputDir = "$outputDriveLetter\Bluray\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Bluray\$($script:MediaFolderName)"
 } else {
-    $finalOutputDir = "$outputDriveLetter\DVDs\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\DVDs\$($script:MediaFolderName)"
 }
 
 # Extras: encode directly into extras subdirectory of the title folder
@@ -1758,6 +1845,7 @@ if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
+if ($script:FolderYear) { Write-Log "Folder year: $($script:FolderYear)" }
 Write-Log "Log file: $($script:LogFile)"
 
 # Builds the continue-rip.ps1 command line that would resume a failed run from its
@@ -1792,7 +1880,10 @@ function Get-ContinueRipCommand {
         # TheDiscDB content hash read from the disc before the rip. continue-rip.ps1 never
         # reads the disc, so this is how it gets to repeat the lookup at Step 3.
         [string]$DiscDbHash = "",
-        [switch]$NoDiscDb
+        [switch]$NoDiscDb,
+        # Year in a movie / genre-film folder name ("Slow Dance (2014)"), so
+        # continue-rip.ps1 rebuilds the same folder path.
+        [string]$Year = ""
     )
 
     # Step 1 (MakeMKV rip) has no continue-rip.ps1 equivalent - only 2/3/4 can be resumed.
@@ -1826,6 +1917,7 @@ function Get-ContinueRipCommand {
         $parts.Add("-EpisodeNames $($quotedNames -join ', ')")
     }
     if ($NoSound) { $parts.Add("-NoSound") }
+    if ($Year -and -not $Series) { $parts.Add("-Year $Year") }
     if ($NoDiscDb) {
         $parts.Add("-NoDiscDb")
     } elseif ($Series -and $DiscDbHash) {
@@ -1945,7 +2037,8 @@ function Stop-WithError {
             -Extras:$Extras -Bluray:$Bluray -Documentary:$Documentary -Tutorial:$Tutorial `
             -Fitness:$Fitness -Music:$Music -Surf:$Surf -StartEpisode $StartEpisode `
             -EpisodeNames $EpisodeNames -NoSound:$NoSound -StartEpisodeExplicit:$script:StartEpisodeExplicit `
-            -DiscDbHash $(if ($script:DiscDbLookup) { $script:DiscDbLookup.ContentHash } else { "" }) -NoDiscDb:$NoDiscDb
+            -DiscDbHash $(if ($script:DiscDbLookup) { $script:DiscDbLookup.ContentHash } else { "" }) -NoDiscDb:$NoDiscDb `
+            -Year $script:FolderYear
         if ($continueCommand) {
             Write-Host "`n--- RETRY WITH continue-rip.ps1 ---" -ForegroundColor Cyan
             Write-Host "The MakeMKV rip already completed - resume from here instead of re-ripping the disc:" -ForegroundColor Gray
