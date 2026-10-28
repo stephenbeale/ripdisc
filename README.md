@@ -153,6 +153,22 @@ Copy-Item ripdisc-config.sample.json ripdisc-config.json
 
 If no config file exists, the scripts auto-detect tool locations by searching the PATH, Windows registry, and common install directories.
 
+### Movie folder naming
+
+`setup.ps1` (step 6) asks how movie and genre-film folders are named. The choice is saved as `movieFolderNaming` in `ripdisc-config.json`:
+
+| Choice | `movieFolderNaming` | Folder |
+|--------|---------------------|--------|
+| 1. Title (default) | `title` | `E:\Surf\Slow Dance\` |
+| 2. Title (Year) | `title-year` | `E:\Surf\Slow Dance (2014)\` (helps Jellyfin/Plex match films) |
+
+The year is decided in this order:
+1. `-Year 2014` on the command line is always used, even with style 1.
+2. An existing `Slow Dance` or `Slow Dance (2014)` folder is reused when there is exactly one. A Disc 2 or extras run therefore lands beside Disc 1.
+3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year.
+
+File names follow the folder (`Slow Dance (2014)-title_t00.mp4`). Series folders never get a year. The retry command for a failed run carries `-Year`, so `continue-rip.ps1` rebuilds the same path.
+
 ## Usage
 
 Both versions use the same command-line parameters:
@@ -173,6 +189,8 @@ Both versions use the same command-line parameters:
 -fitness                Fitness mode (outputs to Fitness folder)
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
+-year <YYYY>            Year in the movie / genre-film folder name: "Slow Dance (2014)"
+                        (see Movie folder naming; series folders are unchanged)
 -startEpisode <int>     Starting episode number for series (default: 1). For plain -series
                         Disc 2+, you are asked at the start of the run if this is omitted
 -noSound                Skip the completion fanfare (Console.Beep melody)
@@ -399,6 +417,8 @@ E:\DVDs\MovieName\
     ├── MovieName-trailer.mp4
     └── MovieName-deleted-scenes.mp4
 ```
+
+With `movieFolderNaming: title-year` (or `-Year`) the folder and file names carry the year: `E:\DVDs\MovieName (1999)\MovieName (1999)-Feature.mp4`.
 
 ### TV Series (with season)
 

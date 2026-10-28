@@ -40,7 +40,7 @@ function Import-FunctionFromScript {
 }
 
 . $sharedPath
-foreach ($name in @('Clean-DiscName', 'New-TitleCandidate', 'Get-ShortText', 'Get-TitleCandidateUrl', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
+foreach ($name in @('Clean-DiscName', 'New-TitleCandidate', 'Get-ShortText', 'Get-TitleCandidateUrl', 'Show-TitleCandidates', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
                     'Get-DiscTitleCandidates', 'Read-TitleChoice', 'Get-DiscLabelTitleCheck')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath $name)))
 }

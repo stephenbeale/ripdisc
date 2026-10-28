@@ -19,6 +19,12 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-28 - Movie folder naming `Title (Year)` (branch `feature/movie-folder-year`, stacked on `feature/infer-title-from-disc` / PR #162)
+
+User chose option 3: only `Title` / `Title (Year)`, no IMDb id yet. Setup step 6 saves `movieFolderNaming` (`title` / `title-year`); `-Year` on both scripts. Precedence: `-Year`, then exactly one existing `<title>`/`<title> (YYYY)` folder, then (title-year) the discovery pick's year or the `Read-FolderYear` prompt (Enter/EOF = no year, never aborts). Only the 7 movie/genre-film `$finalOutputDir` lines use `$script:MediaFolderName`; series untouched. Tests: Test-MovieFolderNaming 50/50, full suite 670/670 (13 files). Load-Config read checked against real config files (title-year / bogus / none). **Not run on a real disc.**
+
+**Deferred:** `[imdbid-tt...]` naming needs a bracket audit first (wildcards in `-like` and `-Path`: Get-Item/Test-Path/New-Item/Get-ChildItem on `$finalOutputDir`, the movie-mode prefix `-like` checks in both scripts).
+
 ### 2026-10-28 - Title suggestions from the disc (branch `feature/infer-title-from-disc`, off main 87293d4)
 
 Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive F` while the drive listing already showed `[Slow Dance]`. They asked for the title to be inferred from the disc, with API suggestions, years and IMDb ids.
