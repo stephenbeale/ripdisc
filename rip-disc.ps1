@@ -675,84 +675,226 @@ function Get-EpisodeFileName {
     return "$Title-$EpisodeTag$Extension"
 }
 
-function Search-TMDb {
-    param([string]$SearchTitle)
+# ========== TITLE SUGGESTIONS ==========
+# Without -title, the title is inferred from the disc: TheDiscDB (exact match on the
+# disc's content hash, no key needed), the disc label MakeMKV/Windows report, a TMDb
+# search (needs the TMDb key) and IMDb's suggestion feed (no key; gives IMDb ids and
+# years). Candidates are merged into one numbered menu. With -title,
+# the disc label is only compared against it as a sanity check - no prompt, no network.
 
-    $apiKey = if ($script:Config_TmdbApiKey) { $script:Config_TmdbApiKey } else { $env:TMDB_API_KEY }
+# Comparison key for two titles: case, punctuation, "&" vs "and" and a leading "The"
+# are ignored, so "SLOW_DANCE", "Slow Dance" and "The Slow Dance" all compare equal.
+function ConvertTo-TitleKey {
+    param([string]$Title)
+    $k = "$Title".ToLowerInvariant() -replace '&', ' and '
+    $k = ($k -replace '[^\p{L}\p{Nd}]+', ' ').Trim()
+    $k = $k -replace '^the\s+', ''
+    return ($k -replace '\s+', '')
+}
+
+# True for labels that say nothing about the content (authoring defaults, bare numbers).
+function Test-GenericDiscLabel {
+    param([string]$Label)
+    $k = ConvertTo-TitleKey $Label
+    return (-not $k) -or ($k -match '^(dvd(video)?|disc\d*|blank|bdrom|bluray|bdmv|videots|logicalvolumeid|volume\d*|newvolume|untitled|cdrom|\d+)$')
+}
+
+# Non-interactive TMDb multi search (movies and TV only). Returns up to -Max candidates,
+# or an empty array when the key is unset or the request fails - never throws. Search
+# results carry no IMDb id, so each candidate costs one external_ids call to get it;
+# a failed call just leaves that candidate without one.
+function Get-TMDbTitleCandidates {
+    param([string]$SearchTitle, [int]$Max = 5)
+
+    $apiKey = Get-TMDbApiKey
     if (-not $apiKey) {
-        Write-Host "TMDb API key not set - skipping TMDb search (run setup.ps1 or set TMDB_API_KEY)" -ForegroundColor Yellow
-        return $null
+        Write-Host "TMDb API key not set - no TMDb suggestions (run setup.ps1 or set TMDB_API_KEY)" -ForegroundColor Yellow
+        return @()
     }
-
     try {
         $encodedTitle = [System.Uri]::EscapeDataString($SearchTitle)
-        $url = "https://api.themoviedb.org/3/search/multi?query=$encodedTitle&api_key=$apiKey"
         Write-Host "Searching TMDb for: $SearchTitle" -ForegroundColor Yellow
-
-        $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 10
-        $results = $response.results | Where-Object { $_.media_type -eq "movie" -or $_.media_type -eq "tv" }
-
-        if (-not $results -or $results.Count -eq 0) {
-            Write-Host "No TMDb results found" -ForegroundColor Yellow
-            return $null
-        }
-
-        # Take top 5
-        $top = @($results | Select-Object -First 5)
-
-        if ($top.Count -eq 1) {
-            $r = $top[0]
-            $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
-            $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
-            Write-Host "TMDb match: $tmdbTitle ($tmdbYear) [$($r.media_type)]" -ForegroundColor Green
-            return @{
-                Title = $tmdbTitle
-                Year = $tmdbYear
-                MediaType = $r.media_type
-                Overview = $r.overview
-                Id = $r.id
-            }
-        }
-
-        # Multiple results - let user pick
-        Write-Host "`nTMDb results:" -ForegroundColor Cyan
-        for ($i = 0; $i -lt $top.Count; $i++) {
-            $r = $top[$i]
-            $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
-            $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
-            $typeLabel = if ($r.media_type -eq "tv") { "TV" } else { "Movie" }
-            Write-Host "  [$($i + 1)] $tmdbTitle ($tmdbYear) [$typeLabel]" -ForegroundColor White
-        }
-        Write-Host "  [0] None of these" -ForegroundColor Gray
-
-        $choice = $null
-        while ($null -eq $choice) {
-            $input = Read-Host "Select (0-$($top.Count))"
-            if ($input -match '^\d+$' -and [int]$input -ge 0 -and [int]$input -le $top.Count) {
-                $choice = [int]$input
-            } else {
-                Write-Host "Invalid choice. Enter 0-$($top.Count)." -ForegroundColor Red
-            }
-        }
-
-        if ($choice -eq 0) {
-            return $null
-        }
-
-        $r = $top[$choice - 1]
-        $tmdbTitle = if ($r.media_type -eq "movie") { $r.title } else { $r.name }
-        $tmdbYear = if ($r.media_type -eq "movie") { ($r.release_date -split '-')[0] } else { ($r.first_air_date -split '-')[0] }
-        return @{
-            Title = $tmdbTitle
-            Year = $tmdbYear
-            MediaType = $r.media_type
-            Overview = $r.overview
-            Id = $r.id
-        }
+        $response = Invoke-TMDbRequest -Url "https://api.themoviedb.org/3/search/multi?query=$encodedTitle&api_key=$apiKey"
+        $results = @(@($response.results) | Where-Object { $_ -and ($_.media_type -eq 'movie' -or $_.media_type -eq 'tv') } | Select-Object -First $Max)
     } catch {
         Write-Host "WARNING: TMDb search failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        return $null
+        return @()
     }
+    return @(foreach ($r in $results) {
+        $isMovie = $r.media_type -eq 'movie'
+        $date = if ($isMovie) { "$($r.release_date)" } else { "$($r.first_air_date)" }
+        $imdbId = $null
+        try {
+            $ext = Invoke-TMDbRequest -Url "https://api.themoviedb.org/3/$($r.media_type)/$($r.id)/external_ids?api_key=$apiKey"
+            if ("$($ext.imdb_id)" -match '^tt\d+$') { $imdbId = "$($ext.imdb_id)" }
+        } catch { }
+        [pscustomobject]@{
+            Title     = if ($isMovie) { $r.title } else { $r.name }
+            Year      = ($date -split '-')[0]
+            MediaType = $r.media_type
+            TmdbId    = $r.id
+            ImdbId    = $imdbId
+            Season    = 0
+            Source    = 'TMDb'
+        }
+    })
+}
+
+# Single seam for IMDb suggestion calls - tests replace this function with a mock.
+function Invoke-ImdbSuggestRequest {
+    param([string]$Url)
+    return Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec 8
+}
+
+# IMDb's search-box suggestion feed (v2.sg.media-imdb.com): no key, gives IMDb id, year
+# and kind. It is UNOFFICIAL and undocumented, so it may change or vanish - everything
+# here is fail-soft and an empty array just means one source fewer. Music videos, games,
+# podcasts and single episodes are dropped; shorts and videos stay (surf / skate films
+# are often listed as those).
+function Get-ImdbTitleCandidates {
+    param([string]$SearchTitle, [int]$Max = 5)
+    $q = ("$SearchTitle".ToLowerInvariant() -replace '\s+', ' ').Trim()
+    if (-not $q) { return @() }
+    $first = if ($q[0] -match '[a-z0-9]') { $q[0] } else { 'x' }
+    try {
+        Write-Host "Searching IMDb for: $SearchTitle" -ForegroundColor Yellow
+        $response = Invoke-ImdbSuggestRequest -Url "https://v2.sg.media-imdb.com/suggestion/$first/$([System.Uri]::EscapeDataString($q)).json"
+    } catch {
+        Write-Host "WARNING: IMDb search failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @()
+    }
+    return @(@($response.d) | Where-Object {
+            $_ -and "$($_.id)" -match '^tt\d+$' -and $_.l -and
+            "$($_.qid)" -notmatch '^(musicVideo|videoGame|podcastSeries|podcastEpisode|tvEpisode)$'
+        } | Select-Object -First $Max | ForEach-Object {
+            [pscustomobject]@{
+                Title     = "$($_.l)"
+                Year      = if ($_.y) { "$($_.y)" } else { "" }
+                MediaType = if ("$($_.qid)" -match '^tv(Series|MiniSeries)$') { 'tv' } else { 'movie' }
+                TmdbId    = $null
+                ImdbId    = "$($_.id)"
+                Season    = 0
+                Source    = 'IMDb'
+            }
+        })
+}
+
+# Merges the sources into one ordered, de-duplicated list: TheDiscDB first (it
+# identifies this exact pressing), then the cleaned disc label, then TMDb, then IMDb.
+# Entries with the same title key (and no conflicting year or IMDb id) collapse into
+# one, keeping the first position and borrowing year / media type / TMDb and IMDb ids
+# from the later source, e.g. "30 Rock (2006) [TV] tt0496424 - TheDiscDB + TMDb + IMDb".
+# The bare disc label never absorbs a search hit: a shared name is not the same work
+# (label "Slow Dance" on a surf film vs IMDb's 2005 TV series "Slow Dance"), and adopting
+# a [TV] hit would switch Series mode on. Only TheDiscDB, an exact disc match, absorbs it.
+function Get-DiscTitleCandidates {
+    param([string]$DiscLabel = "", [object]$DiscDbDisc = $null, [object[]]$TmdbCandidates = @(), [object[]]$ImdbCandidates = @())
+
+    $incoming = New-Object System.Collections.Generic.List[object]
+    if ($DiscDbDisc -and $DiscDbDisc.MediaTitle) {
+        $seasons = @($DiscDbDisc.Titles | Where-Object { $_.ItemType -eq 'Episode' -and $_.Season } | ForEach-Object { $_.Season } | Select-Object -Unique)
+        $incoming.Add([pscustomobject]@{
+            Title     = "$($DiscDbDisc.MediaTitle)"
+            Year      = "$($DiscDbDisc.Year)"
+            MediaType = if ("$($DiscDbDisc.MediaType)" -match '(?i)series|tv|show') { 'tv' } else { 'movie' }
+            TmdbId    = $null
+            ImdbId    = $null
+            Season    = if ($seasons.Count -eq 1) { [int]$seasons[0] } else { 0 }
+            Source    = 'TheDiscDB'
+        })
+    }
+    if ($DiscLabel -and -not (Test-GenericDiscLabel $DiscLabel)) {
+        $incoming.Add([pscustomobject]@{
+            Title = (Clean-DiscName -RawName $DiscLabel).CleanedTitle
+            Year = ""; MediaType = $null; TmdbId = $null; ImdbId = $null; Season = 0; Source = 'disc label'
+        })
+    }
+    foreach ($t in @($TmdbCandidates) + @($ImdbCandidates)) { if ($t -and $t.Title) { $incoming.Add($t) } }
+
+    $merged = New-Object System.Collections.Generic.List[object]
+    foreach ($c in $incoming) {
+        $key = ConvertTo-TitleKey $c.Title
+        if (-not $key) { continue }
+        $same = $null
+        foreach ($m in $merged) {
+            if ((ConvertTo-TitleKey $m.Title) -ne $key) { continue }
+            if ($m.Source -eq 'disc label') { continue }
+            if ($m.Year -and $c.Year -and $m.Year -ne $c.Year) { continue }
+            if ($m.ImdbId -and $c.ImdbId -and $m.ImdbId -ne $c.ImdbId) { continue }
+            $same = $m; break
+        }
+        if ($same) {
+            if ($same.Source -notmatch [regex]::Escape($c.Source)) { $same.Source = "$($same.Source) + $($c.Source)" }
+            if (-not $same.Year -and $c.Year) { $same.Year = "$($c.Year)" }
+            if (-not $same.MediaType -and $c.MediaType) { $same.MediaType = $c.MediaType }
+            if (-not $same.TmdbId -and $c.TmdbId) { $same.TmdbId = $c.TmdbId }
+            if (-not $same.ImdbId -and $c.ImdbId) { $same.ImdbId = $c.ImdbId }
+        } else {
+            $merged.Add([pscustomobject]@{ Title = $c.Title; Year = "$($c.Year)"; MediaType = $c.MediaType; TmdbId = $c.TmdbId; ImdbId = $c.ImdbId; Season = [int]$c.Season; Source = $c.Source })
+        }
+    }
+    return $merged.ToArray()
+}
+
+# One menu line, e.g. "Heat (1995) [Movie] tt0113277 - TheDiscDB + IMDb"
+function Format-TitleCandidate {
+    param([object]$Candidate)
+    $year = if ($Candidate.Year) { " ($($Candidate.Year))" } else { "" }
+    $kind = switch ($Candidate.MediaType) { 'tv' { ' [TV]' } 'movie' { ' [Movie]' } default { '' } }
+    $imdb = if ($Candidate.ImdbId) { " $($Candidate.ImdbId)" } else { "" }
+    return "$($Candidate.Title)$year$kind$imdb - $($Candidate.Source)"
+}
+
+# Numbered pick list. Enter takes [1]; M types a title; A (or end of input) aborts.
+# Returns the chosen candidate, a Source='typed' candidate, or $null to abort.
+function Read-TitleChoice {
+    param([object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p })
+
+    $Candidates = @($Candidates | Where-Object { $_ })
+    if ($Candidates.Count -eq 0) {
+        Write-Host "No title suggestions for this disc." -ForegroundColor Yellow
+    } else {
+        Write-Host "`nSuggested titles:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $Candidates.Count; $i++) {
+            Write-Host "  [$($i + 1)] $(Format-TitleCandidate $Candidates[$i])" -ForegroundColor White
+        }
+        Write-Host "  [M] Type a different title" -ForegroundColor Gray
+        Write-Host "  [A] Abort" -ForegroundColor Gray
+    }
+
+    while ($true) {
+        if ($Candidates.Count -eq 0) {
+            $answer = 'M'
+        } else {
+            $answer = & $ReadInput "Pick a title (Enter = 1)"
+            if ($null -eq $answer) { return $null }
+            $answer = "$answer".Trim()
+            if ($answer -eq '') { return $Candidates[0] }
+            if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $Candidates.Count) { return $Candidates[[int]$answer - 1] }
+        }
+        switch ($answer.ToUpper()) {
+            'M' {
+                $text = & $ReadInput "Enter title (blank to abort)"
+                if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+                return [pscustomobject]@{ Title = "$text".Trim(); Year = ""; MediaType = $null; TmdbId = $null; ImdbId = $null; Season = 0; Source = 'typed' }
+            }
+            'A' { return $null }
+            default { Write-Host "Invalid choice. Enter 1-$($Candidates.Count), M or A." -ForegroundColor Red }
+        }
+    }
+}
+
+# With an explicit -title: does the disc label agree? $null when the label is missing or
+# generic (nothing to compare). Containment counts as agreement, so a label with season /
+# disc tokens ("SILICON VALLEY S1 D2") still matches "Silicon Valley".
+function Get-DiscLabelTitleCheck {
+    param([string]$Title, [string]$DiscLabel)
+    if (-not $DiscLabel -or (Test-GenericDiscLabel $DiscLabel)) { return $null }
+    $clean = (Clean-DiscName -RawName $DiscLabel).CleanedTitle
+    $tk = ConvertTo-TitleKey $Title
+    $lk = ConvertTo-TitleKey $DiscLabel
+    $agrees = $tk -and $lk -and ($tk -eq $lk -or ($tk.Length -ge 4 -and $lk.Contains($tk)) -or ($lk.Length -ge 4 -and $tk.Contains($lk)))
+    return [pscustomobject]@{ Agrees = [bool]$agrees; Label = $clean }
 }
 
 # ========== DRIVE CONFIRMATION ==========
@@ -971,6 +1113,11 @@ if ($DriveIndex -ge 0) {
     }
 }
 
+# Set by auto-discovery (TheDiscDB) or by plain -Series naming further down
+$script:DiscDbLookup = $null
+$titleWasGiven = $title -ne ""
+$script:DiscLabelNote = $null
+$script:PickedTitleNote = $null
 if ($title -eq "") {
     # No title provided - run full discovery
     $discoverySource = $discSource
@@ -990,6 +1137,8 @@ if ($title -eq "") {
 
     $discInfo = Get-DiscInfo -DiscSource $discoverySource
 
+    $cleanResult = $null
+    $rawLabel = $script:TargetDiscLabel
     if ($discInfo) {
         $script:DiscType = $discInfo.DiscType
         Write-Host "`nDisc Type: $($discInfo.DiscType)" -ForegroundColor White
@@ -998,98 +1147,114 @@ if ($title -eq "") {
             Write-Host "Volume Label: $($discInfo.VolumeLabel)" -ForegroundColor Gray
         }
         Write-Host "Titles on disc: $($discInfo.Titles.Count)" -ForegroundColor White
+        if ($discInfo.DiscName) { $rawLabel = $discInfo.DiscName }
 
         # Auto-detect Blu-ray from disc type
         if ($discInfo.DiscType -match '(?i)blu-?ray') {
             $Bluray = $true
             Write-Host "Blu-ray detected - enabling Blu-ray mode" -ForegroundColor Green
         }
+    } else {
+        Write-Host "Disc info not available from MakeMKV." -ForegroundColor Yellow
+    }
 
-        # Clean the disc name for searching
-        $cleanResult = Clean-DiscName -RawName $discInfo.DiscName
-        Write-Host "`nCleaned title: $($cleanResult.CleanedTitle)" -ForegroundColor White
+    # Season/disc hints come from the label even when it is too generic to search on
+    if ($rawLabel) {
+        $cleanResult = Clean-DiscName -RawName $rawLabel
+        Write-Host "`nCleaned label: $($cleanResult.CleanedTitle)" -ForegroundColor White
         if ($cleanResult.SeasonHint -gt 0) {
             Write-Host "Season hint: $($cleanResult.SeasonHint)" -ForegroundColor White
         }
         if ($cleanResult.DiscHint -gt 0) {
             Write-Host "Disc hint: $($cleanResult.DiscHint)" -ForegroundColor White
         }
+    }
 
-        # Search TMDb if API key is available
-        $tmdbResult = $null
-        if ($cleanResult.CleanedTitle -and $cleanResult.CleanedTitle -ne "" -and
-            $cleanResult.CleanedTitle -notmatch '(?i)^(dvd.?video|disc|blank)$') {
-            $tmdbResult = Search-TMDb -SearchTitle $cleanResult.CleanedTitle
-        } else {
-            Write-Host "Disc name too generic for TMDb search" -ForegroundColor Yellow
-        }
+    # TheDiscDB identifies the exact pressing from its file sizes. The result is kept in
+    # $script:DiscDbLookup so plain -Series naming below reuses it instead of asking twice.
+    # Same -DriveIndex caveat as there: only trust the letter when -Drive was given.
+    $discDbDriveRoot = if ($DriveIndex -ge 0 -and -not $PSBoundParameters.ContainsKey('Drive')) { "" } else { "$driveLetter\" }
+    $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
+        -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
+    $discDbDisc = $script:DiscDbLookup.Disc
 
-        # Populate metadata from discovery
-        if ($tmdbResult) {
-            $title = $tmdbResult.Title
-            if ($tmdbResult.MediaType -eq "tv" -and -not $Series) {
-                $Series = $true
-                Write-Host "TV series detected - enabling Series mode" -ForegroundColor Green
-            }
-        } else {
-            # Use cleaned disc name as title
-            $title = $cleanResult.CleanedTitle
-        }
+    # TMDb / IMDb: search on the label, or on TheDiscDB's title when the label is generic
+    $searchTitle = if ($rawLabel -and -not (Test-GenericDiscLabel $rawLabel)) { $cleanResult.CleanedTitle } elseif ($discDbDisc) { $discDbDisc.MediaTitle } else { "" }
+    $tmdbCandidates = if ($searchTitle) { Get-TMDbTitleCandidates -SearchTitle $searchTitle } else { @() }
+    $imdbCandidates = if ($searchTitle) { Get-ImdbTitleCandidates -SearchTitle $searchTitle } else { @() }
+    if (-not $searchTitle) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
 
-        # Apply season/disc hints if not already set by user
-        if ($cleanResult.SeasonHint -gt 0 -and $Season -eq 0) {
-            $Season = $cleanResult.SeasonHint
-        }
-        if ($cleanResult.DiscHint -gt 0 -and $Disc -eq 1) {
-            $Disc = $cleanResult.DiscHint
-        }
+    $candidates = Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates
+    $picked = Read-TitleChoice -Candidates $candidates
+    if (-not $picked) {
+        Write-Host "Aborted." -ForegroundColor Yellow
+        exit 0
+    }
+    $title = $picked.Title
+    # The log file is not open yet - written out with the session header
+    $script:PickedTitleNote = "Title picked from disc: $(Format-TitleCandidate $picked)"
+    # Later TMDb season lookups reuse the id instead of searching again
+    $tmdbResult = if ($picked.TmdbId) { @{ Title = $picked.Title; Year = $picked.Year; MediaType = $picked.MediaType; Id = $picked.TmdbId } } else { $null }
+    if ($picked.MediaType -eq 'tv' -and -not $Series) {
+        $Series = $true
+        Write-Host "TV series detected - enabling Series mode" -ForegroundColor Green
+    }
 
-        # Show discovered metadata summary
-        Write-Host "`n--- Discovered Metadata ---" -ForegroundColor Cyan
-        Write-Host "  Title:  $title" -ForegroundColor White
-        Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
-        Write-Host "  Type:   $(if ($Series) { 'TV Series' } else { 'Movie' })" -ForegroundColor White
-        if ($Series) {
-            if ($Season -gt 0) {
-                Write-Host "  Season: $Season" -ForegroundColor White
-            }
-            Write-Host "  Disc:   $Disc" -ForegroundColor White
-        }
-        Write-Host "----------------------------" -ForegroundColor Cyan
+    # Apply season/disc hints if not already set by user (TheDiscDB's season wins over the label's)
+    if ($picked.Season -gt 0 -and $Season -eq 0) {
+        $Season = $picked.Season
+    } elseif ($cleanResult -and $cleanResult.SeasonHint -gt 0 -and $Season -eq 0) {
+        $Season = $cleanResult.SeasonHint
+    }
+    if ($cleanResult -and $cleanResult.DiscHint -gt 0 -and $Disc -eq 1) {
+        $Disc = $cleanResult.DiscHint
+    }
 
-        # Prompt for confirmation
-        $discoveryChoice = $null
-        while ($null -eq $discoveryChoice) {
-            $input = Read-Host "[Y] Accept / [E] Edit title / [A] Abort"
-            switch ($input.ToUpper()) {
-                'Y' { $discoveryChoice = 'Y' }
-                'E' {
-                    $newTitle = Read-Host "Enter title"
-                    if ($newTitle -ne "") {
-                        $title = $newTitle
-                    }
-                    # Allow toggling Series mode
-                    $seriesInput = Read-Host "Is this a TV series? (y/N)"
-                    if ($seriesInput -eq 'y' -or $seriesInput -eq 'Y') {
-                        $Series = $true
-                        if ($Season -eq 0) {
-                            $seasonInput = Read-Host "Season number (0 for none)"
-                            if ($seasonInput -match '^\d+$') { $Season = [int]$seasonInput }
-                        }
-                    } else {
-                        $Series = $false
-                    }
-                    $discoveryChoice = 'Y'
+    # Show discovered metadata summary
+    Write-Host "`n--- Discovered Metadata ---" -ForegroundColor Cyan
+    Write-Host "  Title:  $title" -ForegroundColor White
+    if ($picked.Year) { Write-Host "  Year:   $($picked.Year)" -ForegroundColor White }
+    if ($picked.ImdbId) { Write-Host "  IMDb:   $($picked.ImdbId) (https://www.imdb.com/title/$($picked.ImdbId)/)" -ForegroundColor White }
+    Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
+    Write-Host "  Type:   $(if ($Series) { 'TV Series' } else { 'Movie' })" -ForegroundColor White
+    if ($Series) {
+        if ($Season -gt 0) {
+            Write-Host "  Season: $Season" -ForegroundColor White
+        }
+        Write-Host "  Disc:   $Disc" -ForegroundColor White
+    }
+    Write-Host "----------------------------" -ForegroundColor Cyan
+
+    # Prompt for confirmation
+    $discoveryChoice = $null
+    while ($null -eq $discoveryChoice) {
+        $input = Read-Host "[Y] Accept / [E] Edit title / [A] Abort"
+        switch ($input.ToUpper()) {
+            'Y' { $discoveryChoice = 'Y' }
+            'E' {
+                $newTitle = Read-Host "Enter title"
+                if ($newTitle -ne "") {
+                    $title = $newTitle
                 }
-                'A' {
-                    Write-Host "Aborted." -ForegroundColor Yellow
-                    exit 0
+                # Allow toggling Series mode
+                $seriesInput = Read-Host "Is this a TV series? (y/N)"
+                if ($seriesInput -eq 'y' -or $seriesInput -eq 'Y') {
+                    $Series = $true
+                    if ($Season -eq 0) {
+                        $seasonInput = Read-Host "Season number (0 for none)"
+                        if ($seasonInput -match '^\d+$') { $Season = [int]$seasonInput }
+                    }
+                } else {
+                    $Series = $false
                 }
-                default { Write-Host "Invalid choice. Enter Y, E, or A." -ForegroundColor Red }
+                $discoveryChoice = 'Y'
             }
+            'A' {
+                Write-Host "Aborted." -ForegroundColor Yellow
+                exit 0
+            }
+            default { Write-Host "Invalid choice. Enter Y, E, or A." -ForegroundColor Red }
         }
-    } else {
-        Write-Host "Disc info not available." -ForegroundColor Yellow
     }
 
     # Final fallback: manual input if still no title
@@ -1103,6 +1268,17 @@ if ($title -eq "") {
 }
 # When -title is provided, skip disc query entirely (too slow for just Blu-ray detection).
 # User should pass -Bluray manually when ripping Blu-ray discs with -title.
+# The disc label is already known from the drive listing, so checking it costs nothing.
+if ($titleWasGiven) {
+    $labelCheck = Get-DiscLabelTitleCheck -Title $title -DiscLabel $script:TargetDiscLabel
+    if ($labelCheck -and $labelCheck.Agrees) {
+        Write-Host "Disc label `"$($labelCheck.Label)`" matches the title" -ForegroundColor Gray
+    } elseif ($labelCheck) {
+        Write-Host "NOTE: the disc label reads `"$($labelCheck.Label)`" - check -title `"$title`" is right for this disc" -ForegroundColor Yellow
+        # The log file is not open yet - written out next to the TheDiscDB line
+        $script:DiscLabelNote = "Disc label `"$($labelCheck.Label)`" differs from -title `"$title`""
+    }
+}
 
 # ========== TITLE VALIDATION ==========
 # Warn if title appears to contain metadata that should be separate parameters
@@ -1154,14 +1330,16 @@ $safeTitle = Get-SafeTitle $title
 $script:TmdbSeason = $null
 # TheDiscDB lookup result (see Get-SeriesDiscDbLookup). Done here because the content
 # hash is read from the disc's file listing, and the disc is ejected after Step 1.
-$script:DiscDbLookup = $null
+# Auto-discovery may already have done it (initialised above the discovery block).
 if ($Series -and -not $script:IsGenreSeries) {
     # -DriveIndex picks the drive by MakeMKV's own numbering, so $driveLetter is only the
     # configured default and may be a different drive - hashing that would look up the
     # wrong disc. Only trust the letter when -Drive was given or no index was used.
     $discDbDriveRoot = if ($DriveIndex -ge 0 -and -not $PSBoundParameters.ContainsKey('Drive')) { "" } else { "$driveLetter\" }
-    $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
-        -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
+    if (-not $script:DiscDbLookup) {
+        $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
+            -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
+    }
 
     $knownTvId = if ($tmdbResult -and $tmdbResult.MediaType -eq 'tv' -and $tmdbResult.Id) { $tmdbResult.Id } else { $null }
     $script:TmdbSeason = Get-SeriesTmdbSeason -Title $title -Season $Season -KnownTvId $knownTvId
@@ -1382,6 +1560,8 @@ if ($Series -and -not $script:IsGenreSeries) {
     }
     if ($script:DiscDbLookup) { Write-Log $script:DiscDbLookup.Message }
 }
+if ($script:DiscLabelNote) { Write-Log $script:DiscLabelNote }
+if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"

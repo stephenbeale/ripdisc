@@ -19,6 +19,18 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-28 - Title suggestions from the disc (branch `feature/infer-title-from-disc`, off main 87293d4)
+
+Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive F` while the drive listing already showed `[Slow Dance]`. They asked for the title to be inferred from the disc, with API suggestions, years and IMDb ids.
+
+**Built:** without `-title`, auto-discovery now shows one numbered pick list from TheDiscDB (hash, no key), the cleaned disc label, TMDb (key, plus `external_ids` for IMDb ids) and IMDb's suggestion feed `v2.sg.media-imdb.com/suggestion/<c>/<q>.json` (no key, UNOFFICIAL). Rows show year, `[Movie]`/`[TV]` and IMDb id. With `-title`, the label from the drive listing is compared with the title (NOTE on mismatch, no prompt). The discovery TheDiscDB lookup is reused by `-Series` naming. `tests/Test-TitleSuggestions.ps1` 63/63; full suite 601/601 across 12 files.
+
+**Found live and fixed before commit:** a year-less label merged into IMDb's first same-name hit (2005 Japanese TV series "Slow Dance"), so Enter would have turned on Series mode for a surf film. The bare label now never absorbs search hits; only TheDiscDB does.
+
+**Not done:** no real-disc run of the pick list. TMDb key still unset, so the TMDb path is mocked only. IMDb endpoint verified live 2026-10-28 (about 0.4 s; one 8 s cold-start timeout seen once). Year/IMDb id are shown and logged but NOT used in folder/file names (Jellyfin `Title (Year) [imdbid-tt...]` naming is a possible follow-up). C# side unchanged.
+
+**Still open from before:** PR #161 cable-pull test (branch `feature/pause-on-drive-disconnect`).
+
 ### 2026-10-21 - rename-series handles `S1` folders, file-name episode numbers, `._` files (PR #157, merged 45369cf)
 
 Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of 6 season folders (`Parks and Recreation S1/S2/S3/S6`, `Season 4`, `season 5`) and macOS `._` AppleDouble files were numbered as episodes ahead of the real files.

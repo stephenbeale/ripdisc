@@ -1,0 +1,292 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Tests for inferring the title from the disc: title keys, generic-label detection,
+    the non-interactive TMDb candidate search, merging TheDiscDB / disc label / TMDb into
+    one menu (with years and IMDb ids), the IMDb suggestion source, the numbered pick prompt, and the -title vs disc-label sanity check.
+
+.DESCRIPTION
+    Lifts the real functions out of rip-disc.ps1 with the AST parser and dot-sources the
+    real SeriesEpisodes.ps1, so nothing here is a reimplementation. TMDb and IMDb are mocked by
+    replacing the Invoke-TMDbRequest / Invoke-ImdbSuggestRequest seams - no network. No disc, MakeMKV or HandBrake.
+
+.EXAMPLE
+    .\tests\Test-TitleSuggestions.ps1
+#>
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$sharedPath = Join-Path $repoRoot 'SeriesEpisodes.ps1'
+$ripDiscPath = Join-Path $repoRoot 'rip-disc.ps1'
+
+foreach ($p in @($sharedPath, $ripDiscPath)) {
+    if (-not (Test-Path $p)) { throw "Cannot find $p - run this from inside the repo." }
+}
+
+function Import-FunctionFromScript {
+    param([string]$ScriptPath, [string]$FunctionName)
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($ScriptPath, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors -and $parseErrors.Count -gt 0) {
+        throw "$ScriptPath has $($parseErrors.Count) parse error(s); fix those before testing."
+    }
+    $fn = $ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $FunctionName
+    }, $true) | Select-Object -First 1
+    if (-not $fn) { throw "Function '$FunctionName' not found in $ScriptPath" }
+    return $fn.Extent.Text
+}
+
+. $sharedPath
+foreach ($name in @('Clean-DiscName', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
+                    'Get-DiscTitleCandidates', 'Read-TitleChoice', 'Get-DiscLabelTitleCheck')) {
+    . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath $name)))
+}
+
+function New-InputQueue {
+    param([object[]]$Answers)
+    $queue = New-Object System.Collections.Queue
+    foreach ($a in $Answers) { $queue.Enqueue($a) }
+    return { param($prompt) if ($queue.Count -gt 0) { $queue.Dequeue() } else { $null } }.GetNewClosure()
+}
+
+$script:Passed = 0
+$script:Failed = 0
+
+function Assert-Equal {
+    param($Expected, $Actual, [string]$Because)
+    if ($Expected -ceq $Actual) {
+        $script:Passed++
+        Write-Host "  PASS  $Because" -ForegroundColor Green
+    } else {
+        $script:Failed++
+        Write-Host "  FAIL  $Because" -ForegroundColor Red
+        Write-Host "        expected: $Expected" -ForegroundColor Red
+        Write-Host "        actual:   $Actual" -ForegroundColor Red
+    }
+}
+
+function Assert-True {
+    param([bool]$Condition, [string]$Because)
+    if ($Condition) {
+        $script:Passed++
+        Write-Host "  PASS  $Because" -ForegroundColor Green
+    } else {
+        $script:Failed++
+        Write-Host "  FAIL  $Because" -ForegroundColor Red
+    }
+}
+
+function Format-Candidates { param($List) (@($List) | ForEach-Object { "$($_.Title)|$($_.Year)|$($_.MediaType)|$($_.ImdbId)|$($_.Source)" }) -join ';' }
+
+# TMDb mock: records the URL, returns a JSON round-tripped body like Invoke-RestMethod.
+$script:TmdbUrls = @()
+$script:TmdbBody = $null
+$script:TmdbThrow = $false
+function Invoke-TMDbRequest {
+    param([string]$Url)
+    $script:TmdbUrls += $Url
+    if ($script:TmdbThrow) { throw "network down" }
+    if ($Url -match '/(movie|tv)/(\d+)/external_ids') {
+        if ($Matches[2] -eq '303') { throw "404" }
+        if ($Matches[2] -eq '404') { return [pscustomobject]@{ imdb_id = $null } }
+        return [pscustomobject]@{ imdb_id = "tt$($Matches[2])000" }
+    }
+    return $script:TmdbBody
+}
+$script:ImdbUrls = @()
+$script:ImdbBody = $null
+$script:ImdbThrow = $false
+function Invoke-ImdbSuggestRequest {
+    param([string]$Url)
+    $script:ImdbUrls += $Url
+    if ($script:ImdbThrow) { throw "network down" }
+    return $script:ImdbBody
+}
+# Shape of a real response (fetched 2026-10-28 for "30 rock"), trimmed, plus one of
+# each kind that must be dropped.
+$rockImdbJson = @{ d = @(
+    @{ id = 'tt0496424'; l = '30 Rock'; y = 2006; q = 'TV series'; qid = 'tvSeries' },
+    @{ id = 'tt1860375'; l = '30 Rock'; y = 1983; q = 'TV series'; qid = 'tvSeries' },
+    @{ id = 'tt7306384'; l = 'Keri Hilson: 30 Rock'; y = 2009; q = 'musicVideo'; qid = 'musicVideo' },
+    @{ id = 'nm0000001'; l = 'Some Person'; s = 'Actor' },
+    @{ id = 'tt0052529'; l = 'The 30 Foot Bride of Candy Rock'; y = 1959; q = 'feature'; qid = 'movie' },
+    @{ id = 'tt2866584'; l = '30 Rock: The Webisodes'; q = 'video'; qid = 'video' }
+) } | ConvertTo-Json -Depth 5
+$slowDanceJson = @{ results = @(
+    @{ media_type = 'movie'; title = 'Slow Dance'; release_date = '2013-05-01'; id = 101 },
+    @{ media_type = 'person'; name = 'Slow Dancer' ; id = 7 },
+    @{ media_type = 'tv'; name = 'Slow Dance Club'; first_air_date = '2019-02-02'; id = 202 },
+    @{ media_type = 'movie'; title = 'Slow Dance'; release_date = '1998-01-01'; id = 303 },
+    @{ media_type = 'movie'; title = 'No Date'; release_date = $null; id = 404 }
+) } | ConvertTo-Json -Depth 5
+
+# ---------------------------------------------------------------------------
+Write-Host "`nTitle keys and generic labels" -ForegroundColor Cyan
+
+Assert-Equal (ConvertTo-TitleKey 'Slow Dance') (ConvertTo-TitleKey 'SLOW_DANCE') 'case and underscores ignored'
+Assert-Equal (ConvertTo-TitleKey 'Slow Dance') (ConvertTo-TitleKey 'The Slow Dance') 'a leading "The" ignored'
+Assert-Equal (ConvertTo-TitleKey 'Fast & Loose') (ConvertTo-TitleKey 'Fast and Loose') '"&" equals "and"'
+Assert-Equal 'theatre' (ConvertTo-TitleKey 'Theatre') '"The" inside a word is kept'
+foreach ($g in @('DVD_VIDEO', 'DVDVIDEO', 'Disc1', 'BDROM', 'LOGICAL_VOLUME_ID', '12345', '', '  ', 'VIDEO_TS')) {
+    Assert-True (Test-GenericDiscLabel $g) "'$g' is a generic label"
+}
+foreach ($g in @('Slow Dance', 'SILICON_VALLEY_S1_D2', 'Disco Inferno')) {
+    Assert-True (-not (Test-GenericDiscLabel $g)) "'$g' is a real label"
+}
+
+# ---------------------------------------------------------------------------
+Write-Host "`nTMDb candidates (mocked)" -ForegroundColor Cyan
+
+$savedKey = $env:TMDB_API_KEY
+$script:Config_TmdbApiKey = $null
+try {
+    $env:TMDB_API_KEY = $null
+    $c = Get-TMDbTitleCandidates -SearchTitle 'Slow Dance' 6>$null
+    Assert-Equal 0 @($c).Count 'no key: empty list, no request'
+    Assert-Equal 0 $script:TmdbUrls.Count 'no key: TMDb not called'
+
+    $env:TMDB_API_KEY = 'k'
+    $script:TmdbBody = $slowDanceJson | ConvertFrom-Json
+    $c = Get-TMDbTitleCandidates -SearchTitle 'Slow Dance' 6>$null
+    Assert-Equal 'Slow Dance|2013|movie|tt101000|TMDb;Slow Dance Club|2019|tv|tt202000|TMDb;Slow Dance|1998|movie||TMDb;No Date||movie||TMDb' (Format-Candidates $c) 'movies and TV kept in order, people dropped, missing date gives no year; IMDb ids fetched, a failed or empty lookup leaves none'
+    Assert-True ($script:TmdbUrls[0] -match 'search/multi\?query=Slow%20Dance&api_key=k$') 'title URL-encoded into a multi search'
+    Assert-True ($script:TmdbUrls[1] -match '/movie/101/external_ids\?api_key=k$' -and $script:TmdbUrls[2] -match '/tv/202/external_ids') 'external_ids asked per candidate with the right media type'
+    Assert-Equal 101 $c[0].TmdbId 'TMDb id kept for later season lookups'
+    $c = Get-TMDbTitleCandidates -SearchTitle 'Slow Dance' -Max 2 6>$null
+    Assert-Equal 2 @($c).Count '-Max caps the list'
+
+    $script:TmdbThrow = $true
+    $c = Get-TMDbTitleCandidates -SearchTitle 'Slow Dance' 6>$null
+    Assert-Equal 0 @($c).Count 'request failure: empty list, never throws'
+    $script:TmdbThrow = $false
+} finally {
+    $env:TMDB_API_KEY = $savedKey
+}
+
+# ---------------------------------------------------------------------------
+Write-Host "`nIMDb candidates (mocked)" -ForegroundColor Cyan
+
+$script:ImdbBody = $rockImdbJson | ConvertFrom-Json
+$c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
+Assert-Equal '30 Rock|2006|tv|tt0496424|IMDb;30 Rock|1983|tv|tt1860375|IMDb;The 30 Foot Bride of Candy Rock|1959|movie|tt0052529|IMDb;30 Rock: The Webisodes||movie|tt2866584|IMDb' (Format-Candidates $c) 'titles kept with id/year/kind; music videos and people dropped; missing year left blank'
+Assert-Equal 'https://v2.sg.media-imdb.com/suggestion/3/30%20rock.json' $script:ImdbUrls[-1] 'URL: lowercased query under its first character'
+$null = Get-ImdbTitleCandidates -SearchTitle '"Weird" Al' 6>$null
+Assert-True ($script:ImdbUrls[-1] -match '/suggestion/x/') 'a query not starting with a letter/digit goes under x'
+$c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' -Max 1 6>$null
+Assert-Equal 1 @($c).Count '-Max caps the list'
+$n = $script:ImdbUrls.Count
+$c = Get-ImdbTitleCandidates -SearchTitle '   ' 6>$null
+Assert-True (@($c).Count -eq 0 -and $script:ImdbUrls.Count -eq $n) 'blank search: no request'
+$script:ImdbThrow = $true
+$c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
+Assert-Equal 0 @($c).Count 'unofficial endpoint down: empty list, never throws'
+$script:ImdbThrow = $false
+$script:ImdbBody = [pscustomobject]@{ unexpected = 1 }
+$c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
+Assert-Equal 0 @($c).Count 'changed response shape: empty list'
+
+# ---------------------------------------------------------------------------
+Write-Host "`nMerging TheDiscDB, disc label, TMDb and IMDb" -ForegroundColor Cyan
+
+$tmdb = @(
+    [pscustomobject]@{ Title = 'Slow Dance'; Year = '2013'; MediaType = 'movie'; TmdbId = 101; ImdbId = 'tt101000'; Season = 0; Source = 'TMDb' },
+    [pscustomobject]@{ Title = 'Slow Dance Club'; Year = '2019'; MediaType = 'tv'; TmdbId = 202; ImdbId = $null; Season = 0; Source = 'TMDb' },
+    [pscustomobject]@{ Title = 'Slow Dance'; Year = '1998'; MediaType = 'movie'; TmdbId = 303; ImdbId = $null; Season = 0; Source = 'TMDb' }
+)
+$c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE' -TmdbCandidates $tmdb
+Assert-Equal 'Slow Dance||||disc label;Slow Dance|2013|movie|tt101000|TMDb;Slow Dance Club|2019|tv||TMDb;Slow Dance|1998|movie||TMDb' (Format-Candidates $c) 'the label stays its own line; same-name search hits are listed separately, never merged into it'
+Assert-Equal 101 $c[1].TmdbId 'TMDb entry keeps its TMDb id'
+
+$c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE'
+Assert-Equal 'Slow Dance||||disc label' (Format-Candidates $c) 'no TMDb key: the cleaned label is still offered'
+
+$c = Get-DiscTitleCandidates -DiscLabel 'DVD_VIDEO' -TmdbCandidates @()
+Assert-Equal 0 @($c).Count 'generic label and nothing else: no candidates'
+
+$dd = [pscustomobject]@{ MediaTitle = '30 Rock'; MediaType = 'Series'; Year = 2006; Titles = @(
+    [pscustomobject]@{ ItemType = 'Episode'; Season = 1 },
+    [pscustomobject]@{ ItemType = 'Episode'; Season = 1 },
+    [pscustomobject]@{ ItemType = 'DeletedScene'; Season = 3 },
+    [pscustomobject]@{ ItemType = $null; Season = $null }) }
+$c = Get-DiscTitleCandidates -DiscLabel '30ROCK_S1_D2' -DiscDbDisc $dd -TmdbCandidates @(
+    [pscustomobject]@{ Title = '30 Rock'; Year = '2006'; MediaType = 'tv'; TmdbId = 4608; ImdbId = $null; Season = 0; Source = 'TMDb' }) -ImdbCandidates @(
+    [pscustomobject]@{ Title = '30 Rock'; Year = '2006'; MediaType = 'tv'; TmdbId = $null; ImdbId = 'tt0496424'; Season = 0; Source = 'IMDb' },
+    [pscustomobject]@{ Title = '30 Rock'; Year = '1983'; MediaType = 'tv'; TmdbId = $null; ImdbId = 'tt1860375'; Season = 0; Source = 'IMDb' })
+Assert-Equal '30 Rock|2006|tv|tt0496424|TheDiscDB + TMDb + IMDb;30Rock S1||||disc label;30 Rock|1983|tv|tt1860375|IMDb' (Format-Candidates $c) 'TheDiscDB first, TMDb and same-year IMDb fold into it; the 1983 show stays separate; an unsplit label (Clean-DiscName keeps S1) is its own option'
+Assert-Equal 1 $c[0].Season 'season taken from TheDiscDB episodes (extras ignored)'
+Assert-Equal 4608 $c[0].TmdbId 'TheDiscDB entry borrows the TMDb id'
+
+$dd2 = [pscustomobject]@{ MediaTitle = 'Heat'; MediaType = 'Movie'; Year = 1995; Titles = @() }
+$c = Get-DiscTitleCandidates -DiscLabel 'HEAT' -DiscDbDisc $dd2
+Assert-Equal 'Heat|1995|movie||TheDiscDB + disc label' (Format-Candidates $c) 'movie from TheDiscDB, label agrees'
+Assert-Equal 0 $c[0].Season 'no season for a movie'
+
+$c = Get-DiscTitleCandidates -DiscLabel 'HEAT' -ImdbCandidates @(
+    [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
+    [pscustomobject]@{ Title = 'Heat'; Year = '1986'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0093164'; Season = 0; Source = 'IMDb' })
+Assert-Equal 'Heat||||disc label;Heat|1995|movie|tt0113277|IMDb;Heat|1986|movie|tt0093164|IMDb' (Format-Candidates $c) 'label first, then each same-name film on its own line'
+Assert-Equal 'Heat (1995) [Movie] tt0113277 - IMDb' (Format-TitleCandidate $c[1]) 'menu line shows year, kind and IMDb id'
+Assert-Equal 'Heat - disc label' (Format-TitleCandidate ([pscustomobject]@{ Title = 'Heat'; Year = ''; MediaType = $null; ImdbId = $null; Source = 'disc label' })) 'menu line with nothing extra known'
+
+# Regression (live run 2026-10-28): label "Slow Dance" on a surf film took the year,
+# [TV] type and IMDb id of IMDb's first hit, a 2005 Japanese TV series - Enter would
+# then have switched Series mode on.
+$c = Get-DiscTitleCandidates -DiscLabel 'Slow Dance' -ImdbCandidates @(
+    [pscustomobject]@{ Title = 'Slow Dance'; Year = '2005'; MediaType = 'tv'; TmdbId = $null; ImdbId = 'tt0481050'; Season = 0; Source = 'IMDb' },
+    [pscustomobject]@{ Title = 'Slow Dance'; Year = '2020'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt12892860'; Season = 0; Source = 'IMDb' })
+Assert-Equal 'Slow Dance||||disc label' (Format-Candidates @($c)[0]) 'the default pick is the plain label: no borrowed year, type or id'
+Assert-Equal 3 @($c).Count 'both IMDb hits still offered'
+$c = Get-DiscTitleCandidates -TmdbCandidates @(
+    [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = 949; ImdbId = 'tt0113277'; Season = 0; Source = 'TMDb' }) -ImdbCandidates @(
+    [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
+    [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt9999999'; Season = 0; Source = 'IMDb' })
+Assert-Equal 'Heat|1995|movie|tt0113277|TMDb + IMDb;Heat|1995|movie|tt9999999|IMDb' (Format-Candidates $c) 'TMDb and IMDb agreeing on the id merge; a different id stays separate even with the same year'
+
+$c = Get-DiscTitleCandidates -DiscLabel '1917'
+Assert-Equal 0 @($c).Count 'a bare-number label is treated as generic (known trade-off: the film 1917)'
+
+# ---------------------------------------------------------------------------
+Write-Host "`nPick prompt" -ForegroundColor Cyan
+
+$list = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE' -TmdbCandidates $tmdb
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('')) 6>$null
+Assert-Equal 'Slow Dance|disc label' "$($pick.Title)|$($pick.Source)" 'Enter takes the first suggestion (the plain label)'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('4')) 6>$null
+Assert-Equal 'Slow Dance|1998' "$($pick.Title)|$($pick.Year)" 'a number picks that row'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('9', 'x', '3')) 6>$null
+Assert-Equal 'Slow Dance Club' $pick.Title 'out-of-range and junk answers re-ask'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('m', '  Slow Dance (Director''s Cut) ')) 6>$null
+Assert-Equal "Slow Dance (Director's Cut)|typed" "$($pick.Title)|$($pick.Source)" 'M types a title (trimmed)'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('M', '')) 6>$null
+Assert-True ($null -eq $pick) 'M then blank aborts'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('a')) 6>$null
+Assert-True ($null -eq $pick) 'A aborts'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @()) 6>$null
+Assert-True ($null -eq $pick) 'end of input aborts (never silently accepts)'
+$pick = Read-TitleChoice -Candidates @() -ReadInput (New-InputQueue @('Slow Dance')) 6>$null
+Assert-Equal 'Slow Dance|typed' "$($pick.Title)|$($pick.Source)" 'no suggestions: asks for the title straight away'
+$pick = Read-TitleChoice -Candidates @() -ReadInput (New-InputQueue @('')) 6>$null
+Assert-True ($null -eq $pick) 'no suggestions and blank: abort'
+
+# ---------------------------------------------------------------------------
+Write-Host "`n-title vs disc label" -ForegroundColor Cyan
+
+$r = Get-DiscLabelTitleCheck -Title 'Slow Dance' -DiscLabel 'Slow Dance'
+Assert-True ($r.Agrees) 'the reported example: label "Slow Dance" agrees with -title "Slow Dance"'
+$r = Get-DiscLabelTitleCheck -Title 'Silicon Valley' -DiscLabel 'SILICON VALLEY S1 D2'
+Assert-True ($r.Agrees) 'season/disc tokens in the label still agree'
+$r = Get-DiscLabelTitleCheck -Title 'Point Break' -DiscLabel 'SLOW_DANCE'
+Assert-True (-not $r.Agrees) 'a different label disagrees'
+Assert-Equal 'Slow Dance' $r.Label 'the cleaned label is reported'
+Assert-True ($null -eq (Get-DiscLabelTitleCheck -Title 'Anything' -DiscLabel 'DVD_VIDEO')) 'generic label: no check'
+Assert-True ($null -eq (Get-DiscLabelTitleCheck -Title 'Anything' -DiscLabel '')) 'no label: no check'
+$r = Get-DiscLabelTitleCheck -Title 'It' -DiscLabel 'SPLIT_DECISION'
+Assert-True (-not $r.Agrees) 'very short titles do not match by containment'
+
+$total = $script:Passed + $script:Failed
+Write-Host "`n$($script:Passed)/$total passed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
+if ($script:Failed) { exit 1 }
+exit 0
