@@ -46,6 +46,7 @@ The PowerShell version is the primary implementation and has the most features. 
 - **Completion fanfare** ([Console]::Beep melody), optional via `-NoSound`
 - **eBay sold-price check** — prints a clickable eBay UK sold-listings search URL for the ripped title, optional via `-CheckEbayPrice`
 - **Disc type shown per drive** in the drive listing (Audio CD, Blu-ray, DVD-Video, or a size-based guess for a data disc) — a quick check to catch the wrong disc before a rip even starts
+- **Insert-to-start** — leave `watch-drives.ps1` running and a rip window opens by itself when a DVD or Blu-ray goes in (see [watch-drives.ps1](#watch-drivesps1-start-a-rip-when-a-disc-is-inserted))
 
 ## Auto-Discovery
 
@@ -755,6 +756,34 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 - **undo-rename.ps1** - Reverses a plain `-Series` rename using the Disc folder's `rename-manifest.csv` (see [TV series episode naming](#tv-series-episode-naming--series) above). A copy is placed in every Disc folder automatically; the repo-root copy takes an explicit `-ManifestPath`
 - **SeriesRetroRename.ps1** - Folder discovery and numbering across discs for `rename-series.ps1`, dot-sourced, not run directly
 - **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
+- **watch-drives.ps1** - Opens `rip-disc.ps1` in a new window when a DVD or Blu-ray is inserted. Full usage in [watch-drives.ps1](#watch-drivesps1-start-a-rip-when-a-disc-is-inserted) below.
+
+### watch-drives.ps1 (start a rip when a disc is inserted)
+
+Leave it running in its own window. When a DVD or Blu-ray goes into an optical drive, it opens a new
+console running `rip-disc.ps1 -Drive X:`. The rip itself is unchanged: `rip-disc.ps1` still asks its
+usual questions (title, start episode, rename plan) in that new window.
+
+```powershell
+.\watch-drives.ps1                                               # every optical drive
+.\watch-drives.ps1 -Drive D:                                     # only D:
+.\watch-drives.ps1 -RipArguments "-OutputDrive F: -NoSound"      # extra arguments for every rip
+.\watch-drives.ps1 -WhatIf                                       # say what would start, open nothing
+```
+
+- **How it knows** - Windows announces every newly mounted volume (`Win32_VolumeChangeEvent`); the
+  script listens for that. Nothing is polled, no admin rights are needed, and MakeMKV is never run by
+  the watcher, so it cannot disturb a rip already running on another drive.
+- **What starts a rip** - only a disc with a `BDMV` (Blu-ray) or `VIDEO_TS` (DVD) folder. Audio CDs
+  (use ripaudio's `rip-audio.ps1`), data discs and unreadable discs are skipped with a line saying why.
+- **One rip per drive** - a disc inserted while `rip-disc.ps1` is still running for that drive is not
+  started. Once the rip has finished, the next disc starts a new window even if the old one is still open.
+- **Disc already in the drive** - listed when the watcher starts, but not ripped. Eject and re-insert it.
+- **One watcher** - a second `watch-drives.ps1` refuses to start.
+- **Stop** - Ctrl+C. Rip windows already open carry on.
+- **Not tested with a real disc yet (2026-10-11)** - the decisions and the new-window command are covered
+  by `tests\Test-DriveWatcher.ps1`, and the listener starts cleanly, but no disc has been inserted with
+  it running. Whether Windows raises the event for an audio CD is also unconfirmed.
 
 ### rename-series.ps1 (rename series already ripped on disk)
 
@@ -824,6 +853,7 @@ ripdisc/
 ├── rename-series.ps1      # Retroactive series rename of already-ripped folders (dry run by default)
 ├── SeriesRetroRename.ps1  # Folder discovery/orchestration for rename-series.ps1 (dot-sourced)
 ├── undo-rename.ps1        # Reverses a -Series rename from a rename-manifest.csv
+├── watch-drives.ps1       # Opens rip-disc.ps1 in a new window when a disc is inserted
 ├── series-cleanup.ps1     # Series cleanup utility
 ├── CHANGELOG.md           # Release history
 ├── Roadmap.md             # Open feature requests and backlog

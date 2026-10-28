@@ -59,6 +59,25 @@ Trigger: `rename-series.ps1` on `F:\Series\Parks and Recreation` found only 2 of
 - (c) Folder `Parks and Recreation season 5` is lowercase (cosmetic).
 - (d) Season 6 long episodes flagged "a special?" but kept as episodes: Ep1 43:05, Ep16 1:04:47, Ep19 1:04:35, Ep20 53:03 (probably double/extended; unverified, TMDb key still unset).
 
+### 2026-10-11 - watch-drives.ps1, insert-to-start (branch `feature/watch-drives-insert-to-start`)
+
+`watch-drives.ps1` listens for `Win32_VolumeChangeEvent` (EventType 2) via
+`Register-CimIndicationEvent` and opens `rip-disc.ps1 -Drive X:` in a new window for a
+DVD-Video or Blu-ray. Idea borrowed from Automatic Ripping Machine (udev on Linux).
+`rip-disc.ps1` itself is untouched and still interactive.
+
+- **Antivirus (AVG is the active AV here; Defender is off):** do NOT start PowerShell with
+  `-EncodedCommand`, least of all windowless, from scripts or tests. The first draft did;
+  AVG's behaviour shield deleted `tests\Test-WatchDrives.ps1` mid-run and that exact path
+  now gives "access denied" on create. The tests live in `tests\Test-DriveWatcher.ps1` and
+  start no child PowerShell. The new window is launched as
+  `-NoExit -File watch-drives.ps1 -RunRipFor X: -LockPath <file>`; extra rip arguments
+  travel in the lock file, which `-RunRipFor` deletes when `rip-disc.ps1` returns
+  (that deletion is how the watcher knows the drive is free again).
+- **Tests:** `Test-DriveWatcher.ps1` 38/38. Listener registers unelevated (smoke-tested).
+- **Not done:** no real disc inserted with it running; audio-CD event behaviour unknown;
+  the real new-window launch has not been seen on screen.
+
 ### 2026-10-06 - rename-series.ps1 Fixes (branch `fix/rename-series-folder-classification`)
 
 Fixed three #151 bugs, plus -WhatIf:
