@@ -41,7 +41,7 @@ function Import-FunctionFromScript {
 
 . $sharedPath
 foreach ($name in @('Clean-DiscName', 'New-TitleCandidate', 'Get-ShortText', 'Get-TitleCandidateUrl', 'ConvertTo-TitleKey', 'Test-GenericDiscLabel', 'Get-TMDbTitleCandidates', 'Get-ImdbTitleCandidates', 'Format-TitleCandidate',
-                    'Get-DiscTitleCandidates', 'Read-TitleChoice', 'Get-DiscLabelTitleCheck')) {
+                    'Get-DiscTitleCandidates', 'Read-TitleChoice', 'Get-DiscLabelTitleCheck', 'Get-RipAudioCommand', 'Get-OtherDiscDrives', 'Read-OtherDrive', 'Get-RelaunchParams')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath $name)))
 }
 
@@ -130,7 +130,7 @@ Assert-Equal (ConvertTo-TitleKey 'Slow Dance') (ConvertTo-TitleKey 'SLOW_DANCE')
 Assert-Equal (ConvertTo-TitleKey 'Slow Dance') (ConvertTo-TitleKey 'The Slow Dance') 'a leading "The" ignored'
 Assert-Equal (ConvertTo-TitleKey 'Fast & Loose') (ConvertTo-TitleKey 'Fast and Loose') '"&" equals "and"'
 Assert-Equal 'theatre' (ConvertTo-TitleKey 'Theatre') '"The" inside a word is kept'
-foreach ($g in @('DVD_VIDEO', 'DVDVIDEO', 'Disc1', 'BDROM', 'LOGICAL_VOLUME_ID', '12345', '', '  ', 'VIDEO_TS')) {
+foreach ($g in @('Audio CD', 'AUDIO_CD', 'DVD_VIDEO', 'DVDVIDEO', 'Disc1', 'BDROM', 'LOGICAL_VOLUME_ID', '12345', '', '  ', 'VIDEO_TS')) {
     Assert-True (Test-GenericDiscLabel $g) "'$g' is a generic label"
 }
 foreach ($g in @('Slow Dance', 'SILICON_VALLEY_S1_D2', 'Disco Inferno')) {
@@ -233,7 +233,8 @@ $c = Get-DiscTitleCandidates -DiscLabel 'HEAT' -ImdbCandidates @(
     [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
     [pscustomobject]@{ Title = 'Heat'; Year = '1986'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0093164'; Season = 0; Source = 'IMDb' })
 Assert-Equal 'Heat||||disc label;Heat|1995|movie|tt0113277|IMDb;Heat|1986|movie|tt0093164|IMDb' (Format-Candidates $c) 'label first, then each same-name film on its own line'
-Assert-Equal 'Heat (1995) [Movie] tt0113277 - IMDb' (Format-TitleCandidate $c[1]) 'menu line shows year, kind and IMDb id'
+Assert-Equal 'Heat (1995) tt0113277 - IMDb' (Format-TitleCandidate $c[1]) 'menu line shows year and IMDb id; [Movie] left out as the expected case'
+Assert-Equal 'Slow Dance (2014) [Short] tt3453042 - IMDb' (Format-TitleCandidate (New-TitleCandidate -Title 'Slow Dance' -Year '2014' -MediaType 'movie' -Kind 'Short' -ImdbId 'tt3453042' -Source 'IMDb')) 'other kinds are still flagged'
 Assert-Equal 'Heat - disc label' (Format-TitleCandidate ([pscustomobject]@{ Title = 'Heat'; Year = ''; MediaType = $null; ImdbId = $null; Source = 'disc label' })) 'menu line with nothing extra known'
 
 # Regression (live run 2026-10-28): label "Slow Dance" on a surf film took the year,
@@ -316,6 +317,57 @@ Assert-True ($null -eq (Get-DiscLabelTitleCheck -Title 'Anything' -DiscLabel 'DV
 Assert-True ($null -eq (Get-DiscLabelTitleCheck -Title 'Anything' -DiscLabel '')) 'no label: no check'
 $r = Get-DiscLabelTitleCheck -Title 'It' -DiscLabel 'SPLIT_DECISION'
 Assert-True (-not $r.Agrees) 'very short titles do not match by containment'
+
+# ---------------------------------------------------------------------------
+Write-Host "`nAudio CD guard" -ForegroundColor Cyan
+
+Assert-Equal '.\rip-audio.ps1 -Drive D' (Get-RipAudioCommand -DriveLetter 'D:') 'plain command, drive colon dropped'
+Assert-Equal '.\rip-audio.ps1 -Drive D -OutputDrive F' (Get-RipAudioCommand -DriveLetter 'd:' -OutputDrive 'F:\') 'output drive carried when given; drive letters upper-cased'
+Assert-Equal 'cd "C:\repos\ripaudio"; .\rip-audio.ps1 -Drive D' (Get-RipAudioCommand -DriveLetter 'D:' -RipAudioDir 'C:\repos\ripaudio') 'cd into the sibling ripaudio checkout when found'
+$ripText = Get-Content -LiteralPath $ripDiscPath -Raw
+$guardAt = $ripText.IndexOf('# ========== AUDIO CD GUARD ==========')
+$discoveryAt = $ripText.IndexOf('AUTO-DISCOVERY MODE')
+Assert-True ($guardAt -gt 0 -and $guardAt -lt $discoveryAt) 'the audio CD guard runs before auto-discovery (the reported run offered film titles for "Audio CD")'
+Assert-True ($ripText.Substring($guardAt, 600) -match "Get-DiscTypeLabel -DriveLetter \`$driveLetter\) -eq 'Audio CD'") 'guard uses the same disc-type check as the drive listing'
+
+# ---------------------------------------------------------------------------
+Write-Host "`nUse a different drive" -ForegroundColor Cyan
+
+# The reported run: D: held an audio CD, G: held SCARFACE.
+$drv = @(
+    [pscustomobject]@{ Index = 0; Letter = 'D:'; DiscName = 'Audio CD'; Busy = $false },
+    [pscustomobject]@{ Index = 1; Letter = 'G:'; DiscName = 'SCARFACE'; Busy = $false },
+    [pscustomobject]@{ Index = 2; Letter = 'H:'; DiscName = 'BUSY ONE'; Busy = $true },
+    [pscustomobject]@{ Index = 3; Letter = 'I:'; DiscName = ''; Busy = $false },
+    [pscustomobject]@{ Index = 4; Letter = ''; DiscName = 'NO LETTER'; Busy = $false })
+$types = @{ 'D:' = 'Audio CD'; 'G:' = 'DVD-Video'; 'H:' = 'DVD-Video'; 'I:' = '' }
+$getType = { param($l) $types[$l] }.GetNewClosure()
+$others = Get-OtherDiscDrives -DrvLines $drv -CurrentLetter 'd:' -GetDiscType $getType
+Assert-Equal 'G:|SCARFACE|DVD-Video' (($others | ForEach-Object { "$($_.Letter)|$($_.DiscName)|$($_.DiscType)" }) -join ';') 'only G: offered: current drive, busy drive, empty drive and letterless entry left out'
+$others = Get-OtherDiscDrives -DrvLines $drv -CurrentLetter 'G:' -GetDiscType $getType
+Assert-Equal 'D:' (($others | ForEach-Object { $_.Letter }) -join ';') 'from G:, the audio CD drive is offered (the title list keeps every disc type)'
+Assert-Equal 0 @(Get-OtherDiscDrives -DrvLines @() -CurrentLetter 'D:').Count 'no drive list (-DriveIndex mode): nothing offered'
+
+$two = @([pscustomobject]@{ Letter = 'G:'; DiscName = 'SCARFACE'; DiscType = 'DVD-Video' }, [pscustomobject]@{ Letter = 'E:'; DiscName = ''; DiscType = 'Blu-ray' })
+Assert-Equal 'E:' (Read-OtherDrive -Drives $two -ReadInput (New-InputQueue @('2')) 6>$null) 'pick by number'
+Assert-Equal 'G:' (Read-OtherDrive -Drives $two -ReadInput (New-InputQueue @('x', 'g')) 6>$null) 'pick by letter after an invalid answer'
+Assert-True ($null -eq (Read-OtherDrive -Drives $two -ReadInput (New-InputQueue @('')) 6>$null)) 'Enter goes back'
+Assert-True ($null -eq (Read-OtherDrive -Drives $two -ReadInput (New-InputQueue @()) 6>$null)) 'end of input goes back'
+
+$bound = @{ Drive = 'd'; DriveIndex = 0; OutputDrive = 'F'; Surf = [switch]$true; title = 'Slow Dance' }
+$re = Get-RelaunchParams -BoundParams $bound -DriveLetter 'G:'
+Assert-Equal 'Drive=G:;OutputDrive=F;Surf=True;title=Slow Dance' (($re.Keys | Sort-Object | ForEach-Object { "$_=$($re[$_])" }) -join ';') 'restart keeps every option, drops -DriveIndex, points -Drive at the new drive'
+Assert-Equal 'd' $bound.Drive 'the original parameters are not modified'
+
+$list = @(New-TitleCandidate -Title 'Audio Cd' -Source 'disc label')
+$pick = Read-TitleChoice -Candidates $list -OtherDrives @($two[0]) -ReadInput (New-InputQueue @('d', '1')) 6>$null
+Assert-Equal 'switch-drive|G:' "$($pick.Source)|$($pick.SwitchDrive)" '[D] in the title list returns the drive to switch to'
+$pick = Read-TitleChoice -Candidates $list -OtherDrives @($two[0]) -ReadInput (New-InputQueue @('d', '', '')) 6>$null
+Assert-Equal 'disc label' $pick.Source '[D] then Enter goes back to the list'
+$pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('d', '')) 6>$null
+Assert-Equal 'disc label' $pick.Source '[D] with no other drives is just an invalid choice'
+$pick = Read-TitleChoice -Candidates @() -OtherDrives @($two[0]) -ReadInput (New-InputQueue @('d', '1')) 6>$null
+Assert-Equal 'switch-drive|G:' "$($pick.Source)|$($pick.SwitchDrive)" 'no suggestions: [D] still offered instead of jumping to typing'
 
 $total = $script:Passed + $script:Failed
 Write-Host "`n$($script:Passed)/$total passed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })

@@ -27,6 +27,8 @@ Trigger: user ran `rip-disc.ps1 -title "Slow Dance" -Surf -Drive d -OutputDrive 
 
 **Real-disc run (user, Slow Dance DVD):** the menu worked but the user says the film is 2014 and no 2014 row appeared. IMDb's suggestion feed returns only ~8 hits ranked by popularity, and "slow dance 2014" does find `tt3453042` (a 2014 short; NOT confirmed to be the user's surf film). Added a description line (TMDb overview / IMDb cast) and a check link per row, IMDb's real kind, and `[R] Search again`.
 
+**Second real-disc run:** an audio CD in D: (label "Audio CD") was offered film titles. Fixed: an AUDIO CD GUARD right after the drive match (reuses `Get-DiscTypeLabel`, checked live: D: -> Audio CD, G: -> DVD-Video) prints the ripaudio command and offers [R] start rip-audio.ps1 / [D] rip another drive's video disc. Also `[D] Use a different drive` in the pick list (restarts the script via `Get-RelaunchParams` splat - verified with a throwaway script that switches and exit codes survive), and `[Movie]` hidden (user request). Test-TitleSuggestions 99/99 at that point; the guard and [D] restart have NOT been run end-to-end on a real drive.
+
 **Found live and fixed before commit:** a year-less label merged into IMDb's first same-name hit (2005 Japanese TV series "Slow Dance"), so Enter would have turned on Series mode for a surf film. The bare label now never absorbs search hits; only TheDiscDB does.
 
 **Not done:** no real-disc run of the pick list. TMDb key still unset, so the TMDb path is mocked only. IMDb endpoint verified live 2026-10-28 (about 0.4 s; one 8 s cold-start timeout seen once). Year/IMDb id are shown and logged but NOT used in folder/file names (Jellyfin `Title (Year) [imdbid-tt...]` naming is a possible follow-up). C# side unchanged.

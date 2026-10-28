@@ -90,6 +90,9 @@ Add-Type -AssemblyName System.Web
 # has to be captured here: $PSBoundParameters is per-function, so Stop-WithError (defined
 # further down as its own function) cannot see the top-level script's copy directly.
 $script:OutputDriveExplicit = $PSBoundParameters.ContainsKey('OutputDrive')
+# Same reason: the whole set, for restarting this script on another drive ("[D] Use a
+# different drive" - see Get-RelaunchParams).
+$script:LaunchParams = @{} + $PSBoundParameters
 # Same reason: whether -StartEpisode was given (or answered at the Disc 2+ prompt below)
 # decides both whether to prompt and whether the continue-rip.ps1 retry command carries it.
 $script:StartEpisodeExplicit = $PSBoundParameters.ContainsKey('StartEpisode')
@@ -696,7 +699,68 @@ function ConvertTo-TitleKey {
 function Test-GenericDiscLabel {
     param([string]$Label)
     $k = ConvertTo-TitleKey $Label
-    return (-not $k) -or ($k -match '^(dvd(video)?|disc\d*|blank|bdrom|bluray|bdmv|videots|logicalvolumeid|volume\d*|newvolume|untitled|cdrom|\d+)$')
+    return (-not $k) -or ($k -match '^(dvd(video)?|disc\d*|blank|bdrom|bluray|bdmv|videots|logicalvolumeid|volume\d*|newvolume|untitled|cdrom|audiocd|\d+)$')
+}
+
+# The command that rips this disc with ripaudio instead, for an audio CD put in by
+# mistake. Uses the sibling ripaudio checkout when there is one (repos side by side),
+# otherwise just the script name. -OutputDrive only when the user gave one, like the
+# continue-rip command.
+function Get-RipAudioCommand {
+    param([string]$DriveLetter, [string]$OutputDrive = "", [string]$RipAudioDir = "")
+    $cmdArgs = "-Drive $($DriveLetter.TrimEnd(':', '\').ToUpper())"
+    if ($OutputDrive) { $cmdArgs += " -OutputDrive $($OutputDrive.TrimEnd(':', '\').ToUpper())" }
+    if ($RipAudioDir) { return "cd `"$RipAudioDir`"; .\rip-audio.ps1 $cmdArgs" }
+    return ".\rip-audio.ps1 $cmdArgs"
+}
+
+# The other drives (from the MakeMKV drive listing) that hold a disc and are not busy,
+# with the same disc type tag the listing shows - offered as "[D] Use a different drive"
+# when the chosen drive turns out to hold the wrong disc. -GetDiscType is a seam for tests.
+function Get-OtherDiscDrives {
+    param([object[]]$DrvLines = @(), [string]$CurrentLetter = "", [scriptblock]$GetDiscType = { param($l) Get-DiscTypeLabel -DriveLetter $l })
+    $current = "$CurrentLetter".TrimEnd(':', '\').ToUpper()
+    return @(foreach ($d in @($DrvLines)) {
+        if (-not $d -or -not $d.Letter -or $d.Busy) { continue }
+        $letter = "$($d.Letter)".TrimEnd(':', '\').ToUpper()
+        if ($letter -eq $current) { continue }
+        $type = & $GetDiscType "${letter}:"
+        if (-not $type) { continue }
+        [pscustomobject]@{ Letter = "${letter}:"; DiscName = "$($d.DiscName)"; DiscType = $type }
+    })
+}
+
+# Asks which of the other drives to use. Returns its letter ("G:"), or $null for
+# Enter / end of input (go back).
+function Read-OtherDrive {
+    param([object[]]$Drives = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    $Drives = @($Drives | Where-Object { $_ })
+    if ($Drives.Count -eq 0) { return $null }
+    Write-Host "`nOther drives with a disc:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Drives.Count; $i++) {
+        $d = $Drives[$i]
+        $name = if ($d.DiscName) { " [$($d.DiscName)]" } else { "" }
+        Write-Host "  [$($i + 1)] $($d.Letter)$name ($($d.DiscType))" -ForegroundColor White
+    }
+    while ($true) {
+        $answer = & $ReadInput "Drive (1-$($Drives.Count), Enter to go back)"
+        if ($null -eq $answer -or "$answer".Trim() -eq '') { return $null }
+        $answer = "$answer".Trim()
+        if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $Drives.Count) { return $Drives[[int]$answer - 1].Letter }
+        $byLetter = @($Drives | Where-Object { $_.Letter.TrimEnd(':') -ieq $answer.TrimEnd(':') })
+        if ($byLetter.Count -eq 1) { return $byLetter[0].Letter }
+        Write-Host "Invalid choice." -ForegroundColor Red
+    }
+}
+
+# This run's parameters re-pointed at another drive, for restarting rip-disc.ps1 there:
+# -DriveIndex is dropped (it named the old drive), -Drive set; everything else kept.
+function Get-RelaunchParams {
+    param([hashtable]$BoundParams, [string]$DriveLetter)
+    $params = @{}
+    foreach ($k in $BoundParams.Keys) { if ($k -notin @('Drive', 'DriveIndex')) { $params[$k] = $BoundParams[$k] } }
+    $params['Drive'] = "$DriveLetter".TrimEnd('\')
+    return $params
 }
 
 # One suggestion. Kind is the source's own label ("Short", "TV mini-series"...) for
@@ -859,12 +923,14 @@ function Get-DiscTitleCandidates {
     return $merged.ToArray()
 }
 
-# One menu line, e.g. "Heat (1995) [Movie] tt0113277 - TheDiscDB + IMDb"
+# One menu line, e.g. "Heat (1995) tt0113277 - TheDiscDB + IMDb" or "Slow Dance (2014) [Short] tt3453042 - IMDb"
 function Format-TitleCandidate {
     param([object]$Candidate)
     $year = if ($Candidate.Year) { " ($($Candidate.Year))" } else { "" }
     $kindText = if ($Candidate.Kind) { $Candidate.Kind } else { switch ($Candidate.MediaType) { 'tv' { 'TV' } 'movie' { 'Movie' } default { '' } } }
-    $kind = if ($kindText) { " [$kindText]" } else { "" }
+    # A feature film is the expected case, so [Movie] is noise; only the exceptions
+    # ([Short], [Video], [TV series]...) are worth flagging.
+    $kind = if ($kindText -and $kindText -ne 'Movie') { " [$kindText]" } else { "" }
     $imdb = if ($Candidate.ImdbId) { " $($Candidate.ImdbId)" } else { "" }
     return "$($Candidate.Title)$year$kind$imdb - $($Candidate.Source)"
 }
@@ -875,7 +941,10 @@ function Format-TitleCandidate {
 # -Search takes the search text and returns a fresh candidate list.
 # Returns the chosen candidate, a Source='typed' candidate, or $null to abort.
 function Read-TitleChoice {
-    param([object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null)
+    param([object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null,
+          # Other drives with a disc (Get-OtherDiscDrives). When given, [D] picks one and
+          # the result is a Source='switch-drive' object carrying its letter in SwitchDrive.
+          [object[]]$OtherDrives = @())
 
     $Candidates = @($Candidates | Where-Object { $_ })
     $show = $true
@@ -893,15 +962,19 @@ function Read-TitleChoice {
                 }
             }
             if ($Search) { Write-Host "  [R] Search again (e.g. add the year, or a word like `"surf`")" -ForegroundColor Gray }
+            if ($OtherDrives.Count -gt 0) {
+                $driveHint = if ($OtherDrives.Count -eq 1) { " ($($OtherDrives[0].Letter)$(if ($OtherDrives[0].DiscName) { " $($OtherDrives[0].DiscName)" }))" } else { "" }
+                Write-Host "  [D] Use a different drive$driveHint" -ForegroundColor Gray
+            }
             Write-Host "  [M] Type a different title" -ForegroundColor Gray
             Write-Host "  [A] Abort" -ForegroundColor Gray
             $show = $false
         }
 
-        if ($Candidates.Count -eq 0 -and -not $Search) {
+        if ($Candidates.Count -eq 0 -and -not $Search -and $OtherDrives.Count -eq 0) {
             $answer = 'M'
         } else {
-            $prompt = if ($Candidates.Count -gt 0) { "Pick a title (Enter = 1)" } else { "R, M or A" }
+            $prompt = if ($Candidates.Count -gt 0) { "Pick a title (Enter = 1)" } else { "$(if ($Search) { 'R, ' })$(if ($OtherDrives.Count -gt 0) { 'D, ' })M or A" }
             $answer = & $ReadInput $prompt
             if ($null -eq $answer) { return $null }
             $answer = "$answer".Trim()
@@ -921,10 +994,16 @@ function Read-TitleChoice {
                 if (-not [string]::IsNullOrWhiteSpace($text)) { $Candidates = @(& $Search "$text".Trim() | Where-Object { $_ }) }
                 $show = $true
             }
+            'D' {
+                if ($OtherDrives.Count -eq 0) { Write-Host "Invalid choice." -ForegroundColor Red; continue }
+                $letter = Read-OtherDrive -Drives $OtherDrives -ReadInput $ReadInput
+                if ($letter) { return [pscustomobject]@{ Source = 'switch-drive'; SwitchDrive = $letter; Title = "" } }
+                $show = $true
+            }
             'A' { return $null }
             default {
                 $choices = if ($Candidates.Count -gt 0) { "1-$($Candidates.Count), " } else { "" }
-                Write-Host "Invalid choice. Enter $choices$(if ($Search) { 'R, ' })M or A." -ForegroundColor Red
+                Write-Host "Invalid choice. Enter $choices$(if ($Search) { 'R, ' })$(if ($OtherDrives.Count -gt 0) { 'D, ' })M or A." -ForegroundColor Red
             }
         }
     }
@@ -1159,6 +1238,50 @@ if ($DriveIndex -ge 0) {
     }
 }
 
+# ========== AUDIO CD GUARD ==========
+# MakeMKV rips video discs only. An audio CD used to get as far as Step 1 (SCSI "ILLEGAL
+# MODE FOR THIS TRACK", caught there too) - and without -title it was even offered film
+# titles for the label "Audio CD". Stop here instead and hand over to ripaudio. Same
+# -DriveIndex caveat as the Step 1 check: the letter is only trusted when no index was
+# used, or -Drive was given.
+if (($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) -and (Get-DiscTypeLabel -DriveLetter $driveLetter) -eq 'Audio CD') {
+    $ripAudioDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'ripaudio'
+    if (-not (Test-Path -LiteralPath (Join-Path $ripAudioDir 'rip-audio.ps1'))) { $ripAudioDir = "" }
+    Write-Host "`n$driveLetter holds an audio CD - ripdisc rips DVDs and Blu-rays (MakeMKV), not music CDs." -ForegroundColor Yellow
+    Write-Host "Rip it with ripaudio instead:" -ForegroundColor Yellow
+    Write-Host "  $(Get-RipAudioCommand -DriveLetter $driveLetter -OutputDrive $(if ($script:OutputDriveExplicit) { $OutputDrive } else { '' }) -RipAudioDir $ripAudioDir)" -ForegroundColor Cyan
+    # Video discs in other drives (the audio CD's own drive and other audio CDs left out)
+    $videoDrives = @(if ($drvLines) { Get-OtherDiscDrives -DrvLines $drvLines -CurrentLetter $driveLetter | Where-Object { $_.DiscType -ne 'Audio CD' } })
+    if ($ripAudioDir -or $videoDrives.Count -gt 0) {
+        Write-Host ""
+        if ($ripAudioDir) { Write-Host "  [R] Rip this CD with rip-audio.ps1 now" -ForegroundColor White }
+        foreach ($v in $videoDrives) {
+            Write-Host "  [D] Rip $($v.Letter)$(if ($v.DiscName) { " [$($v.DiscName)]" }) ($($v.DiscType)) instead" -ForegroundColor White
+            break
+        }
+        if ($videoDrives.Count -gt 1) { Write-Host "      (D lists all $($videoDrives.Count) drives with a video disc)" -ForegroundColor DarkGray }
+        Write-Host "  [A] or Enter: stop" -ForegroundColor Gray
+        $guardChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
+        if ($guardChoice -eq 'R' -and $ripAudioDir) {
+            $audioArgs = @{ Drive = $driveLetter.TrimEnd(':') }
+            if ($script:OutputDriveExplicit) { $audioArgs.OutputDrive = $OutputDrive.TrimEnd(':', '\') }
+            Set-Location -LiteralPath $ripAudioDir
+            & (Join-Path $ripAudioDir 'rip-audio.ps1') @audioArgs
+            exit $LASTEXITCODE
+        }
+        if ($guardChoice -eq 'D' -and $videoDrives.Count -gt 0) {
+            $newDrive = if ($videoDrives.Count -eq 1) { $videoDrives[0].Letter } else { Read-OtherDrive -Drives $videoDrives }
+            if ($newDrive) {
+                Write-Host "`nRestarting on $newDrive..." -ForegroundColor Cyan
+                $relaunch = Get-RelaunchParams -BoundParams $script:LaunchParams -DriveLetter $newDrive
+                & $PSCommandPath @relaunch
+                exit $LASTEXITCODE
+            }
+        }
+    }
+    exit 1
+}
+
 # Set by auto-discovery (TheDiscDB) or by plain -Series naming further down
 $script:DiscDbLookup = $null
 $titleWasGiven = $title -ne ""
@@ -1235,7 +1358,14 @@ if ($title -eq "") {
     # the year often finds what IMDb's short popularity-ranked list left out)
     $searchAgain = { param($q) Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc `
         -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
-    $picked = Read-TitleChoice -Candidates $candidates -Search $searchAgain
+    $otherDrives = if ($drvLines) { Get-OtherDiscDrives -DrvLines $drvLines -CurrentLetter $driveLetter } else { @() }
+    $picked = Read-TitleChoice -Candidates $candidates -Search $searchAgain -OtherDrives $otherDrives
+    if ($picked -and $picked.Source -eq 'switch-drive') {
+        Write-Host "`nRestarting on $($picked.SwitchDrive)..." -ForegroundColor Cyan
+        $relaunch = Get-RelaunchParams -BoundParams $script:LaunchParams -DriveLetter $picked.SwitchDrive
+        & $PSCommandPath @relaunch
+        exit $LASTEXITCODE
+    }
     if (-not $picked) {
         Write-Host "Aborted." -ForegroundColor Yellow
         exit 0
