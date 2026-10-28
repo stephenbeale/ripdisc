@@ -20,6 +20,8 @@
 
     Episode numbers continue across the discs of a season (Disc2 starts after Disc1's last
     episode), whether the earlier discs are already renamed or only planned in this run.
+    A file whose name already carries its number ("Show S04E21 Title.mp4", "Show S01 Ep02.mp4")
+    keeps that number, so a missing episode leaves a gap rather than shifting the rest.
 
     Not touched: the optical drive (this only reads file names and video durations).
     TheDiscDB needs the disc's hash from the physical disc, so it is not used here;
@@ -27,7 +29,8 @@
 
 .PARAMETER Path
     A series folder (<root>\Silicon Valley), one Season folder, or one DiscN folder
-    ("Disc 2" and "<Title>-Disc 2" folders are recognised too).
+    ("Disc 2" and "<Title>-Disc 2" folders are recognised too; season folders may be
+    "Season 2", "Series 2", "<Title> S2" or "<Title> S02").
 
 .PARAMETER Title
     Series title used in the new names. Default: the series folder's name.

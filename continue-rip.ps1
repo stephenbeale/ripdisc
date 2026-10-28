@@ -91,6 +91,13 @@
     [Parameter()]
     [switch]$NoDiscDb,
 
+    # Year in the movie / genre-film folder name ("Slow Dance (2014)"), as printed in
+    # rip-disc.ps1's retry command. Without it an existing "<title>" or "<title> (YYYY)"
+    # folder is used when there is exactly one.
+    [Parameter()]
+    [ValidatePattern('^(\d{4})?$')]
+    [string]$Year = "",
+
     [Parameter()]
     [switch]$Help
 )
@@ -295,6 +302,7 @@ function Show-Usage {
     Write-Host "                      (by default those are skipped)" -ForegroundColor Gray
     Write-Host "  -DiscDbHash <hash>  TheDiscDB disc hash from the original rip (series naming)" -ForegroundColor White
     Write-Host "  -NoDiscDb           Skip the TheDiscDB lookup" -ForegroundColor White
+    Write-Host "  -Year <YYYY>        Year in the movie folder name, e.g. `"Slow Dance (2014)`"" -ForegroundColor White
     Write-Host "  -Yes                Do not ask for confirmation before starting; series naming" -ForegroundColor White
     Write-Host "                      takes the suggested start episode and accepts the table" -ForegroundColor Gray
     Write-Host "  -Help               Show this text" -ForegroundColor White
@@ -700,6 +708,20 @@ $tempRoot = $script:Config_TempRoot
 # user always sees their real title, not the sanitized one.
 $safeTitle = Get-SafeTitle $title
 
+# Movie / genre-film folder: -Year, else the one existing "<title>" / "<title> (YYYY)"
+# folder, else the plain title. Never asks - rip-disc.ps1 settled the name.
+$script:MediaFolderName = $safeTitle
+if (-not $Series) {
+    if ($Year) {
+        $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $Year
+    } else {
+        $movieParentDir = Join-Path (Get-NormalizedDriveLetter $OutputDrive) (Get-MovieParentFolder -Documentary:$Documentary `
+            -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Bluray:$Bluray)
+        $existingFolder = Find-ExistingMediaFolder -ParentDir $movieParentDir -SafeTitle $safeTitle
+        if ($existingFolder) { $script:MediaFolderName = $existingFolder }
+    }
+}
+
 # MakeMKV temp directory - use subdirectory for multi-disc and extras rips
 if ($Extras) {
     $makemkvOutputDir = "$tempRoot\$safeTitle\Extras"
@@ -725,15 +747,15 @@ if ($script:IsGenreSeries) {
     }
     $finalOutputDir = Join-Path $genreSeriesSeasonDir "Disc$Disc"
 } elseif ($Documentary) {
-    $finalOutputDir = "$outputDriveLetter\Documentaries\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Documentaries\$($script:MediaFolderName)"
 } elseif ($Tutorial) {
-    $finalOutputDir = "$outputDriveLetter\Tutorials\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Tutorials\$($script:MediaFolderName)"
 } elseif ($Fitness) {
-    $finalOutputDir = "$outputDriveLetter\Fitness\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Fitness\$($script:MediaFolderName)"
 } elseif ($Music) {
-    $finalOutputDir = "$outputDriveLetter\Music\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Music\$($script:MediaFolderName)"
 } elseif ($Surf) {
-    $finalOutputDir = "$outputDriveLetter\Surf\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Surf\$($script:MediaFolderName)"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$safeTitle"
     if ($Season -gt 0) {
@@ -747,9 +769,9 @@ if ($script:IsGenreSeries) {
     # Use per-disc subdirectory to isolate concurrent disc rips (prevents rename conflicts)
     $finalOutputDir = Join-Path $seriesSeasonDir "Disc$Disc"
 } elseif ($Bluray) {
-    $finalOutputDir = "$outputDriveLetter\Bluray\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\Bluray\$($script:MediaFolderName)"
 } else {
-    $finalOutputDir = "$outputDriveLetter\DVDs\$safeTitle"
+    $finalOutputDir = "$outputDriveLetter\DVDs\$($script:MediaFolderName)"
 }
 
 # Extras: encode directly into extras subdirectory of the title folder
@@ -894,6 +916,7 @@ function Get-EquivalentCommand {
     if ($Force)       { $parts += "-Force" }
     if ($StartEpisode -ne 1 -or $script:StartEpisodeExplicit) { $parts += "-StartEpisode $StartEpisode" }
     if ($NoDiscDb)    { $parts += "-NoDiscDb" } elseif ($DiscDbHash) { $parts += "-DiscDbHash $DiscDbHash" }
+    if ($Year -and -not $Series) { $parts += "-Year $Year" }
     $parts += "-OutputDrive $($outputDriveLetter.TrimEnd(':'))"
     return ($parts -join " ")
 }

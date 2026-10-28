@@ -18,10 +18,11 @@
 
 # Season number from a folder name, or $null. Accepts "Season 2", "Series 1", and a
 # trailing form after any prefix: "Joking Apart-Series 1", "Joking Apart Series 1",
-# "Show - Season 3" (case-insensitive, "Series1" too).
+# "Show - Season 3" (case-insensitive, "Series1" too). Also the short form "S1" / "S01"
+# ("Parks and Recreation S1"), with no space between the S and the number.
 function Get-SeasonFolderNumber {
     param([string]$Name)
-    if ($Name -match '(?i)(?:^|[\s\-_.])(?:series|season)\s*(\d+)$') { return [int]$Matches[1] }
+    if ($Name -match '(?i)(?:^|[\s\-_.])(?:(?:series|season)\s*|s)(\d+)$') { return [int]$Matches[1] }
     return $null
 }
 
