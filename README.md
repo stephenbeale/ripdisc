@@ -573,6 +573,8 @@ If an error occurs:
 
 **Failure classification:** a MakeMKV run that reads the disc successfully but then fails to save any titles (e.g. the drive disconnects mid-rip) is reported as a drive disconnect, not as "no disc detected" — the two are distinguished by the specific Windows error text rather than a generic "0 titles" match, so a real hardware disconnect isn't confused with an empty/unreadable drive.
 
+**Pause on drive disconnect:** if the drive drops out mid-rip (a knocked USB cable, a hub reset), `rip-disc.ps1` no longer fails straight away. It beeps, shows a Windows notification, marks the window title `DRIVE DISCONNECTED`, deletes the MKV files from that attempt and asks `[R] Retry / [A] Abort`. R is only accepted once Windows sees a readable disc in the drive again, and MakeMKV's drive index is then looked up afresh (a replugged USB drive can come back as a different `disc:N`). MakeMKV cannot resume, so a retry re-rips the whole disc. Up to 3 attempts; A, end of input or a third disconnect falls through to the normal failure report. Only a disconnect is retried - CSS, unreadable-disc and other failures stop as before.
+
 ## Feature Parity
 
 The PowerShell scripts are the primary implementation. The C# version covers core functionality but is missing some newer features:
@@ -608,6 +610,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | `-CheckEbayPrice` (eBay UK sold-listings search URL in the FILE SUMMARY) | Yes (`rip-disc.ps1` only) | No |
 | Disc type shown per-drive in the drive listing (Audio CD/Blu-ray/DVD-Video/data disc) | Yes (`rip-disc.ps1` only) | No |
 | Device-disconnect vs. no-disc error classification | Yes | Yes |
+| Pause and retry (up to 3 attempts) when the drive disconnects mid-rip | Yes (`rip-disc.ps1` only) | No |
 | `continue-rip.ps1` resume script | Yes | N/A |
 | HandBrake recovery scripts | Yes | No |
 
