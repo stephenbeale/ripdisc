@@ -43,6 +43,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 **Not tested with a real drive being unplugged.** The retry loop was run against a fake `makemkvcon` (disconnect then retry with a renumbered drive, abort, three disconnects in a row, `-DriveIndex`). The tray notification and beeps were fired once for real and appeared.
 
+## 2026-10-22 - `-Documentary -Disc N`: Parts Named `<Title>-Part N` in the Title Folder
+
+### Added
+- `rip-disc.ps1` / `continue-rip.ps1`: `-Documentary` with an explicitly supplied `-Disc N` (no `-Series`, no `-Extras`) names the disc's largest file `<Title>-Part N` and keeps it in `Documentaries\<Title>\`; other titles go to `extras`. Earlier parts in the folder are never mistaken for the current disc's feature or moved to extras, and a re-run skips an existing Part N. The generated resume command carries `-Disc` even for Part 1.
+- `tests/Test-DocumentaryPartNaming.ps1` (30 checks, lifts the real code from both scripts).
+
+### Unchanged
+- `-Documentary` without an explicit `-Disc`, `-Documentary -Series`, `-Extras` and all non-documentary rips behave as before. Not implemented in the C# `RipDisc` app. Untested on a real disc.
+
 ## 2026-10-21 - rename-series.ps1: `S1` / `S01` Season Folders, Episode Numbers From File Names, `._` Files Ignored
 
 ### Added

@@ -122,6 +122,12 @@ $script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "T
 $script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
 $script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
 
+# -Documentary together with an EXPLICIT -Disc N (no -Series, no -Extras) means one part of a
+# multi-disc documentary: the disc's feature is named "<Title>-Part N" and stays in the title
+# folder (Documentaries\<Title>) like a Feature file does, rather than being treated as a
+# Special Features disc. Without an explicit -Disc, -Documentary behaves exactly as before.
+$script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
+
 # ========== STEP DEFINITIONS ==========
 $script:AllSteps = @(
     @{ Number = 1; Key = "makemkv";   Name = "MakeMKV rip";        Description = "Rip the disc to MKV files";             Needs = "a disc in the drive"; Resumable = $false }
@@ -884,7 +890,21 @@ function Stop-WithError {
 }
 
 $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
-$isMainFeatureDisc = (-not $Series) -and ($Disc -eq 1) -and (-not $Extras)
+# Re-evaluate: the interactive prompts above can set -Documentary/-Series after the early definition.
+$script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
+$isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
+# Naming of the main file: "<Title>-Feature[-BluRay]" normally, "<Title>-Part N" for a documentary part.
+# $featureExcludePattern keeps earlier parts (same folder) from being picked as this disc's largest
+# file or swept into extras; (?!) never matches, so it is inert for ordinary movies.
+if ($script:DocumentaryPart) {
+    $featurePattern = "-Part $Disc\.[^.]+$"
+    $featureSuffix = "-Part $Disc"
+    $featureExcludePattern = '-Part \d+\.[^.]+$'
+} else {
+    $featurePattern = '-Feature(-BluRay)?\.[^.]+$'
+    $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
+    $featureExcludePattern = '(?!)'
+}
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # ========== WINDOW TITLE ==========
@@ -1717,13 +1737,13 @@ if ($StartFromStepNumber -le 3) {
         # Movie disc 1 only: add 'Feature' suffix to largest file
         if ($isMainFeatureDisc) {
             Write-Host "`nChecking for Feature file..." -ForegroundColor Yellow
-            $featureExists = Get-ChildItem -File | Where-Object { $_.Name -match '-Feature(-BluRay)?\.[^.]+$' }
+            $featureExists = Get-ChildItem -File | Where-Object { $_.Name -match $featurePattern }
             if (!$featureExists) {
-                $largestFile = Get-ChildItem -File | Sort-Object Length -Descending | Select-Object -First 1
+                $largestFile = Get-ChildItem -File | Where-Object { $_.Name -notmatch $featureExcludePattern } | Sort-Object Length -Descending | Select-Object -First 1
                 if ($largestFile) {
                     Write-Host "Largest file: $($largestFile.Name) ($([math]::Round($largestFile.Length/1GB, 2)) GB)" -ForegroundColor White
                     # -Bluray rips get "-Feature-BluRay" so Jellyfin can tell the Blu-ray version
-                    $newName = $largestFile.Directory.Name + "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" }) + $largestFile.Extension
+                    $newName = $largestFile.Directory.Name + $featureSuffix + $largestFile.Extension
                     Write-Host "Renaming to: $newName" -ForegroundColor Yellow
                     $maxRetries = 10
                     $retryDelay = 5
@@ -1754,7 +1774,7 @@ if ($StartFromStepNumber -le 3) {
         # Handle extras folder
         if ($isMainFeatureDisc) {
             Write-Host "`nChecking for non-feature videos..." -ForegroundColor Yellow
-            $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" }
+            $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" -and $_.Name -notmatch $featureExcludePattern }
             if ($nonFeatureVideos) {
                 Write-Host "Non-feature videos found: $($nonFeatureVideos.Count)" -ForegroundColor White
                 $nonFeatureVideos | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
