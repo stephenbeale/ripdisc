@@ -152,6 +152,20 @@ function Find-ExistingMediaFolder {
     return $null
 }
 
+# The main-feature file already in $FolderPath (e.g. "Scarface-Feature.mp4"), or $null.
+# A Disc 1 rip must never be put in a folder that already holds a film: Step 3 would see
+# "Feature already exists" and sweep the new film into extras (Scarface 1932 into the
+# 1983 film's folder, 2026-10-28). $Pattern is rip-disc's $featurePattern.
+function Get-ExistingFeatureFile {
+    param([string]$FolderPath, [string]$Pattern = '-Feature(-BluRay)?\.[^.]+$')
+    if (-not $FolderPath -or -not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return $null }
+    $hit = Get-ChildItem -LiteralPath $FolderPath -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match $Pattern -and $_.Extension -match '^\.(mp4|mkv|m4v|avi|mov|wmv)$' } |
+        Select-Object -First 1
+    if ($hit) { return $hit.Name }
+    return $null
+}
+
 # ========== FIRST-RUN CHECK ==========
 if (-not (Test-Path $configFilePath)) {
     Write-Host "" -ForegroundColor Yellow

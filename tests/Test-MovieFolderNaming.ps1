@@ -174,6 +174,66 @@ try {
     }
 
     # ---------------------------------------------------------------------------
+    Write-Host "`nNever rip a film into another film's folder (Scarface 1932, 2026-10-28)" -ForegroundColor Cyan
+
+    . ([scriptblock]::Create((Import-FunctionFromScript $configPath 'Get-ExistingFeatureFile')))
+    . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath 'Get-UniqueFilePath')))
+    $dvds = Join-Path $tempRoot 'clash\DVDs'
+    New-Item -ItemType Directory -Path (Join-Path $dvds 'Scarface\extras') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $dvds 'Scarface\Scarface-Feature.mp4') -Value 'x'
+    Set-Content -LiteralPath (Join-Path $dvds 'Scarface\folder.jpg') -Value 'x'
+    Assert-Equal 'Scarface-Feature.mp4' (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface')) 'finds an existing Feature'
+    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface (1932)')) 'missing folder: no Feature'
+    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface') -Pattern '-Part 1\.[^.]+$') 'a Part pattern ignores a Feature'
+
+    # The real folder-choice block from rip-disc.ps1, run with prompts/lookups stubbed and
+    # "exit 1" turned into a throw so a refusal can be seen
+    $ripText = Get-Content -LiteralPath $ripDiscPath -Raw
+    $start = $ripText.IndexOf('# ========== MOVIE FOLDER NAME')
+    $end = $ripText.IndexOf('# ========== SERIES EPISODE NUMBERING')
+    $folderBlock = [scriptblock]::Create($ripText.Substring($start, $end - $start).Replace('exit 1', "throw 'REFUSED'"))
+    function Get-NormalizedDriveLetter { param($d) $d }
+    function Get-DiscTitleCandidates { @() }
+    function Get-TMDbTitleCandidates { @() }
+    function Get-ImdbTitleCandidates { @() }
+    $outputRoot = Join-Path $tempRoot 'clash'
+    function Invoke-FolderChoice {
+        param([string]$T, $Pick = $null, [string]$Y = '', [int]$D = 1, [switch]$X, [string]$Naming = 'title', [string]$YearAnswer = '')
+        $script:Config_MovieFolderNaming = $Naming
+        $script:DocumentaryPart = $false
+        $script:YearAnswer = $YearAnswer
+        function Read-FolderYear { param($Title, $Candidates, $Search) $script:YearAnswer }
+        $title = $T; $safeTitle = $T; $picked = $Pick; $Year = $Y; $Disc = $D; $Extras = [bool]$X
+        $Series = $false; $OutputDrive = $outputRoot
+        $Documentary = $Tutorial = $Fitness = $Music = $Surf = $Bluray = $false
+        try { . $folderBlock 6>$null; return $script:MediaFolderName } catch { return "$($_.Exception.Message)" }
+    }
+    $pick1932 = [pscustomobject]@{ Title = 'Scarface'; Year = 1932 }
+    Assert-Equal 'Scarface (1932)' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932) 'THE BUG: picked Scarface (1932) goes to "Scarface (1932)", not the 1983 film''s folder'
+    Assert-Equal 'Scarface (1932)' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932 -Naming 'title-year') 'same with title-year naming'
+    Assert-Equal 'Scarface (1983)' (Invoke-FolderChoice -T 'Scarface' -YearAnswer '1983') 'no picked year: asks for one and uses it'
+    Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Scarface' -YearAnswer '') 'no year given: refuses before ripping'
+    Assert-Equal 'Scarface (1983)' (Invoke-FolderChoice -T 'Scarface' -Y '1983') '-Year to a free folder is used'
+    New-Item -ItemType Directory -Path (Join-Path $dvds 'Scarface (1932)') -Force | Out-Null
+    Assert-Equal 'Scarface (1932)' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932) 'an empty "Scarface (1932)" folder is reused'
+    Set-Content -LiteralPath (Join-Path $dvds 'Scarface (1932)\Scarface (1932)-Feature.mp4') -Value 'x'
+    Assert-Equal 'Scarface (1932)' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932 -D 2) 'Disc 2 of the 1932 film goes to its own folder'
+    Assert-Equal 'Scarface (1932)' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932 -X) '-Extras of the 1932 film goes to its own folder'
+    Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932) 'both folders hold a Feature: refuses before ripping'
+    Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Scarface' -Y '1932') '-Year to a folder that holds a Feature: refuses'
+    Assert-Equal 'Slow Dance' (Invoke-FolderChoice -T 'Slow Dance') 'no existing folder: unchanged plain name'
+
+    Write-Host "`nHandBrake output never overwrites" -ForegroundColor Cyan
+    $enc = Join-Path $tempRoot 'enc'
+    New-Item -ItemType Directory -Path $enc | Out-Null
+    Set-Content -LiteralPath (Join-Path $enc 'title_t00.mp4') -Value 'old'
+    Assert-Equal (Join-Path $enc 'title_t00-1.mp4') (Get-UniqueFilePath -DestDir $enc -FileName 'title_t00.mp4') 'existing name gets -1'
+    Assert-Equal (Join-Path $enc 'title_t01.mp4') (Get-UniqueFilePath -DestDir $enc -FileName 'title_t01.mp4') 'free name kept'
+    Assert-True ($ripText.Contains('$outputFile = $encodeTargets[$mkv.FullName]')) 'rip-disc.ps1 encodes to the de-clashed paths'
+    Assert-True (-not $ripText.Contains('$outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")')) 'rip-disc.ps1 has no raw BaseName.mp4 output left'
+    Assert-True ($ripText.Contains('if ($script:ForeignFeature) {')) 'Step 3 never sweeps a new film into extras beside an existing Feature'
+
+    # ---------------------------------------------------------------------------
     Write-Host "`nsetup.ps1 and config" -ForegroundColor Cyan
 
     $setupText = Get-Content -LiteralPath $setupPath -Raw
