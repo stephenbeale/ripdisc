@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-29 - Never Rip a Film Into Another Film's Folder, Never Overwrite an Encode
+
+### Fixed
+- A Disc 1 (or documentary part) rip no longer goes into a folder that already holds a `-Feature` (or that `-Part N`). Real case 2026-10-28: Scarface (1932), picked from the list, went into `F:\DVDs\Scarface` (the 1983 film) because an existing same-name folder beat the picked year, and Step 3 then saw "Feature already exists" and moved the new film into `extras`. Now, before anything is ripped, it switches to `Title (Year)` (the picked year, else the year prompt) and stops with nothing ripped if that folder is taken too, or no year is given.
+- A picked year's existing `Title (Year)` folder is preferred over a plain same-name folder, so Disc 2 / `-Extras` runs of the 1932 film land beside it.
+- HandBrake output names are chosen up front with `Get-UniqueFilePath`: an existing `<name>.mp4` in the output folder gets `-1`, `-2`... instead of being silently overwritten by `-o`. The recovery script uses the same names.
+- Step 3 safety net: if a Feature is still found in the folder, the disc's files are left unsorted with a red warning and log line, never swept into `extras`.
+- New `Get-ExistingFeatureFile` in `Load-Config.ps1`. `tests/Test-MovieFolderNaming.ps1` now runs the real folder-choice block from `rip-disc.ps1` against temp folders (69 tests; 12 fail on the old code).
+
+### Not changed
+- `continue-rip.ps1`: it deliberately treats an existing `<name>.mp4` as already encoded (resume), so its output naming is unchanged.
+
 ## 2026-10-28 - Movie Folder Naming: `Title` or `Title (Year)`
 
 ### Added

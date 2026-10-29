@@ -1684,6 +1684,13 @@ if (-not $Series) {
     $movieParentDir = Join-Path (Get-NormalizedDriveLetter $OutputDrive) (Get-MovieParentFolder -Documentary:$Documentary `
         -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Bluray:$Bluray)
     $existingFolder = Find-ExistingMediaFolder -ParentDir $movieParentDir -SafeTitle $safeTitle
+    # The discovery pick's year only counts if the title was not edited afterwards
+    $pickYear = if ($picked -and $picked.Year -and $picked.Title -eq $title) { "$($picked.Year)" } else { "" }
+    # A picked year whose "Title (Year)" folder already exists beats a same-name folder
+    # that may be a different film (Scarface 1932 vs Scarface)
+    if (-not $Year -and $pickYear -and (Test-Path -LiteralPath (Join-Path $movieParentDir (Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear)) -PathType Container)) {
+        $existingFolder = Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear
+    }
     if ($Year) {
         $script:FolderYear = $Year
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $Year
@@ -1692,15 +1699,41 @@ if (-not $Series) {
         if ($existingFolder -match ' \((\d{4})\)$') { $script:FolderYear = $Matches[1] }
         if ($existingFolder -ne $safeTitle) { Write-Host "Using the existing folder `"$existingFolder`"" -ForegroundColor Gray }
     } elseif ($script:Config_MovieFolderNaming -eq 'title-year') {
-        # The discovery pick's year only counts if the title was not edited afterwards
-        if ($picked -and $picked.Year -and $picked.Title -eq $title) {
-            $script:FolderYear = "$($picked.Year)"
+        if ($pickYear) {
+            $script:FolderYear = $pickYear
         } else {
             $yearLookup = { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
             $chosenYear = Read-FolderYear -Title $title -Candidates @(& $yearLookup $title) -Search $yearLookup
             if ($chosenYear) { $script:FolderYear = $chosenYear }
         }
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear
+    }
+
+    # ========== NEVER RIP A FILM INTO ANOTHER FILM'S FOLDER ==========
+    # A main-feature disc (Disc 1 / a documentary part) must not land in a folder that
+    # already has its Feature (or this Part): checked now, before anything is ripped.
+    # Falls back to "Title (Year)" (picked year, else asked), and stops if that clashes too.
+    if (-not $Extras -and (($Disc -eq 1) -or $script:DocumentaryPart)) {
+        $clashPattern = if ($script:DocumentaryPart) { "-Part $Disc\.[^.]+$" } else { '-Feature(-BluRay)?\.[^.]+$' }
+        $clashFile = Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $script:MediaFolderName) -Pattern $clashPattern
+        if ($clashFile) {
+            Write-Host "`n$movieParentDir\$($script:MediaFolderName) already holds $clashFile - this disc will NOT be put there." -ForegroundColor Yellow
+            $altYear = if ($Year) { "" } elseif ($pickYear -and $script:MediaFolderName -ne (Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear)) { $pickYear } else { "" }
+            if (-not $altYear -and -not $Year) {
+                $yearLookup = { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+                $altYear = Read-FolderYear -Title $title -Candidates @(& $yearLookup $title) -Search $yearLookup
+            }
+            $altName = if ($altYear) { Get-MediaFolderName -SafeTitle $safeTitle -Year $altYear } else { "" }
+            if (-not $altName -or $altName -eq $script:MediaFolderName -or
+                (Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $altName) -Pattern $clashPattern)) {
+                Write-Host "ERROR: no free folder for `"$title`" - nothing was ripped and nothing was changed." -ForegroundColor Red
+                Write-Host "  Run again with -Year <year> or a different -title." -ForegroundColor Yellow
+                exit 1
+            }
+            $script:FolderYear = $altYear
+            $script:MediaFolderName = $altName
+            Write-Host "Using `"$altName`" instead" -ForegroundColor Green
+        }
     }
 }
 
@@ -2185,6 +2218,7 @@ $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } els
 # Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 # unless combined with -Series (genre series / box sets), which are organized like Series: every file is an episode, none is "the Feature"
 $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
+$script:ForeignFeature = $false
 # Naming of the main file: "<Title>-Feature[-BluRay]" normally, "<Title>-Part N" for a documentary part.
 # $featureExcludePattern keeps earlier parts (same folder) from being picked as this disc's largest
 # file or swept into extras; (?!) never matches, so it is inert for ordinary movies.
@@ -3082,9 +3116,24 @@ $recoveryLines = @(
     "if (!(Test-Path `$finalOutputDir)) { New-Item -ItemType Directory -Path `$finalOutputDir -Force | Out-Null }"
     ""
 )
+# HandBrake's -o silently overwrites, so each output name is chosen once, here, never
+# reusing a file already in the output folder (gets "-1", "-2" ... instead). The recovery
+# script and the encode loop below both use these paths.
+$encodeTargets = @{}
+foreach ($mkv in $mkvFiles) {
+    $target = Get-UniqueFilePath -DestDir $finalOutputDir -FileName ($mkv.BaseName + ".mp4")
+    while ($encodeTargets.Values -contains $target) {
+        $target = Get-UniqueFilePath -DestDir $finalOutputDir -FileName ([System.IO.Path]::GetFileNameWithoutExtension($target) + "-1.mp4")
+    }
+    if ((Split-Path $target -Leaf) -ne ($mkv.BaseName + ".mp4")) {
+        Write-Host "$($mkv.BaseName).mp4 already exists in the output folder - encoding to $(Split-Path $target -Leaf) instead" -ForegroundColor Yellow
+        Write-Log "Output name taken, not overwriting: $($mkv.BaseName).mp4 -> $(Split-Path $target -Leaf)"
+    }
+    $encodeTargets[$mkv.FullName] = $target
+}
 foreach ($mkv in $mkvFiles) {
     $inputFile = $mkv.FullName
-    $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
+    $outputFile = $encodeTargets[$mkv.FullName]
     $recoveryLines += "# --- $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB) ---"
     $recoveryLines += "if (!(Test-Path `"$outputFile`")) {"
     $recoveryLines += "    Write-Host `"Encoding: $($mkv.Name)`" -ForegroundColor Cyan"
@@ -3108,12 +3157,12 @@ $fileCount = 0
 foreach ($mkv in $mkvFiles) {
     $fileCount++
     $inputFile = $mkv.FullName
-    $outputFile = Join-Path $finalOutputDir ($mkv.BaseName + ".mp4")
+    $outputFile = $encodeTargets[$mkv.FullName]
 
     Write-Timestamp "Encoding file $fileCount of $($mkvFiles.Count)"
     Write-Host "`n--- Encoding file $fileCount of $($mkvFiles.Count) ---" -ForegroundColor Cyan
     Write-Host "Input:  $($mkv.Name)" -ForegroundColor White
-    Write-Host "Output: $($mkv.BaseName).mp4" -ForegroundColor White
+    Write-Host "Output: $(Split-Path $outputFile -Leaf)" -ForegroundColor White
     Write-Host "Size:   $([math]::Round($mkv.Length/1GB, 2)) GB" -ForegroundColor White
     Write-Log "Encoding file $fileCount of $($mkvFiles.Count): $($mkv.Name) ($([math]::Round($mkv.Length/1GB, 2)) GB)"
 
@@ -3155,7 +3204,7 @@ foreach ($mkv in $mkvFiles) {
         Write-Timestamp "Encoding complete: $($mkv.Name)"
         Write-Host "`nEncoding complete: $($mkv.Name)" -ForegroundColor Green
         Write-Host "Output size: $([math]::Round($encodedSize/1GB, 2)) GB" -ForegroundColor White
-        Write-Log "Encoded: $($mkv.Name) -> $($mkv.BaseName).mp4 ($([math]::Round($encodedSize/1GB, 2)) GB)"
+        Write-Log "Encoded: $($mkv.Name) -> $(Split-Path $outputFile -Leaf) ($([math]::Round($encodedSize/1GB, 2)) GB)"
     } else {
         Stop-WithError -Step "STEP 2/4: HandBrake encoding" -Message "Output file not created for $($mkv.Name)"
     }
@@ -3541,14 +3590,21 @@ if ($script:IsGenreSeries) {
                 Write-Log "Feature file: $($largestFile.Name) -> $newName ($([math]::Round($largestFile.Length/1GB, 2)) GB)"
             }
         } else {
-            Write-Host "Feature file already exists: $($featureExists.Name)" -ForegroundColor Gray
+            # rip-disc never resumes, so a Feature here was not made by this run: it is another
+            # film's (the pre-rip folder check should have prevented this). Leave this disc's
+            # files where they are rather than sweeping the new film into extras.
+            $script:ForeignFeature = $true
+            Write-Host "WARNING: $($featureExists.Name) was already in this folder - this disc's files are left unsorted here for you to check" -ForegroundColor Red
+            Write-Log "WARNING: existing feature $($featureExists.Name) found; new files not renamed or moved to extras"
         }
     } else {
         Write-Host "`nSkipping Feature rename (Special Features disc)" -ForegroundColor Gray
     }
 
     # Handle extras folder based on disc type
-    if ($isMainFeatureDisc) {
+    if ($script:ForeignFeature) {
+        Write-Host "`nSkipping the move to extras (see WARNING above)" -ForegroundColor Yellow
+    } elseif ($isMainFeatureDisc) {
         # Disc 1: move non-feature videos to extras
         Write-Host "`nChecking for non-feature videos..." -ForegroundColor Yellow
         $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" -and $_.Name -notmatch $featureExcludePattern }
