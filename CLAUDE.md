@@ -84,6 +84,7 @@ Trigger: the 2026-10-28 real rip of Scarface (1932), picked from the pick list (
 4. Real-disc checks for #166: a film whose plain folder holds a Feature gets `Title (Year)`; the refusal message when there is no year.
 5. Re-rip the 1983 Scarface into `F:\DVDs\Scarface (1983)`; delete the broken 55 MB `F:\DVDs\Scarface\Scarface-Feature.mp4` only with user confirmation.
 6. Still open from the 2026-10-28 list below: cable-pull test for #161, README CR lines, Write-Host spacing, other real-drive tests, Slow Dance IMDb question, ripaudio/ripdisc direction.
+7. Friend's release safety: undecided, (a) tags / (b) stable branch / (c) README rollback section; bad release = git revert on main, never force-push.
 
 ### 2026-10-28 - NEXT SESSION items (main = 9f1b240, 790/790 tests, 16 files)
 
