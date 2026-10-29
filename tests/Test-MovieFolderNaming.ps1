@@ -205,6 +205,9 @@ try {
     function Get-DiscTitleCandidates { @() }
     function Get-TMDbTitleCandidates { @() }
     function Get-ImdbTitleCandidates { @() }
+    . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath 'Test-OnlineOnce')))
+    . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath 'Get-YearLookup')))
+    function Test-InternetConnection { $true }
     $outputRoot = Join-Path $tempRoot 'clash'
     function Invoke-FolderChoice {
         param([string]$T, $Pick = $null, [string]$Y = '', [int]$D = 1, [switch]$X, [string]$Naming = 'title', [string]$YearAnswer = '',

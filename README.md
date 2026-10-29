@@ -183,7 +183,8 @@ Both versions use the same command-line parameters:
 -disc <int>             Disc number (default: 1)
 -drive <string>         Drive letter (default: D:)
 -driveIndex <int>       Drive index for MakeMKV (default: -1)
--outputDrive <string>   Output drive letter (default: E:)
+-outputDrive <string>   Output drive letter. If omitted you are asked, with the config's
+                        defaultOutputDrive (E: unless changed) on Enter
 -extras                 Flag for extras-only disc
 -queue                  Queue encoding instead of running immediately
 -bluray                 Blu-ray mode (outputs to Bluray folder, forced subtitle scan)
@@ -193,6 +194,9 @@ Both versions use the same command-line parameters:
 -fitness                Fitness mode (outputs to Fitness folder)
 -music                  Music mode (outputs to Music folder)
 -surf                   Surf mode (outputs to Surf folder)
+-genre <string>         Any other genre folder: -genre Basketball outputs to Basketball\<Title>.
+                        An unknown switch such as -Basketball asks whether to use it as
+                        this; answering N rips into the standard DVDs/Bluray folder
 -year <YYYY>            Year in the movie / genre-film folder name: "Slow Dance (2014)"
                         (see Movie folder naming; series folders are unchanged)
 -startEpisode <int>     Starting episode number for series (default: 1). For plain -series
@@ -528,6 +532,17 @@ E:\Surf\SurfTitle\
 └── extras\
     └── SurfTitle-bonus.mp4
 ```
+
+### Any other genre (`-Genre`, or an unknown switch)
+
+`.ip-disc.ps1 -Drive D -OutputDrive F -Basketball` asks whether `-Basketball` should be a
+new folder. Y (or Enter) gives the same layout as Surf, under `F:\Basketball\`; N uses the
+standard `DVDs` (or `Bluray`) folder. A near-miss of a real option (`-Documentry`) is
+pointed out before the question. `-Genre Basketball` skips the question.
+
+```
+F:\Basketball\Larry Bird A Basketball Legend├── Larry Bird A Basketball Legend-Feature.mp4
+└── extras```
 
 ### Blu-ray
 
