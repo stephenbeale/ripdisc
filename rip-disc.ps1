@@ -97,6 +97,7 @@
 # Plain -Series episode/extra naming, rename manifest and TMDb season lookup - shared
 # with continue-rip.ps1 so a resumed rip names files exactly like the original run.
 . (Join-Path $PSScriptRoot "SeriesEpisodes.ps1")
+. (Join-Path $PSScriptRoot "RipStats.ps1")
 $makemkvconPath = $script:Config_MakeMkvPath
 
 # Load System.Web for URL encoding (used to build the -CheckEbayPrice search URL)
@@ -1761,6 +1762,9 @@ if (-not $Series) {
     } elseif ($script:Config_MovieFolderNaming -eq 'title-year') {
         if ($pickYear) {
             $script:FolderYear = $pickYear
+        } elseif (Get-TitleYear $safeTitle) {
+            # The title already says which year ("Musica Surfica (2008)") - no need to ask
+            $script:FolderYear = Get-TitleYear $safeTitle
         } else {
             $yearLookup = Get-YearLookup
             $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup
@@ -1846,9 +1850,15 @@ Write-Host "Ready to rip: $title" -ForegroundColor White
 if ($safeTitle -ne $title) {
     Write-Host "Folder/file name will be sanitized to: `"$safeTitle`"" -ForegroundColor Yellow
 }
-if ($script:MediaFolderName -ne $safeTitle) {
-    Write-Host "Folder name: `"$($script:MediaFolderName)`"" -ForegroundColor White
-}
+# Full destination, category folder included (F:\Surf\..., F:\DVDs\...), built the same
+# way as $finalOutputDir further down so what is shown is where the files go.
+$previewDrive = Get-NormalizedDriveLetter $OutputDrive
+$previewSeason = if ($Season -gt 0) { "\Season $Season" } else { "" }
+$outputFolderPreview = if ($script:IsGenreSeries) { "$previewDrive\$($script:GenreFolder)\$safeTitle$previewSeason" }
+    elseif ($Series) { "$previewDrive\Series\$safeTitle$previewSeason\Disc$Disc" }
+    else { Join-Path $movieParentDir $script:MediaFolderName }
+if ($Extras -and -not $Series) { $outputFolderPreview = Join-Path $outputFolderPreview "extras" }
+Write-Host "Output folder: $outputFolderPreview" -ForegroundColor White
 if ($script:IsGenreSeries) {
     if ($Season -gt 0) {
         $seasonTagPreview = "S{0:D2}" -f $Season
@@ -2052,6 +2062,19 @@ Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
 if ($script:FolderYear) { Write-Log "Folder year: $($script:FolderYear)" }
 Write-Log "Log file: $($script:LogFile)"
+
+# Rough finish time from past completed rips of the same type (RipStats.ps1). Read-only
+# and best-effort: a missing log folder or unreadable log just means no estimate.
+try {
+    $ripEstimate = Get-RipTimeEstimate -LogDir $logDir -Type (Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray)
+    if ($ripEstimate) {
+        $estimateLine = Format-RipTimeEstimate $ripEstimate
+        Write-Log $estimateLine
+        Write-Host $estimateLine -ForegroundColor Gray
+    }
+} catch {
+    Write-Log "Estimated finish: unavailable ($($_.Exception.Message))"
+}
 
 # Builds the continue-rip.ps1 command line that would resume a failed run from its
 # first incomplete step, reusing this run's own inputs, so it can be printed on

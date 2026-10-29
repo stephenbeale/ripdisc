@@ -264,11 +264,20 @@ function Get-EditDistance {
 }
 
 # "Slow Dance" + "2014" -> "Slow Dance (2014)". No valid 4-digit year, no change.
+# A title that already ends in a year ("Musica Surfica (2008)", as a pick-list title can)
+# has that year replaced rather than doubled ("Musica Surfica (2008) (2008)", 2026-10-29).
 # Parentheses are not PowerShell wildcard characters, so -Path / -like keep working.
 function Get-MediaFolderName {
     param([string]$SafeTitle, [string]$Year = "")
-    if ("$Year" -match '^\d{4}$') { return "$SafeTitle ($Year)" }
+    if ("$Year" -match '^\d{4}$') { return "$($SafeTitle -replace ' \(\d{4}\)$', '') ($Year)" }
     return $SafeTitle
+}
+
+# The year a title already carries ("Musica Surfica (2008)" -> "2008"), else "".
+function Get-TitleYear {
+    param([string]$Title)
+    if ($Title -match ' \((\d{4})\)$') { return $Matches[1] }
+    return ""
 }
 
 # The one existing folder for this title under $ParentDir, plain or with a year, so a

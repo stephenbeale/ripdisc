@@ -52,7 +52,7 @@ function Get-ScriptParameterNames {
     return @((Get-ScriptAst $ScriptPath).ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
 }
 
-foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Find-ExistingMediaFolder')) {
+foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
 }
 foreach ($name in @('New-TitleCandidate', 'Get-TitleCandidateUrl', 'Format-TitleCandidate', 'Show-TitleCandidates',
@@ -104,6 +104,12 @@ try {
     Assert-Equal 'Slow Dance (2014)' (Get-MediaFolderName -SafeTitle 'Slow Dance' -Year '2014') 'year appended in brackets'
     Assert-Equal 'Slow Dance' (Get-MediaFolderName -SafeTitle 'Slow Dance' -Year '') 'no year, no change'
     Assert-Equal 'Slow Dance' (Get-MediaFolderName -SafeTitle 'Slow Dance' -Year '14') 'a non-4-digit year is ignored'
+    Assert-Equal 'Musica Surfica (2008)' (Get-MediaFolderName -SafeTitle 'Musica Surfica (2008)' -Year '2008') 'a title already ending in the year is not doubled (2026-10-29 bug)'
+    Assert-Equal 'Jean de Florette (1986)' (Get-MediaFolderName -SafeTitle 'Jean de Florette (1984)' -Year '1986') 'a different year in the title is replaced, not stacked'
+    Assert-Equal 'Musica Surfica (2008)' (Get-MediaFolderName -SafeTitle 'Musica Surfica (2008)' -Year '') 'no year given: a title with its own year is left alone'
+    Assert-Equal 'Brazil 1984 (1985)' (Get-MediaFolderName -SafeTitle 'Brazil 1984' -Year '1985') 'a bare number in the title is not treated as a year'
+    Assert-Equal '2008' (Get-TitleYear 'Musica Surfica (2008)') 'Get-TitleYear reads a trailing (YYYY)'
+    Assert-Equal '' (Get-TitleYear 'Slow Dance') 'Get-TitleYear: no year, empty'
     Assert-Equal 'Surf' (Get-MovieParentFolder -Surf) '-Surf films live under Surf'
     Assert-Equal 'Documentaries' (Get-MovieParentFolder -Documentary -Bluray) 'a genre wins over -Bluray (same order as the scripts)'
     Assert-Equal 'Bluray' (Get-MovieParentFolder -Bluray) 'Blu-ray movies under Bluray'

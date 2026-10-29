@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-29 - Rip Time Stats, Estimated Finish, No Doubled Year, Output Folder in the Summary
+
+### Added
+- `rip-stats.ps1`: median / average / typical range and MakeMKV / HandBrake / cyanrip phase times per content type, from every finished session in the ripdisc and ripaudio logs, then each unusually slow rip (above Q3 + 1.5 x IQR for its type) with the reasons the logs give. For albums it also reads cyanrip's own log beside the album (paranoia re-reads and fix-ups, skipped sectors, audio length, drive model). `-JsonPath` writes the data for charts. Read-only.
+- `RipStats.ps1`: the shared log parser, dot-sourced by `rip-disc.ps1` and `rip-stats.ps1`.
+- `rip-disc.ps1` logs and shows `Estimated finish: ~HH:mm (median of N past <Type> rips ...)` at the start of a rip, from past finished rips of the same type (3 or more needed). Best-effort: any failure only logs "unavailable".
+- The "Ready to rip" summary now always shows the full output folder, category included (`Output folder: F:\Surf\Musica Surfica (2008)`), instead of only the folder name when it differed from the title.
+
+### Fixed
+- A title that already ends in its year got the year twice: picking "Musica Surfica (2008)" gave the folder `Musica Surfica (2008) (2008)`, and the 2026-10-29 Jean de Florette rip went to `F:\DVDs\Jean de Florette (1986) (1986)`. `Get-MediaFolderName` now replaces a trailing `(YYYY)` instead of adding a second, and with `title-year` naming a title that already carries a year no longer asks which year.
+- Tests: new `Test-RipStats.ps1` (29, fixture logs); `Test-MovieFolderNaming.ps1` +6 for the year fix.
+
 ## 2026-10-29 - Ask for the Output Drive, Custom Genre Folders, Offline Lookups
 
 ### Added
