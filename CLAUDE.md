@@ -19,6 +19,27 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-29 (late) - Rip stats, auto drive pick (PRs #170, #171) and NEXT SESSION items (main = 35606dc, all 19 test files pass)
+
+Both PRs MERGED, **neither run on a real disc**.
+
+**PR #170 (squash e93234b):** new `rip-stats.ps1` + shared `RipStats.ps1` (per-type rip time stats and outlier reasons from `C:\Video\logs` and `C:\Music\logs` plus each album's cyanrip log; `-JsonPath` export). `rip-disc.ps1` logs "Estimated finish: ~HH:mm (median of N past <Type> rips ...)". The "Ready to rip" summary always shows the full "Output folder:" path incl. category. Fix: a title already ending "(YYYY)" got the year twice (`Get-MediaFolderName` replaces a trailing year, new `Get-TitleYear` skips the year prompt). Tests: Test-RipStats 29/29, Test-MovieFolderNaming 125/125.
+
+**PR #171 (squash 35606dc):** without `-Drive`, if the default drive holds no DVD/Blu-ray (audio CD, empty, not in MakeMKV's list) or is busy, switch to the one other free drive with a video disc, or ask if several (`Select-AutoVideoDrive`); when nothing better, name PnP-not-present optical drives (`Get-DisconnectedOpticalDrives`). Test-AutoVideoDrive 21/21.
+
+**Findings from rip-stats on real logs:** median start-to-complete: DVD movie 51 min, documentary 52 min, TV series disc 1h07m, album 30 min. About 20% cyanrip paranoia VERIFY is baseline; >1000 fix-ups = damaged disc. Every no-damage slow album was on one of the two HL-DT-ST DVDRAM GP75N drives (median 0.6x real time vs BU40N 0.47x). Logs record no disc region. Dashboard artifact (snapshot): https://claude.ai/artifact/YXUE9569xWopJPHEdZrzNf
+
+### 2026-10-29 (late) - NEXT SESSION items
+
+1. Real-disc checks for #170: Estimated finish line, Output folder line, no doubled year and no year prompt for a "Title (YYYY)" pick.
+2. Real-disc checks for #171: audio CD in the default drive + DVD elsewhere switches; two DVDs asks; the disconnected-drives line.
+3. Rename doubled-year folders/files once the encodes finish: `F:\DVDs\Jean de Florette (1986) (1986)` and `F:\Surf\Musica Surfica (2008) (2008)` (made before the fix). Ask the user first.
+4. Hardware: at 18:5x on 2026-10-29 the BU40N and the second GP75N (fw 1.02) showed Present=False in PnP (dropped off USB); only GP75N 1.01 (D:, audio CD in it) was visible. Reconnect/check the hub (see also the WD Elements/USB root-hub memory).
+5. Audio CD still in D: - rip it with ripaudio.
+6. Empty folder `C:\Users\sjbeale\source\repos\ripdisc-auto-drive` left behind (was locked by the session) - delete it.
+7. Idea not done: ripaudio could warn when a GP75N is picked for audio (slower reads).
+8. Still open from the earlier lists below (not repeated): the 2026-10-29 items 1-6 (Step 3 image deletion, continue-rip.ps1 clash/ForeignFeature guard, C# RipDisc.Core lacks #166 fixes, #166 real-disc checks, re-rip 1983 Scarface) and the 2026-10-28 items 1-6 (cable-pull test for #161, README CR lines, Write-Host spacing, real-drive tests, Slow Dance IMDb, ripaudio/ripdisc direction). Note PR #168 has since fixed the image-deletion and continue-rip risks per memory; verify before acting. The untracked `ripdisc-config.json.bak-20261029` is still undecided: do not commit, delete or move.
+
 ### 2026-10-29 - Scarface folder clash fix (PR #166, merged 7ff567a) and NEXT SESSION items (main = 7ff567a, 809/809 tests, 16 files)
 
 Trigger: the 2026-10-28 real rip of Scarface (1932), picked from the pick list (title "Scarface", year 1932), went into `F:\DVDs\Scarface` (the 1983 film's folder). Config used plain `title` folder naming and the existing-same-name-folder rule beat the year, so Step 3 saw "Feature already exists" and moved the new film into extras. Log: `C:\Video\logs\Scarface_disc1_20261028_202002.log`. The user later moved the 1932 film to `F:\DVDs\Scarface (1932)\Scarface (1932)-Feature.mp4` (1.89 GB, fine).
