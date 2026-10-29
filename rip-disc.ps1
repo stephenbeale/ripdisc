@@ -882,6 +882,47 @@ function Get-OtherDiscDrives {
     })
 }
 
+# Without -Drive, the configured default drive may hold the wrong disc (an audio CD left
+# in D: while the DVD sits in G:, 2026-10-29) or be missing from MakeMKV's list. Decides
+# what to do from the drive listing: Action 'keep' (the default holds a DVD/Blu-ray, or no
+# other free drive does), 'switch' (exactly one other free drive has a video disc - Drives[0])
+# or 'ask' (several do). -GetDiscType is a seam for tests.
+function Select-AutoVideoDrive {
+    param([object[]]$DrvLines = @(), [string]$CurrentLetter = "", [scriptblock]$GetDiscType = { param($l) Get-DiscTypeLabel -DriveLetter $l })
+    $videoTypes = @('DVD-Video', 'Blu-ray')
+    $current = "$CurrentLetter".TrimEnd(':', '\').ToUpper()
+    # Never query a drive mid-rip: a busy default counts as "no video disc to start"
+    $currentBusy = [bool](@($DrvLines) | Where-Object { $_ -and $_.Busy -and "$($_.Letter)".TrimEnd(':', '\').ToUpper() -eq $current })
+    $currentType = if ($currentBusy) { "" } else { & $GetDiscType "${current}:" }
+    $result = [pscustomobject]@{ Action = 'keep'; Drives = @(); CurrentType = "$currentType"; CurrentBusy = $currentBusy }
+    if ($videoTypes -contains $currentType) { return $result }
+    $video = @(Get-OtherDiscDrives -DrvLines $DrvLines -CurrentLetter $CurrentLetter -GetDiscType $GetDiscType |
+        Where-Object { $videoTypes -contains $_.DiscType })
+    $result.Drives = $video
+    if ($video.Count -eq 1) { $result.Action = 'switch' }
+    elseif ($video.Count -gt 1) { $result.Action = 'ask' }
+    return $result
+}
+
+# Optical drives Windows has seen before but cannot see now (unplugged, or dropped off a
+# flaky USB hub), by name. Empty when none, or when PnP cannot be queried.
+# Two drives of one model share a name, so a missing one beside a connected twin reads
+# "HL-DT-ST DVDRAM GP75N (another one)". -Devices is a seam for tests.
+function Get-DisconnectedOpticalDrives {
+    param([object[]]$Devices = $null)
+    try {
+        if ($null -eq $Devices) { $Devices = @(Get-PnpDevice -Class CDROM -ErrorAction Stop) }
+        $nameOf = { param($d) "$($d.FriendlyName)".Replace(' USB Device', '').Trim() }
+        $present = @($Devices | Where-Object { $_.Present } | ForEach-Object { & $nameOf $_ })
+        return @($Devices | Where-Object { -not $_.Present } | ForEach-Object {
+            $n = & $nameOf $_
+            if ($present -contains $n) { "$n (another one)" } else { $n }
+        } | Sort-Object -Unique)
+    } catch {
+        return @()
+    }
+}
+
 # Asks which of the other drives to use. Returns its letter ("G:"), or $null for
 # Enter / end of input (go back).
 function Read-OtherDrive {
@@ -1437,6 +1478,38 @@ if ($DriveIndex -ge 0) {
             Write-Host "  disc:$($d.Index) = $($d.Letter) - $($d.Name)$discLabel$discTypeTag$busyTag$marker" -ForegroundColor $color
         }
     }
+
+    # ========== NO -Drive: USE THE DRIVE THAT HOLDS THE DVD / BLU-RAY ==========
+    # The configured default is only a guess. When it holds no video disc (an audio CD, no
+    # disc, or it is not in MakeMKV's list at all), take the one other free drive that does,
+    # or ask when several do. An explicit -Drive / -DriveIndex is never second-guessed.
+    if (-not $PSBoundParameters.ContainsKey('Drive')) {
+        $autoDrive = Select-AutoVideoDrive -DrvLines $drvLines -CurrentLetter $driveLetter
+        $pickedLetter = $null
+        if ($autoDrive.Action -eq 'switch') {
+            $v = $autoDrive.Drives[0]
+            $why = if ($autoDrive.CurrentBusy) { " is busy with another rip" } elseif ($autoDrive.CurrentType) { " ($($autoDrive.CurrentType)) has no DVD or Blu-ray" } else { " has no DVD or Blu-ray" }
+            Write-Host "$driveLetter$why - using $($v.Letter)$(if ($v.DiscName) { " [$($v.DiscName)]" }), the only drive with a $($v.DiscType) (pass -Drive to choose)." -ForegroundColor Cyan
+            $pickedLetter = $v.Letter
+        } elseif ($autoDrive.Action -eq 'ask') {
+            Write-Host "$driveLetter$(if ($autoDrive.CurrentBusy) { ' is busy with another rip' } else { ' has no DVD or Blu-ray' }), but $($autoDrive.Drives.Count) other drives have one." -ForegroundColor Cyan
+            $pickedLetter = Read-OtherDrive -Drives $autoDrive.Drives
+        }
+        if ($pickedLetter) {
+            $driveLetter = Get-NormalizedDriveLetter $pickedLetter
+            $driveDescription = "Drive $driveLetter"
+            $hit = @($drvLines | Where-Object { $_.Letter -eq $driveLetter }) | Select-Object -First 1
+            $matchedIndex = if ($hit) { $hit.Index } else { -1 }
+        } elseif (-not ($autoDrive.CurrentType -in @('DVD-Video', 'Blu-ray'))) {
+            # Nothing better here: say so when a known drive has dropped off (flaky USB hub)
+            $missing = @(Get-DisconnectedOpticalDrives)
+            if ($missing.Count -gt 0) {
+                Write-Host "Not connected (Windows knows these drives but cannot see them now): $($missing -join ', ')" -ForegroundColor Yellow
+                Write-Host "  If the disc you want is in one of them, check its USB cable or hub, then run this again." -ForegroundColor Yellow
+            }
+        }
+    }
+
     if ($matchedIndex -ge 0) {
         $discSource = "disc:$matchedIndex"
         # See Select-MatchedDrive: without matching on Letter too, $matchedDrv.Name below could
