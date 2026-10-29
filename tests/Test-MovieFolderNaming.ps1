@@ -176,15 +176,24 @@ try {
     # ---------------------------------------------------------------------------
     Write-Host "`nNever rip a film into another film's folder (Scarface 1932, 2026-10-28)" -ForegroundColor Cyan
 
-    . ([scriptblock]::Create((Import-FunctionFromScript $configPath 'Get-ExistingFeatureFile')))
+    foreach ($name in @('Get-ExistingFeatureFile', 'Get-FeatureNamePattern', 'Get-ImageFileNames')) {
+        . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
+    }
+    $script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
+    Assert-True ((Get-Content -LiteralPath $configPath -Raw).Contains("`$script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'")) 'Load-Config.ps1 defines the same any-version pattern used here'
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath 'Get-UniqueFilePath')))
     $dvds = Join-Path $tempRoot 'clash\DVDs'
     New-Item -ItemType Directory -Path (Join-Path $dvds 'Scarface\extras') -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $dvds 'Scarface\Scarface-Feature.mp4') -Value 'x'
     Set-Content -LiteralPath (Join-Path $dvds 'Scarface\folder.jpg') -Value 'x'
-    Assert-Equal 'Scarface-Feature.mp4' (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface')) 'finds an existing Feature'
-    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface (1932)')) 'missing folder: no Feature'
-    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface') -Pattern '-Part 1\.[^.]+$') 'a Part pattern ignores a Feature'
+    $dvdPat = Get-FeatureNamePattern
+    Assert-Equal 'Scarface-Feature.mp4' (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface') -Pattern $dvdPat) 'finds an existing Feature'
+    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface (1932)') -Pattern $dvdPat) 'missing folder: no Feature'
+    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface') -Pattern (Get-FeatureNamePattern -Part 1)) 'a Part pattern ignores a Feature'
+    Assert-Equal $null (Get-ExistingFeatureFile -FolderPath (Join-Path $dvds 'Scarface') -Pattern (Get-FeatureNamePattern -Bluray)) 'a Blu-ray run does not see the DVD Feature as its own'
+    Assert-Equal '-Feature\.[^.]+$' $dvdPat 'DVD main-file pattern'
+    Assert-Equal '-Feature-BluRay\.[^.]+$' (Get-FeatureNamePattern -Bluray) 'Blu-ray main-file pattern'
+    Assert-Equal '-Part 2\.[^.]+$' (Get-FeatureNamePattern -Part 2 -Bluray) 'a documentary part is named by part, Blu-ray or not'
 
     # The real folder-choice block from rip-disc.ps1, run with prompts/lookups stubbed and
     # "exit 1" turned into a throw so a refusal can be seen
@@ -198,14 +207,16 @@ try {
     function Get-ImdbTitleCandidates { @() }
     $outputRoot = Join-Path $tempRoot 'clash'
     function Invoke-FolderChoice {
-        param([string]$T, $Pick = $null, [string]$Y = '', [int]$D = 1, [switch]$X, [string]$Naming = 'title', [string]$YearAnswer = '')
+        param([string]$T, $Pick = $null, [string]$Y = '', [int]$D = 1, [switch]$X, [string]$Naming = 'title', [string]$YearAnswer = '',
+              [switch]$BD, [switch]$Doc, [switch]$Part)
         $script:Config_MovieFolderNaming = $Naming
-        $script:DocumentaryPart = $false
+        $script:DocumentaryPart = [bool]$Part
         $script:YearAnswer = $YearAnswer
         function Read-FolderYear { param($Title, $Candidates, $Search) $script:YearAnswer }
         $title = $T; $safeTitle = $T; $picked = $Pick; $Year = $Y; $Disc = $D; $Extras = [bool]$X
         $Series = $false; $OutputDrive = $outputRoot
-        $Documentary = $Tutorial = $Fitness = $Music = $Surf = $Bluray = $false
+        $Tutorial = $Fitness = $Music = $Surf = $false
+        $Documentary = [bool]$Doc; $Bluray = [bool]$BD
         try { . $folderBlock 6>$null; return $script:MediaFolderName } catch { return "$($_.Exception.Message)" }
     }
     $pick1932 = [pscustomobject]@{ Title = 'Scarface'; Year = 1932 }
@@ -222,6 +233,76 @@ try {
     Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Scarface' -Pick $pick1932) 'both folders hold a Feature: refuses before ripping'
     Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Scarface' -Y '1932') '-Year to a folder that holds a Feature: refuses'
     Assert-Equal 'Slow Dance' (Invoke-FolderChoice -T 'Slow Dance') 'no existing folder: unchanged plain name'
+
+    Write-Host "`nBlu-ray and documentary names are left alone" -ForegroundColor Cyan
+    $docs = Join-Path $outputRoot 'Documentaries'
+    New-Item -ItemType Directory -Path (Join-Path $docs 'Cream') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $docs 'Cream\Cream-Feature.mp4') -Value 'x'
+    Assert-Equal 'Cream' (Invoke-FolderChoice -T 'Cream' -Doc -BD) 'Blu-ray version goes beside the DVD Feature (two Jellyfin versions)'
+    Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Cream' -Doc) 'a second DVD Feature is still refused'
+    New-Item -ItemType Directory -Path (Join-Path $docs 'Metal') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $docs 'Metal\Metal-Part 1.mp4') -Value 'x'
+    Assert-Equal 'Metal' (Invoke-FolderChoice -T 'Metal' -Doc -Part -D 2) 'documentary Part 2 goes beside Part 1'
+    Assert-Equal 'REFUSED' (Invoke-FolderChoice -T 'Metal' -Doc -Part -D 1) 'a second Part 1 is refused'
+    $bluray = Join-Path $outputRoot 'Bluray'
+    New-Item -ItemType Directory -Path (Join-Path $bluray 'Scarface') -Force | Out-Null
+    Assert-Equal 'Scarface' (Invoke-FolderChoice -T 'Scarface' -BD) 'Blu-ray movies use the Bluray folder; the DVDs Scarface does not clash'
+
+    # The real Step 3 main-file patterns from both scripts
+    foreach ($path in @($ripDiscPath, $continuePath)) {
+        $leaf = Split-Path $path -Leaf
+        $text = Get-Content -LiteralPath $path -Raw
+        $s = $text.IndexOf('# Naming of the main file')
+        $e = $text.IndexOf('$extrasDir = Join-Path $finalOutputDir "extras"', $s)
+        $patBlock = [scriptblock]::Create($text.Substring($s, $e - $s))
+        foreach ($case in @(@{ BD = $false; Part = $false; D = 1; Own = 'Cream-Feature.mp4'; Other = 'Cream-Feature-BluRay.mp4' },
+                            @{ BD = $true; Part = $false; D = 1; Own = 'Cream-Feature-BluRay.mp4'; Other = 'Cream-Feature.mp4' },
+                            @{ BD = $false; Part = $true; D = 2; Own = 'Metal-Part 2.mp4'; Other = 'Metal-Part 1.mp4' })) {
+            $Bluray = $case.BD; $Disc = $case.D; $script:DocumentaryPart = $case.Part
+            . $patBlock
+            $label = "$leaf $(if ($case.Part) { 'part' } elseif ($case.BD) { 'Blu-ray' } else { 'DVD' })"
+            Assert-True ($case.Own -match $featurePattern) "$label`: its own main file counts as done"
+            Assert-True ($case.Other -notmatch $featurePattern) "$label`: $($case.Other) is not taken for its own"
+            Assert-True ($case.Other -match $featureExcludePattern -and $case.Own -match $featureExcludePattern) "$label`: neither main file is ever the 'largest' pick or moved to extras"
+            Assert-True ('Cream-title_t00.mp4' -notmatch $featureExcludePattern) "$label`: ordinary encodes are still sorted"
+        }
+    }
+
+    Write-Host "`nExisting artwork is never deleted" -ForegroundColor Cyan
+    Assert-Equal 'folder.jpg' ((Get-ImageFileNames -Dir (Join-Path $dvds 'Scarface')) -join ',') 'artwork snapshot lists images only'
+    Assert-Equal 0 @(Get-ImageFileNames -Dir (Join-Path $dvds 'Nope')).Count 'missing folder: empty snapshot'
+    foreach ($path in @($ripDiscPath, $continuePath)) {
+        $text = Get-Content -LiteralPath $path -Raw
+        $leaf = Split-Path $path -Leaf
+        Assert-True ($text.Contains('$script:PreexistingImages = Get-ImageFileNames -Dir $finalOutputDir')) "$leaf`: snapshots artwork before the run"
+        Assert-True ($text.Contains('-and $script:PreexistingImages -notcontains $_.Name }')) "$leaf`: Step 3 deletes only images that are new"
+        Assert-True (([regex]::Matches($text, "Extension -match '\\.\(jpg\|jpeg\|png\|gif\|bmp\)\$' \}")).Count -eq 0) "$leaf`: no unfiltered image delete left"
+    }
+
+    Write-Host "`ncontinue-rip.ps1 never organizes into another film's folder" -ForegroundColor Cyan
+    $contText = Get-Content -LiteralPath $continuePath -Raw
+    $s = $contText.IndexOf("# ========== NEVER ORGANIZE A FILM INTO ANOTHER FILM'S FOLDER")
+    $e = $contText.IndexOf('# ========== SERIES EPISODE NUMBERING', $s)
+    $contBlock = [scriptblock]::Create($contText.Substring($s, $e - $s).Replace('exit 1', "throw 'REFUSED'"))
+    function Enable-ConsoleClose { }
+    function Write-Log { param($m) }
+    function Invoke-ContinueCheck {
+        param([string]$Dir, [int]$Step, [string]$Pattern, [string]$Answer = $null, [bool]$Main = $true)
+        $script:ReadHostAnswer = $Answer
+        function Read-Host { param($p) $script:ReadHostAnswer }
+        $finalOutputDir = $Dir; $StartFromStepNumber = $Step; $featurePattern = $Pattern; $isMainFeatureDisc = $Main
+        $script:FeatureIsOurs = $false
+        try { . $contBlock 6>$null; return "OK ours=$($script:FeatureIsOurs) images=$($script:PreexistingImages -join ',')" } catch { return "$($_.Exception.Message)" }
+    }
+    $scar = Join-Path $dvds 'Scarface'
+    Assert-Equal 'REFUSED' (Invoke-ContinueCheck -Dir $scar -Step 2 -Pattern $dvdPat) 'from Step 2: an existing Feature is another film - stop'
+    Assert-Equal 'REFUSED' (Invoke-ContinueCheck -Dir $scar -Step 3 -Pattern $dvdPat -Answer '') 'from Step 3, Enter: stop'
+    Assert-Equal 'REFUSED' (Invoke-ContinueCheck -Dir $scar -Step 3 -Pattern $dvdPat -Answer $null) 'from Step 3, no input: stop'
+    Assert-Equal 'OK ours=True images=folder.jpg' (Invoke-ContinueCheck -Dir $scar -Step 3 -Pattern $dvdPat -Answer 'y') 'from Step 3, "y" (interrupted organize): carries on, artwork kept'
+    Assert-Equal 'OK ours=False images=folder.jpg' (Invoke-ContinueCheck -Dir $scar -Step 2 -Pattern (Get-FeatureNamePattern -Bluray)) 'Blu-ray continue beside a DVD Feature: no stop'
+    Assert-Equal 'OK ours=False images=folder.jpg' (Invoke-ContinueCheck -Dir $scar -Step 4 -Pattern $dvdPat) 'Step 4 only opens the folder: no check'
+    Assert-Equal 'OK ours=False images=folder.jpg' (Invoke-ContinueCheck -Dir $scar -Step 2 -Pattern $dvdPat -Main $false) 'Disc 2 / extras into the film folder: no stop'
+    Assert-True ($contText.Contains('if ($script:ForeignFeature) {')) 'continue-rip.ps1 Step 3 never sweeps into extras beside a Feature it did not confirm'
 
     Write-Host "`nHandBrake output never overwrites" -ForegroundColor Cyan
     $enc = Join-Path $tempRoot 'enc'

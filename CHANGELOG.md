@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-29 - Keep Existing Artwork; continue-rip.ps1 Folder Check; DVD and Blu-ray Versions Side by Side
+
+### Fixed
+- Step 3 deleted every image in the output folder, so a Disc 2, `-Extras` or `continue-rip.ps1` run into an existing film's folder wiped its Jellyfin artwork (`folder.jpg`, `backdrop.jpg`...). Both scripts now take a snapshot of the images already there (`Get-ImageFileNames`) and only delete images that appeared during the run.
+- `continue-rip.ps1` now has the pre-check `rip-disc.ps1` got in #166. When a Disc 1 / documentary-part run would organize into a folder that already holds its main file, it stops before Step 2 with nothing changed (use `-Year`). From Step 3 it asks whether that file is this disc's own, from an interrupted Step 3; Enter or no input stops. Step 3 also has the same guard: it never sweeps into extras beside a Feature it did not confirm.
+- Main-file names are version-specific (`Get-FeatureNamePattern`): a DVD run looks for `-Feature`, a `-Bluray` run for `-Feature-BluRay`, a documentary part for `-Part N`. A genre folder can therefore hold the DVD and Blu-ray versions side by side (Jellyfin versions) without either blocking the other. Before, a DVD run into a folder with `-Feature-BluRay` thought its Feature already existed, and the "largest file becomes the Feature" pick could take the other version's file.
+- No existing main file (either Feature version, any `-Part N`) is ever picked as this disc's largest file or moved to extras.
+- Tests: `Test-MovieFolderNaming.ps1` 119 (Blu-ray / documentary / Step 3 patterns / artwork / continue-rip check, lifted from the real scripts; 15+ fail on the old code). `Test-DocumentaryPartNaming.ps1` updated for the moved exclude line. Full suite 859/859.
+
 ## 2026-10-29 - Never Rip a Film Into Another Film's Folder, Never Overwrite an Encode
 
 ### Fixed
