@@ -585,6 +585,7 @@ Logs include:
 - File operations
 - Error messages
 - Recovery information
+- An estimated finish time near the top (`Estimated finish: ~19:02 (median of 55 past Movie rips: 51 min, most take 37-79 min)`), from the past finished rips of the same type. It is left out when there are fewer than 3 of them.
 
 ## Error Handling
 
@@ -793,6 +794,8 @@ Remove-Item 'C:\Video\recovery_{title}_*.ps1' -Force
 - **SeriesRetroRename.ps1** - Folder discovery and numbering across discs for `rename-series.ps1`, dot-sourced, not run directly
 - **SeriesEpisodes.ps1** - Shared plain `-Series` naming logic (episode/extras classification, TheDiscDB lookup, manifest writing), dot-sourced by both `rip-disc.ps1` and `continue-rip.ps1` rather than duplicated — not run directly
 - **watch-drives.ps1** - Opens `rip-disc.ps1` in a new window when a DVD or Blu-ray is inserted. Full usage in [watch-drives.ps1](#watch-drivesps1-start-a-rip-when-a-disc-is-inserted) below.
+- **rip-stats.ps1** - How long rips take. Reads every finished session in the ripdisc logs (and ripaudio's `C:\Music\logs`, plus each album's own cyanrip log) and prints the median, average, typical range and phase times per type, then every unusually slow rip (above Q3 + 1.5 x IQR for its type) with the reasons the logs give: waiting at a prompt, many titles, a big or damaged disc, slow reads (with the drive model), other rips running at once, earlier failed attempts. Read-only. `-JsonPath <file>` also writes the data for charts; `-MusicLogDir ""` skips audio.
+- **RipStats.ps1** - The log parsing behind `rip-stats.ps1` and the start-of-rip "Estimated finish" line, dot-sourced, not run directly
 
 ### watch-drives.ps1 (start a rip when a disc is inserted)
 
