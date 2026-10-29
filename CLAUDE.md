@@ -19,6 +19,27 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-10-29 - Scarface folder clash fix (PR #166, merged 7ff567a) and NEXT SESSION items (main = 7ff567a, 809/809 tests, 16 files)
+
+Trigger: the 2026-10-28 real rip of Scarface (1932), picked from the pick list (title "Scarface", year 1932), went into `F:\DVDs\Scarface` (the 1983 film's folder). Config used plain `title` folder naming and the existing-same-name-folder rule beat the year, so Step 3 saw "Feature already exists" and moved the new film into extras. Log: `C:\Video\logs\Scarface_disc1_20261028_202002.log`. The user later moved the 1932 film to `F:\DVDs\Scarface (1932)\Scarface (1932)-Feature.mp4` (1.89 GB, fine).
+
+**The 1983 file was NOT damaged by that run:** `F:\DVDs\Scarface\Scarface-Feature.mp4` is 55 MB, has no moov atom (unplayable), is dated 13/01/2026, and the 10-28 log listed it at 0.05 GB before anything moved. It has been broken since January and needs a re-rip into `F:\DVDs\Scarface (1983)`.
+
+**PR #166 (squash 7ff567a):** pre-rip folder clash check for Disc 1 / documentary part (switches to `Title (Year)` via the picked year or the year prompt, else stops before ripping); the picked year's existing `Title (Year)` folder is preferred over a plain same-name folder; HandBrake outputs de-clashed with `Get-UniqueFilePath` (no silent `-o` overwrite; the recovery script uses the same names); Step 3 ForeignFeature guard (never sweeps into extras beside an existing Feature). New `Get-ExistingFeatureFile` in Load-Config.ps1. Test-MovieFolderNaming 69/69 (12 new tests fail on old main); full suite 809/809. **Not run on a real disc.** continue-rip.ps1 deliberately left with BaseName.mp4 encode naming (existing MP4 = already encoded, for resume).
+
+**Config:** the user's local git-ignored `ripdisc-config.json` now has `movieFolderNaming = "title-year"`. Backup is the untracked `ripdisc-config.json.bak-20261029` (user has not decided; do not commit, delete or move).
+
+**Audit answer** ("will any titles overwrite a main feature from now on?"): no code path overwrites a `-Feature` file now (Rename-Item/Move-Item never use -Force; encode outputs are raw MakeMKV names, now made unique). Remaining risks are items 1-3 below.
+
+### 2026-10-29 - NEXT SESSION items
+
+1. **Step 3 deletes every jpg/png/gif/bmp in the output folder** (rip-disc.ps1 ~line 3300, continue-rip.ps1 ~line 1499). A Disc 2 / `-Extras` / continue run into an existing film folder wipes that film's Jellyfin artwork (folder.jpg, backdrop.jpg etc.); probably why F:\DVDs\Scarface's artwork was rewritten at 21:04 on 10-28. Fix idea: only delete images not present before the run, or skip deletion when the folder pre-existed.
+2. **continue-rip.ps1 has no pre-rip folder clash check and no ForeignFeature guard**, so a continue run can still sweep a new film into extras beside an existing Feature. Its `-Force` re-encodes over its own raw names only.
+3. **C# RipDisc.Core has none of #166's fixes:** RipPipeline.cs:546 builds the HandBrake output as BaseName.mp4 with no uniqueness, and RipPipeline.cs:574 deletes outputFile on Blu-ray subtitle retry, so a pre-existing raw-named mp4 (not a Feature) could be overwritten or deleted.
+4. Real-disc checks for #166: a film whose plain folder holds a Feature gets `Title (Year)`; the refusal message when there is no year.
+5. Re-rip the 1983 Scarface into `F:\DVDs\Scarface (1983)`; delete the broken 55 MB `F:\DVDs\Scarface\Scarface-Feature.mp4` only with user confirmation.
+6. Still open from the 2026-10-28 list below: cable-pull test for #161, README CR lines, Write-Host spacing, other real-drive tests, Slow Dance IMDb question, ripaudio/ripdisc direction.
+
 ### 2026-10-28 - NEXT SESSION items (main = 9f1b240, 790/790 tests, 16 files)
 
 All PRs below are MERGED: #162 e362198, #164 c919c5b (replaced #163, auto-closed when its stacked base branch was deleted), #156 8621a43, #161 dbbb24c, #159 9f1b240. #156, #161, #159 were merged without real-hardware tests.
