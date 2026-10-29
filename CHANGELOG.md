@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-29 - Without -Drive, Use the Drive That Holds the DVD; Name Disconnected Drives
+
+### Changed
+- `rip-disc.ps1` without `-Drive`: when the configured default drive holds no DVD or Blu-ray (an audio CD, no disc, not in MakeMKV's list) or is busy with another rip, it now uses the one other free drive that does hold one ("D: (Audio CD) has no DVD or Blu-ray - using G: [JEAN_DE_FLORETTE], the only drive with a DVD-Video"), or asks when several do. Before, it always used the default and stopped at the audio-CD prompt. An explicit `-Drive` or `-DriveIndex` is never changed. A busy drive is never queried.
+
+### Added
+- When the default drive holds no video disc and nothing better is found, optical drives Windows knows but cannot see now (unplugged, or dropped off a flaky USB hub) are named, e.g. `Not connected ...: HL-DT-ST BD-RE BU40N, HL-DT-ST DVDRAM GP75N (another one)`, with a hint to check the cable or hub. Real case 2026-10-29: two of three drives had dropped off, so no other drive could be offered.
+- Tests: new `Test-AutoVideoDrive.ps1` (21).
+
 ## 2026-10-29 - Rip Time Stats, Estimated Finish, No Doubled Year, Output Folder in the Summary
 
 ### Added
