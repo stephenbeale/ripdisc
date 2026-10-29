@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-29 - Ask for the Output Drive, Custom Genre Folders, Offline Lookups
+
+### Added
+- `rip-disc.ps1` without `-OutputDrive` now asks which drive to use, listing local and removable drives with free space; Enter takes the config's `defaultOutputDrive`. Before, it silently used that default (a Jean de Florette rip went to E: unnoticed). The answer is carried into the continue-rip / ripaudio commands and the `[D]` restart.
+- `-Genre <name>` on both scripts: any genre folder (`F:\Basketball\<Title>`), laid out like `-Surf`, also with `-Series`. An unknown switch such as `-Basketball` asks whether to use it as `-Genre Basketball`; N rips into the standard DVDs/Bluray folder, A aborts. A near-miss of a real option (`-Documentry`) is pointed out first. Any other unknown argument stops the script.
+- No internet: one quick check (HTTPS to TheDiscDB / IMDb, ~3 s) before the online lookups. Offline, it says "cannot check the title online" once, skips TheDiscDB / TMDb / IMDb (the disc hash is still read), drops `[R] Search again`, and the year prompt only takes a typed year or Enter.
+
+### Fixed
+- "Discovered Metadata" said `Type: Movie` for `-Documentary` (and every other genre) runs; it only knew TV Series and Movie. All content-type labels now come from one `Get-ContentTypeLabel`. The output folder was already right.
+
 ## 2026-10-29 - Keep Existing Artwork; continue-rip.ps1 Folder Check; DVD and Blu-ray Versions Side by Side
 
 ### Fixed

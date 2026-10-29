@@ -122,14 +122,145 @@ $script:Config_MovieFolderNaming = if ($cfg -and "$($cfg.movieFolderNaming)" -in
 # ========== FOLDER NAMING HELPERS (shared by rip-disc.ps1 and continue-rip.ps1) ==========
 # Folder under the output drive that holds a movie / genre film.
 function Get-MovieParentFolder {
-    param([switch]$Documentary, [switch]$Tutorial, [switch]$Fitness, [switch]$Music, [switch]$Surf, [switch]$Bluray)
+    param([switch]$Documentary, [switch]$Tutorial, [switch]$Fitness, [switch]$Music, [switch]$Surf, [string]$Genre = "", [switch]$Bluray)
     if ($Documentary) { return 'Documentaries' }
     if ($Tutorial) { return 'Tutorials' }
     if ($Fitness) { return 'Fitness' }
     if ($Music) { return 'Music' }
     if ($Surf) { return 'Surf' }
+    if ($Genre) { return $Genre }
     if ($Bluray) { return 'Bluray' }
     return 'DVDs'
+}
+
+# "Documentary", "Surf Series", "Basketball", "TV Series", "Blu-ray" or "Movie" - the one
+# content-type label for console, log and summary lines. $GenreLabel is $script:GenreLabel
+# (a built-in genre or the -Genre folder name).
+function Get-ContentTypeLabel {
+    param([switch]$IsGenreSeries, [string]$GenreLabel = "", [switch]$Series, [switch]$Bluray)
+    if ($IsGenreSeries) { return "$GenreLabel Series" }
+    if ($GenreLabel) { return $GenreLabel }
+    if ($Series) { return 'TV Series' }
+    if ($Bluray) { return 'Blu-ray' }
+    return 'Movie'
+}
+
+# A -Genre folder name must be one plain folder: no path separators, wildcards or other
+# characters Windows rejects, and not "." / "..".
+function Test-GenreFolderName {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name.Trim() -in @('.', '..')) { return $false }
+    if ($Name.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) { return $false }
+    return $Name -notmatch '[\[\]*?]'
+}
+
+# Is the internet reachable? Probes HTTPS on the lookup hosts with a short timeout, so an
+# offline machine costs ~3 s once instead of a timeout per lookup. Tests replace this.
+function Test-InternetConnection {
+    param([string[]]$Hosts = @('thediscdb.com', 'v2.sg.media-imdb.com'), [int]$TimeoutMs = 3000)
+    try {
+        if (-not [System.Net.NetworkInformation.NetworkInterface]::GetIsNetworkAvailable()) { return $false }
+    } catch { }
+    foreach ($h in $Hosts) {
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            if ($client.ConnectAsync($h, 443).Wait($TimeoutMs) -and $client.Connected) { return $true }
+        } catch {
+        } finally {
+            $client.Close()
+        }
+    }
+    return $false
+}
+
+# Drives a rip can be written to (local and removable disks with a letter), for the
+# output-drive prompt. Each: Letter ("F:"), Label, FreeGB. Tests pass their own list.
+function Get-OutputDriveChoices {
+    try {
+        return @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType = 2 OR DriveType = 3' -ErrorAction Stop |
+            Sort-Object DeviceID | ForEach-Object {
+                [pscustomobject]@{ Letter = "$($_.DeviceID)"; Label = "$($_.VolumeName)"; FreeGB = [math]::Round(([double]$_.FreeSpace) / 1GB, 0) }
+            })
+    } catch {
+        return @()
+    }
+}
+
+# Asks which drive the rip goes to when -OutputDrive was not given. Enter (or end of
+# input) takes $Default, the config's defaultOutputDrive. Returns e.g. "F:".
+function Read-OutputDrive {
+    param([string]$Default, [object[]]$Drives = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    $Default = "$Default".TrimEnd('\')
+    if ($Default -notmatch ':$') { $Default = "${Default}:" }
+    $Default = $Default.ToUpper()
+    Write-Host "`nNo -OutputDrive given - where should the rip go?" -ForegroundColor Cyan
+    foreach ($d in $Drives) {
+        $mark = if ($d.Letter -ieq $Default) { "  (default)" } else { "" }
+        Write-Host ("  {0} {1,-20} {2,6} GB free{3}" -f $d.Letter, $(if ($d.Label) { $d.Label } else { '(no label)' }), $d.FreeGB, $mark) -ForegroundColor White
+    }
+    while ($true) {
+        $answer = & $ReadInput "Output drive letter (Enter = $Default)"
+        if ($null -eq $answer -or "$answer".Trim() -eq '') { return $Default }
+        $letter = "$answer".Trim().TrimEnd('\').TrimEnd(':').ToUpper()
+        if ($letter -match '^[A-Z]$') {
+            $letter = "${letter}:"
+            if ($Drives.Count -eq 0 -or @($Drives | Where-Object { $_.Letter -ieq $letter }).Count -gt 0) { return $letter }
+        }
+        Write-Host "Not an output drive: '$answer'. Type a letter from the list, or Enter for $Default." -ForegroundColor Red
+    }
+}
+
+# Arguments the parameter list did not take ($UnknownArgs). A single bare switch such as
+# -Basketball is offered as a new genre folder (<drive>\Basketball\<Title>); the user
+# confirms, or says no and the rip goes to the standard folder. Returns
+# @{ Genre = "Basketball" | ""; Error = "" | message }. $KnownParams lists the real
+# parameter names, so a near-miss typo (-Documentry) is pointed out before asking.
+function Resolve-CustomGenreArg {
+    param([object[]]$Arguments = @(), [string]$OutputDrive, [string[]]$KnownParams = @(),
+          [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    $result = @{ Genre = ""; Error = "" }
+    $Arguments = @($Arguments | Where-Object { $null -ne $_ -and "$_" -ne '' })
+    if ($Arguments.Count -eq 0) { return $result }
+    $switches = @($Arguments | Where-Object { "$_" -match '^-[A-Za-z][A-Za-z0-9]*:?$' })
+    if ($switches.Count -ne 1 -or $Arguments.Count -ne 1) {
+        $result.Error = "Unknown argument(s): $($Arguments -join ' '). Only one new folder switch (e.g. -Basketball) can be given, with no value after it."
+        return $result
+    }
+    $name = "$($switches[0])".TrimStart('-').TrimEnd(':')
+    $near = @($KnownParams | Where-Object { $_ -and (Get-EditDistance $_.ToLower() $name.ToLower()) -le 2 })
+    if ($near.Count -gt 0) {
+        Write-Host "`n-$name is not a rip-disc.ps1 option - did you mean -$($near[0])?" -ForegroundColor Yellow
+    }
+    $drive = "$OutputDrive".TrimEnd('\')
+    Write-Host "`n-$name is not a built-in type. Treat it as a new folder?" -ForegroundColor Cyan
+    Write-Host "  [Y] Yes - rip into $drive\$name\<Title>" -ForegroundColor White
+    Write-Host "  [N] No  - rip into the standard folder ($drive\DVDs or $drive\Bluray)" -ForegroundColor White
+    Write-Host "  [A] Abort" -ForegroundColor White
+    while ($true) {
+        $answer = & $ReadInput "Use $drive\$name? (Y/N/A, Enter = Y)"
+        if ($null -eq $answer) { return $result }
+        switch ("$answer".Trim().ToUpper()) {
+            { $_ -in @('Y', '') } { $result.Genre = $name; return $result }
+            'N' { return $result }
+            'A' { $result.Error = "Aborted."; return $result }
+            default { Write-Host "Enter Y, N or A." -ForegroundColor Red }
+        }
+    }
+}
+
+# Levenshtein distance, for spotting a mistyped switch name.
+function Get-EditDistance {
+    param([string]$A, [string]$B)
+    $prev = 0..$B.Length
+    for ($i = 1; $i -le $A.Length; $i++) {
+        $cur = @($i) + @(0) * $B.Length
+        for ($j = 1; $j -le $B.Length; $j++) {
+            $cost = if ($A[$i - 1] -eq $B[$j - 1]) { 0 } else { 1 }
+            $cur[$j] = [math]::Min([math]::Min($prev[$j] + 1, $cur[$j - 1] + 1), $prev[$j - 1] + $cost)
+        }
+        $prev = $cur
+    }
+    return $prev[$B.Length]
 }
 
 # "Slow Dance" + "2014" -> "Slow Dance (2014)". No valid 4-digit year, no change.

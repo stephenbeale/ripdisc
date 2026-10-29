@@ -98,6 +98,11 @@
     [ValidatePattern('^(\d{4})?$')]
     [string]$Year = "",
 
+    # Folder for a genre with no switch of its own (<drive>\<Genre>\<Title>), as printed
+    # in rip-disc.ps1's retry command after -Genre / a -Basketball style switch.
+    [Parameter()]
+    [string]$Genre = "",
+
     [Parameter()]
     [switch]$Help
 )
@@ -118,8 +123,8 @@ $script:StartEpisodeExplicit = $PSBoundParameters.ContainsKey('StartEpisode')
 # See rip-disc.ps1 for the full explanation. Mirrored here so continuing a genre
 # series rip (e.g. resuming Step 3 after an interrupted encode) organizes files
 # the same way the original rip-disc.ps1 run would have.
-$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
-$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Genre) { $Genre } else { $null }
+$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Genre) { $Genre } else { $null }
 $script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
 
 # -Documentary together with an EXPLICIT -Disc N (no -Series, no -Extras) means one part of a
@@ -202,7 +207,7 @@ function Show-StepBanner {
 
 
 function Get-TitleSummary {
-    $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+    $contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -304,6 +309,7 @@ function Show-Usage {
     Write-Host "  -Series -Season <n> TV series mode" -ForegroundColor White
     Write-Host "  -Bluray             Blu-ray (subtitle handling + Bluray folder)" -ForegroundColor White
     Write-Host "  -Documentary -Tutorial -Fitness -Music -Surf   Genre folders" -ForegroundColor White
+    Write-Host "  -Genre <name>       Any other genre folder (<drive>\<name>\<Title>)" -ForegroundColor White
     Write-Host "  -Force              Re-encode files that already have an MP4" -ForegroundColor White
     Write-Host "                      (by default those are skipped)" -ForegroundColor Gray
     Write-Host "  -DiscDbHash <hash>  TheDiscDB disc hash from the original rip (series naming)" -ForegroundColor White
@@ -477,7 +483,7 @@ if ($needsPrompting) {
     }
 
     # Content type: only ask if no type switch was supplied.
-    $anyTypeSwitch = $Series -or $Bluray -or $Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf
+    $anyTypeSwitch = $Series -or $Bluray -or $Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf -or $Genre
     if (-not $anyTypeSwitch) {
         $chosenType = Read-ContentTypeInteractive
         switch ($chosenType) {
@@ -722,7 +728,7 @@ if (-not $Series) {
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $Year
     } else {
         $movieParentDir = Join-Path (Get-NormalizedDriveLetter $OutputDrive) (Get-MovieParentFolder -Documentary:$Documentary `
-            -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Bluray:$Bluray)
+            -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Genre $Genre -Bluray:$Bluray)
         $existingFolder = Find-ExistingMediaFolder -ParentDir $movieParentDir -SafeTitle $safeTitle
         if ($existingFolder) { $script:MediaFolderName = $existingFolder }
     }
@@ -762,6 +768,8 @@ if ($script:IsGenreSeries) {
     $finalOutputDir = "$outputDriveLetter\Music\$($script:MediaFolderName)"
 } elseif ($Surf) {
     $finalOutputDir = "$outputDriveLetter\Surf\$($script:MediaFolderName)"
+} elseif ($Genre) {
+    $finalOutputDir = "$outputDriveLetter\$Genre\$($script:MediaFolderName)"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$safeTitle"
     if ($Season -gt 0) {
@@ -821,7 +829,7 @@ $script:LogFile = Join-Path $logDir "${safeTitle}_${logDiscLabel}_continue_${log
 Write-Log "========== CONTINUE SESSION STARTED =========="
 Write-Log "Title: $title"
 Write-Log "Continue from: Step $StartFromStepNumber ($FromStep)"
-Write-Log "Type: $(if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
+Write-Log "Type: $(Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray)"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -889,7 +897,7 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+$contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
 # Re-evaluate: the interactive prompts above can set -Documentary/-Series after the early definition.
 $script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
 $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
@@ -935,6 +943,7 @@ function Get-EquivalentCommand {
     if ($Fitness)     { $parts += "-Fitness" }
     if ($Music)       { $parts += "-Music" }
     if ($Surf)        { $parts += "-Surf" }
+    if ($Genre)       { $parts += "-Genre `"$Genre`"" }
     if ($Force)       { $parts += "-Force" }
     if ($StartEpisode -ne 1 -or $script:StartEpisodeExplicit) { $parts += "-StartEpisode $StartEpisode" }
     if ($NoDiscDb)    { $parts += "-NoDiscDb" } elseif ($DiscDbHash) { $parts += "-DiscDbHash $DiscDbHash" }

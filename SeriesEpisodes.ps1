@@ -1283,7 +1283,10 @@ function Find-DiscDbDisc {
 # Pass -ContentHash when it is already known (continue-rip.ps1), otherwise -DriveRoot.
 # Nothing here throws; every failure falls back to TMDb / median with one line shown.
 function Get-SeriesDiscDbLookup {
-    param([string]$DriveRoot = "", [string]$ContentHash = "", [switch]$Disabled, [string]$NoDriveReason = "")
+    param([string]$DriveRoot = "", [string]$ContentHash = "", [switch]$Disabled, [string]$NoDriveReason = "",
+          # No internet (rip-disc.ps1's Test-OnlineOnce): the hash is still read, for the
+          # continue-rip.ps1 command, but nothing is asked of TheDiscDB.
+          [switch]$Offline)
 
     $result = [pscustomobject]@{ ContentHash = "$ContentHash".Trim().ToUpper(); Disc = $null; Message = "" }
 
@@ -1308,6 +1311,9 @@ function Get-SeriesDiscDbLookup {
                 $result.ContentHash = ""
             }
 
+            if (-not $result.Message -and $Offline) {
+                $result.Message = "TheDiscDB: no internet connection - cannot check this disc online; using TMDb / title lengths"
+            }
             if (-not $result.Message) {
                 $disc = Find-DiscDbDisc -ContentHash $result.ContentHash
                 if ($disc) {

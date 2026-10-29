@@ -78,7 +78,18 @@
     # (and may ask). Series folders never get a year.
     [Parameter()]
     [ValidatePattern('^(\d{4})?$')]
-    [string]$Year = ""
+    [string]$Year = "",
+
+    # Folder for a genre with no switch of its own: -Genre Basketball rips into
+    # <drive>\Basketball\<Title>, like -Surf does for Surf. An unknown switch such as
+    # -Basketball is offered as this (see Resolve-CustomGenreArg in Load-Config.ps1).
+    [Parameter()]
+    [string]$Genre = "",
+
+    # Whatever the parameters above did not take. A lone -Word is offered as a new
+    # -Genre folder; anything else stops the script with an error.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [object[]]$UnknownArgs = @()
 )
 
 # ========== LOAD CONFIG ==========
@@ -104,7 +115,34 @@ $script:LaunchParams = @{} + $PSBoundParameters
 # decides both whether to prompt and whether the continue-rip.ps1 retry command carries it.
 $script:StartEpisodeExplicit = $PSBoundParameters.ContainsKey('StartEpisode')
 if (-not $PSBoundParameters.ContainsKey('Drive')) { $Drive = $script:Config_DefaultInputDrive }
-if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script:Config_DefaultOutputDrive }
+# No -OutputDrive: ask, with the config default on Enter, rather than silently using it.
+# The answer counts as explicit from here on (continue-rip / ripaudio commands, [D] restart).
+if (-not $PSBoundParameters.ContainsKey('OutputDrive')) {
+    $OutputDrive = Read-OutputDrive -Default $script:Config_DefaultOutputDrive -Drives (Get-OutputDriveChoices)
+    $script:OutputDriveExplicit = $true
+    $script:LaunchParams['OutputDrive'] = $OutputDrive
+}
+
+# ========== NEW GENRE FOLDER (-Basketball) ==========
+if ($UnknownArgs.Count -gt 0) {
+    $genreArg = Resolve-CustomGenreArg -Arguments $UnknownArgs -OutputDrive ("$OutputDrive".TrimEnd('\').TrimEnd(':').ToUpper() + ':') `
+        -KnownParams @($MyInvocation.MyCommand.Parameters.Keys)
+    if ($genreArg.Error -eq 'Aborted.') { Write-Host "Aborted." -ForegroundColor Yellow; exit 0 }
+    if ($genreArg.Error) { Write-Host "ERROR: $($genreArg.Error)" -ForegroundColor Red; exit 1 }
+    $Genre = $genreArg.Genre
+    [void]$script:LaunchParams.Remove('UnknownArgs')
+    if ($Genre) { $script:LaunchParams['Genre'] = $Genre }
+}
+if ($Genre) {
+    if (-not (Test-GenreFolderName $Genre)) {
+        Write-Host "ERROR: -Genre '$Genre' is not a usable folder name." -ForegroundColor Red
+        exit 1
+    }
+    if ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
+        Write-Host "ERROR: -Genre $Genre cannot be combined with -Documentary, -Tutorial, -Fitness, -Music or -Surf." -ForegroundColor Red
+        exit 1
+    }
+}
 
 # ========== GENRE SERIES (e.g. multi-disc documentary box sets) ==========
 # -Series combined with a genre flag (-Documentary etc.) means a multi-part,
@@ -114,8 +152,8 @@ if (-not $PSBoundParameters.ContainsKey('OutputDrive')) { $OutputDrive = $script
 # already has (see $makemkvOutputDir and the Step 2 composite check below),
 # it only changes where files land and how they're named in Step 3.
 # Plain -Series (fiction TV, no genre flag) is completely unaffected.
-$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
-$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } else { $null }
+$script:GenreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Genre) { $Genre } else { $null }
+$script:GenreFolder = if ($Documentary) { "Documentaries" } elseif ($Tutorial) { "Tutorials" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Genre) { $Genre } else { $null }
 $script:IsGenreSeries = $Series -and ($null -ne $script:GenreLabel)
 
 # -Documentary together with an EXPLICIT -Disc N (no -Series, no -Extras) means one part of a
@@ -153,7 +191,7 @@ function Get-RemainingSteps {
 }
 
 function Get-TitleSummary {
-    $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+    $contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
     $summary = "$contentType`: $title"
     if ($Series) {
         if ($Season -gt 0) {
@@ -1141,6 +1179,25 @@ function Read-TitleChoice {
     }
 }
 
+# Online lookups (TheDiscDB / TMDb / IMDb) need the internet. Checked once per run; when
+# it is down, says so once and the lookups are skipped instead of each timing out.
+function Test-OnlineOnce {
+    if ($null -eq $script:IsOnline) {
+        $script:IsOnline = [bool](Test-InternetConnection)
+        if (-not $script:IsOnline) {
+            Write-Host "No internet connection - cannot check the title online. Carrying on without online lookups." -ForegroundColor Yellow
+        }
+    }
+    return $script:IsOnline
+}
+
+# Year search for Read-FolderYear (TMDb + IMDb), or $null when offline so the prompt
+# only takes a typed year or Enter.
+function Get-YearLookup {
+    if (-not (Test-OnlineOnce)) { return $null }
+    return { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+}
+
 # The year for a "Title (Year)" folder when nothing has supplied one yet. Lists the search
 # hits that have a year; a row number takes that row's year, a typed 4-digit year is used
 # as-is, R searches again. Enter / S / end of input mean "no year" - never an abort, the
@@ -1515,21 +1572,24 @@ if ($title -eq "") {
     # $script:DiscDbLookup so plain -Series naming below reuses it instead of asking twice.
     # Same -DriveIndex caveat as there: only trust the letter when -Drive was given.
     $discDbDriveRoot = if ($DriveIndex -ge 0 -and -not $PSBoundParameters.ContainsKey('Drive')) { "" } else { "$driveLetter\" }
-    $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
+    $online = Test-OnlineOnce
+    $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb -Offline:(-not $online) `
         -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
     $discDbDisc = $script:DiscDbLookup.Disc
 
     # TMDb / IMDb: search on the label, or on TheDiscDB's title when the label is generic
     $searchTitle = if ($rawLabel -and -not (Test-GenericDiscLabel $rawLabel)) { $cleanResult.CleanedTitle } elseif ($discDbDisc) { $discDbDisc.MediaTitle } else { "" }
-    $tmdbCandidates = if ($searchTitle) { Get-TMDbTitleCandidates -SearchTitle $searchTitle } else { @() }
-    $imdbCandidates = if ($searchTitle) { Get-ImdbTitleCandidates -SearchTitle $searchTitle } else { @() }
-    if (-not $searchTitle) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
+    $tmdbCandidates = if ($searchTitle -and $online) { Get-TMDbTitleCandidates -SearchTitle $searchTitle } else { @() }
+    $imdbCandidates = if ($searchTitle -and $online) { Get-ImdbTitleCandidates -SearchTitle $searchTitle } else { @() }
+    if (-not $searchTitle -and $online) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
 
     $candidates = Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates
     # [R] in the pick list re-runs the online searches with the user's own text (adding
-    # the year often finds what IMDb's short popularity-ranked list left out)
-    $searchAgain = { param($q) Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc `
-        -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+    # the year often finds what IMDb's short popularity-ranked list left out). Offline: no [R].
+    $searchAgain = if ($online) {
+        { param($q) Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc `
+            -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+    } else { $null }
     $otherDrives = if ($drvLines) { Get-OtherDiscDrives -DrvLines $drvLines -CurrentLetter $driveLetter } else { @() }
     $picked = Read-TitleChoice -Candidates $candidates -Search $searchAgain -OtherDrives $otherDrives
     if ($picked -and $picked.Source -eq 'switch-drive') {
@@ -1569,7 +1629,7 @@ if ($title -eq "") {
     if ($picked.ImdbId) { Write-Host "  IMDb:   $($picked.ImdbId) (https://www.imdb.com/title/$($picked.ImdbId)/)" -ForegroundColor White }
     if ($picked.Description) { Write-Host "  About:  $($picked.Description)" -ForegroundColor White }
     Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
-    Write-Host "  Type:   $(if ($Series) { 'TV Series' } else { 'Movie' })" -ForegroundColor White
+    Write-Host "  Type:   $(Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray)" -ForegroundColor White
     if ($Series) {
         if ($Season -gt 0) {
             Write-Host "  Season: $Season" -ForegroundColor White
@@ -1682,7 +1742,7 @@ $script:MediaFolderName = $safeTitle
 $script:FolderYear = ""
 if (-not $Series) {
     $movieParentDir = Join-Path (Get-NormalizedDriveLetter $OutputDrive) (Get-MovieParentFolder -Documentary:$Documentary `
-        -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Bluray:$Bluray)
+        -Tutorial:$Tutorial -Fitness:$Fitness -Music:$Music -Surf:$Surf -Genre $Genre -Bluray:$Bluray)
     $existingFolder = Find-ExistingMediaFolder -ParentDir $movieParentDir -SafeTitle $safeTitle
     # The discovery pick's year only counts if the title was not edited afterwards
     $pickYear = if ($picked -and $picked.Year -and $picked.Title -eq $title) { "$($picked.Year)" } else { "" }
@@ -1702,8 +1762,8 @@ if (-not $Series) {
         if ($pickYear) {
             $script:FolderYear = $pickYear
         } else {
-            $yearLookup = { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
-            $chosenYear = Read-FolderYear -Title $title -Candidates @(& $yearLookup $title) -Search $yearLookup
+            $yearLookup = Get-YearLookup
+            $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup
             if ($chosenYear) { $script:FolderYear = $chosenYear }
         }
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear
@@ -1720,8 +1780,8 @@ if (-not $Series) {
             Write-Host "`n$movieParentDir\$($script:MediaFolderName) already holds $clashFile - this disc will NOT be put there." -ForegroundColor Yellow
             $altYear = if ($Year) { "" } elseif ($pickYear -and $script:MediaFolderName -ne (Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear)) { $pickYear } else { "" }
             if (-not $altYear -and -not $Year) {
-                $yearLookup = { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
-                $altYear = Read-FolderYear -Title $title -Candidates @(& $yearLookup $title) -Search $yearLookup
+                $yearLookup = Get-YearLookup
+                $altYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup
             }
             $altName = if ($altYear) { Get-MediaFolderName -SafeTitle $safeTitle -Year $altYear } else { "" }
             if (-not $altName -or $altName -eq $script:MediaFolderName -or
@@ -1753,7 +1813,7 @@ if ($Series -and -not $script:IsGenreSeries) {
     # wrong disc. Only trust the letter when -Drive was given or no index was used.
     $discDbDriveRoot = if ($DriveIndex -ge 0 -and -not $PSBoundParameters.ContainsKey('Drive')) { "" } else { "$driveLetter\" }
     if (-not $script:DiscDbLookup) {
-        $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb `
+        $script:DiscDbLookup = Get-SeriesDiscDbLookup -DriveRoot $discDbDriveRoot -Disabled:$NoDiscDb -Offline:(-not (Test-OnlineOnce)) `
             -NoDriveReason "-DriveIndex used without -Drive, so the disc's drive letter is unknown (add -Drive X: to enable)"
     }
 
@@ -1796,8 +1856,8 @@ if ($script:IsGenreSeries) {
     } else {
         Write-Host "Type: $($script:GenreLabel) Series - Disc $Disc" -ForegroundColor White
     }
-} elseif ($Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf) {
-    $genreLabel = if ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } else { "Surf" }
+} elseif ($script:GenreLabel) {
+    $genreLabel = $script:GenreLabel
     $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
     Write-Host "Type: $genreLabel - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
 } elseif ($Series) {
@@ -1892,6 +1952,8 @@ if ($script:IsGenreSeries) {
     $finalOutputDir = "$outputDriveLetter\Music\$($script:MediaFolderName)"
 } elseif ($Surf) {
     $finalOutputDir = "$outputDriveLetter\Surf\$($script:MediaFolderName)"
+} elseif ($Genre) {
+    $finalOutputDir = "$outputDriveLetter\$Genre\$($script:MediaFolderName)"
 } elseif ($Series) {
     $seriesBaseDir = "$outputDriveLetter\Series\$safeTitle"
     if ($Season -gt 0) {
@@ -1964,7 +2026,7 @@ $script:LogFile = Join-Path $logDir "${safeTitle}_${logDiscLabel}_${logTimestamp
 
 Write-Log "========== RIP SESSION STARTED =========="
 Write-Log "Title: $title"
-Write-Log "Type: $(if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { 'Documentary' } elseif ($Tutorial) { 'Tutorial' } elseif ($Fitness) { 'Fitness' } elseif ($Music) { 'Music' } elseif ($Surf) { 'Surf' } elseif ($Series) { 'TV Series' } elseif ($Bluray) { 'Blu-ray' } else { 'Movie' })"
+Write-Log "Type: $(Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray)"
 Write-Log "Disc: $Disc$(if ($Extras) { ' (Extras)' } elseif ($script:DocumentaryPart) { " (Part $Disc)" } elseif ($Disc -gt 1 -and -not $Series) { ' (Special Features)' })"
 if ($Series -and $Season -gt 0) {
     Write-Log "Season: $Season"
@@ -2013,6 +2075,7 @@ function Get-ContinueRipCommand {
         [switch]$Fitness,
         [switch]$Music,
         [switch]$Surf,
+        [string]$Genre = "",
         [int]$StartEpisode,
         [string[]]$EpisodeNames,
         [switch]$NoSound,
@@ -2054,6 +2117,7 @@ function Get-ContinueRipCommand {
     if ($Fitness) { $parts.Add("-Fitness") }
     if ($Music) { $parts.Add("-Music") }
     if ($Surf) { $parts.Add("-Surf") }
+    if ($Genre) { $parts.Add("-Genre $(& $quote $Genre)") }
     if ($StartEpisode -ne 1 -or $StartEpisodeExplicit) { $parts.Add("-StartEpisode $StartEpisode") }
     if ($EpisodeNames -and $EpisodeNames.Count -gt 0) {
         $quotedNames = $EpisodeNames | ForEach-Object { & $quote $_ }
@@ -2178,7 +2242,7 @@ function Stop-WithError {
             -Series:$Series -Season $Season -Disc $Disc `
             -OutputDrive $(if ($script:OutputDriveExplicit) { $outputDriveLetter } else { $null }) `
             -Extras:$Extras -Bluray:$Bluray -Documentary:$Documentary -Tutorial:$Tutorial `
-            -Fitness:$Fitness -Music:$Music -Surf:$Surf -StartEpisode $StartEpisode `
+            -Fitness:$Fitness -Music:$Music -Surf:$Surf -Genre $Genre -StartEpisode $StartEpisode `
             -EpisodeNames $EpisodeNames -NoSound:$NoSound -StartEpisodeExplicit:$script:StartEpisodeExplicit `
             -DiscDbHash $(if ($script:DiscDbLookup) { $script:DiscDbLookup.ContentHash } else { "" }) -NoDiscDb:$NoDiscDb `
             -Year $script:FolderYear
@@ -2218,7 +2282,7 @@ function Stop-WithError {
     exit 1
 }
 
-$contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } elseif ($Documentary) { "Documentary" } elseif ($Tutorial) { "Tutorial" } elseif ($Fitness) { "Fitness" } elseif ($Music) { "Music" } elseif ($Surf) { "Surf" } elseif ($Series) { "TV Series" } elseif ($Bluray) { "Blu-ray" } else { "Movie" }
+$contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
 # Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 # unless combined with -Series (genre series / box sets), which are organized like Series: every file is an episode, none is "the Feature"
 $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
