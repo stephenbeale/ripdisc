@@ -894,17 +894,19 @@ $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } els
 $script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
 $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
 # Naming of the main file: "<Title>-Feature[-BluRay]" normally, "<Title>-Part N" for a documentary part.
-# $featureExcludePattern keeps earlier parts (same folder) from being picked as this disc's largest
-# file or swept into extras; (?!) never matches, so it is inert for ordinary movies.
+# Same rules as rip-disc.ps1: $featurePattern is THIS run's name only (DVD and Blu-ray versions can
+# share a genre folder); $featureExcludePattern keeps every existing main file out of the largest-file
+# pick and out of extras.
 if ($script:DocumentaryPart) {
-    $featurePattern = "-Part $Disc\.[^.]+$"
+    $featurePattern = Get-FeatureNamePattern -Part $Disc
     $featureSuffix = "-Part $Disc"
-    $featureExcludePattern = '-Part \d+\.[^.]+$'
 } else {
-    $featurePattern = '-Feature(-BluRay)?\.[^.]+$'
+    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray
     $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
-    $featureExcludePattern = '(?!)'
 }
+$featureExcludePattern = '-Part \d+\.[^.]+$|' + $script:AnyFeaturePattern
+$script:ForeignFeature = $false
+$script:FeatureIsOurs = $false
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # ========== WINDOW TITLE ==========
@@ -1134,6 +1136,37 @@ while ($true) {
     $FromStep = $newKey
     Write-Log "Starting step changed at the prompt to: $FromStep"
 }
+
+# ========== NEVER ORGANIZE A FILM INTO ANOTHER FILM'S FOLDER ==========
+# Same rule as rip-disc.ps1's pre-rip check, by this run's own main-file name (so a DVD
+# "-Feature" never blocks adding the "-Feature-BluRay" version, or Part 1 blocks Part 2).
+# Before Step 3 has run, a main file already there is another film's. From Step 3 it may
+# be this disc's own, renamed by an interrupted Step 3, so ask (no answer = stop).
+if ($isMainFeatureDisc -and $StartFromStepNumber -le 3) {
+    $clashFile = Get-ExistingFeatureFile -FolderPath $finalOutputDir -Pattern $featurePattern
+    if ($clashFile) {
+        Write-Host "`n$finalOutputDir already holds $clashFile." -ForegroundColor Yellow
+        if ($StartFromStepNumber -eq 3) {
+            $answer = Read-Host "Is that THIS disc's film, renamed by an earlier, interrupted Step 3? [y/N]"
+            $script:FeatureIsOurs = "$answer".Trim() -match '^(y|yes)$'
+        }
+        if (-not $script:FeatureIsOurs) {
+            Write-Host "ERROR: not putting this disc into another film's folder - nothing was changed." -ForegroundColor Red
+            Write-Host "  Run again with -Year <year> so it gets its own `"Title (Year)`" folder, or use a different -title." -ForegroundColor Yellow
+            if ($StartFromStepNumber -eq 3) {
+                Write-Host "  This disc's encoded files are already in that folder, unsorted - move them to the new folder first." -ForegroundColor Yellow
+            }
+            Write-Log "Stopped: $finalOutputDir already holds $clashFile (another film)"
+            Enable-ConsoleClose
+            exit 1
+        }
+        Write-Log "Existing $clashFile confirmed as this disc's own (interrupted Step 3)"
+    }
+}
+
+# Artwork already in the output folder (an existing film's Jellyfin images) - Step 3
+# keeps these and only deletes images that turn up from here on
+$script:PreexistingImages = Get-ImageFileNames -Dir $finalOutputDir
 
 # ========== SERIES EPISODE NUMBERING (plain -Series only) ==========
 # Same rule as rip-disc.ps1: asked up front (before any encode), only for Disc 2+ and
@@ -1494,9 +1527,12 @@ if ($StartFromStepNumber -le 3) {
 
     Write-Host "Current directory: $finalOutputDir" -ForegroundColor Yellow
 
-    # Delete image files
+    # Delete image files that appeared since this run started; artwork already here is kept
     Write-Host "`nDeleting image files..." -ForegroundColor Yellow
-    $imageFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(jpg|jpeg|png|gif|bmp)$' }
+    $imageFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(jpg|jpeg|png|gif|bmp)$' -and $script:PreexistingImages -notcontains $_.Name }
+    if ($script:PreexistingImages.Count -gt 0) {
+        Write-Host "Keeping $($script:PreexistingImages.Count) existing artwork file(s)" -ForegroundColor Gray
+    }
     if ($imageFiles) {
         Write-Host "Image files to delete: $($imageFiles.Count)" -ForegroundColor White
         $imageFiles | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
@@ -1764,15 +1800,23 @@ if ($StartFromStepNumber -le 3) {
                     Write-Host "Feature file renamed successfully" -ForegroundColor Green
                     Write-Log "Feature file: $($largestFile.Name) -> $newName ($([math]::Round($largestFile.Length/1GB, 2)) GB)"
                 }
-            } else {
+            } elseif ($script:FeatureIsOurs) {
                 Write-Host "Feature file already exists: $($featureExists.Name)" -ForegroundColor Gray
+            } else {
+                # Not there at the pre-check, so another run put it here meanwhile: never sweep
+                # this disc's files into extras beside another film's Feature
+                $script:ForeignFeature = $true
+                Write-Host "WARNING: $($featureExists.Name) was already in this folder - this disc's files are left unsorted here for you to check" -ForegroundColor Red
+                Write-Log "WARNING: existing feature $($featureExists.Name) found; new files not renamed or moved to extras"
             }
         } else {
             Write-Host "`nSkipping Feature rename (Special Features disc)" -ForegroundColor Gray
         }
 
         # Handle extras folder
-        if ($isMainFeatureDisc) {
+        if ($script:ForeignFeature) {
+            Write-Host "`nSkipping the move to extras (see WARNING above)" -ForegroundColor Yellow
+        } elseif ($isMainFeatureDisc) {
             Write-Host "`nChecking for non-feature videos..." -ForegroundColor Yellow
             $nonFeatureVideos = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notlike "*Feature*" -and $_.Name -notmatch $featureExcludePattern }
             if ($nonFeatureVideos) {

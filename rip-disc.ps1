@@ -1714,7 +1714,7 @@ if (-not $Series) {
     # already has its Feature (or this Part): checked now, before anything is ripped.
     # Falls back to "Title (Year)" (picked year, else asked), and stops if that clashes too.
     if (-not $Extras -and (($Disc -eq 1) -or $script:DocumentaryPart)) {
-        $clashPattern = if ($script:DocumentaryPart) { "-Part $Disc\.[^.]+$" } else { '-Feature(-BluRay)?\.[^.]+$' }
+        $clashPattern = Get-FeatureNamePattern -Bluray:$Bluray -Part $(if ($script:DocumentaryPart) { $Disc } else { 0 })
         $clashFile = Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $script:MediaFolderName) -Pattern $clashPattern
         if ($clashFile) {
             Write-Host "`n$movieParentDir\$($script:MediaFolderName) already holds $clashFile - this disc will NOT be put there." -ForegroundColor Yellow
@@ -1931,6 +1931,10 @@ if ([string]::IsNullOrWhiteSpace($finalOutputDir) -or $finalOutputDir -notmatch 
     Write-Host "  Expected something like 'E:\...' - check the -OutputDrive value." -ForegroundColor Yellow
     exit 1
 }
+
+# Artwork already in the output folder (an existing film's Jellyfin images) - Step 3
+# keeps these and only deletes images that turned up during this run
+$script:PreexistingImages = Get-ImageFileNames -Dir $finalOutputDir
 
 # Fail fast if the destination drive itself isn't there. HandBrake encodes straight to
 # this drive, so continuing here just means finding out the hard way, part-way through
@@ -2220,17 +2224,18 @@ $contentType = if ($script:IsGenreSeries) { "$($script:GenreLabel) Series" } els
 $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryPart) -and (-not $Extras)
 $script:ForeignFeature = $false
 # Naming of the main file: "<Title>-Feature[-BluRay]" normally, "<Title>-Part N" for a documentary part.
-# $featureExcludePattern keeps earlier parts (same folder) from being picked as this disc's largest
-# file or swept into extras; (?!) never matches, so it is inert for ordinary movies.
+# $featurePattern is THIS run's name only, so a DVD "-Feature" and a Blu-ray "-Feature-BluRay"
+# can share a (genre) folder as two versions. $featureExcludePattern keeps every existing main
+# file - earlier parts, either version's Feature - from being picked as this disc's largest
+# file or swept into extras.
 if ($script:DocumentaryPart) {
-    $featurePattern = "-Part $Disc\.[^.]+$"
+    $featurePattern = Get-FeatureNamePattern -Part $Disc
     $featureSuffix = "-Part $Disc"
-    $featureExcludePattern = '-Part \d+\.[^.]+$'
 } else {
-    $featurePattern = '-Feature(-BluRay)?\.[^.]+$'
+    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray
     $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
-    $featureExcludePattern = '(?!)'
 }
+$featureExcludePattern = '-Part \d+\.[^.]+$|' + $script:AnyFeaturePattern
 $extrasDir = Join-Path $finalOutputDir "extras"
 
 # For disc 2+, ensure parent dir and extras folder exist upfront (disc 1 may still be running)
@@ -3296,9 +3301,12 @@ if ($currentPath -ne $finalOutputDir.TrimEnd('\')) {
 
 Write-Host "Current directory: $finalOutputDir" -ForegroundColor Yellow
 
-# delete image files first (only if they exist)
+# delete image files that appeared during this run; artwork that was already here is kept
 Write-Host "`nDeleting image files..." -ForegroundColor Yellow
-$imageFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(jpg|jpeg|png|gif|bmp)$' }
+$imageFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(jpg|jpeg|png|gif|bmp)$' -and $script:PreexistingImages -notcontains $_.Name }
+if ($script:PreexistingImages.Count -gt 0) {
+    Write-Host "Keeping $($script:PreexistingImages.Count) existing artwork file(s)" -ForegroundColor Gray
+}
 if ($imageFiles) {
     Write-Host "Image files to delete: $($imageFiles.Count)" -ForegroundColor White
     $imageFiles | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }

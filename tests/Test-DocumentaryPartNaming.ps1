@@ -35,6 +35,11 @@ function Get-Block {
     return ($lines[($s - 1)..($e - 1)] -join "`n")
 }
 
+# Shared helpers the decision block calls (Load-Config.ps1, dot-sourced by both scripts)
+$cfgAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'Load-Config.ps1'), [ref]$null, [ref]$null)
+$cfgAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-FeatureNamePattern' }, $true) | ForEach-Object { . ([scriptblock]::Create($_.Extent.Text)) }
+$script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
+
 function Get-Line {
     param([string]$Path, [string]$Pattern)
     $m = Select-String -LiteralPath $Path -Pattern $Pattern -SimpleMatch | Select-Object -First 1
@@ -49,7 +54,7 @@ function Invoke-Decision {
     $BoundFake = @{}
     if ($DiscBound) { $BoundFake['Disc'] = $Disc }
     $partLine = (Get-Line $Path '$script:DocumentaryPart = ').Replace('$PSBoundParameters', '$BoundFake')
-    $block = Get-Block $Path '^\$isMainFeatureDisc = ' '^\}\s*$'
+    $block = Get-Block $Path '^\$isMainFeatureDisc = ' '^\$featureExcludePattern = '
     $script:DocumentaryPart = $null
     Invoke-Expression $partLine
     Invoke-Expression $block
@@ -109,7 +114,7 @@ try {
     $BoundFake = @{ Disc = 2 }
     $Documentary = $true; $Series = $false; $Extras = $false; $Bluray = $false; $Disc = 2
     Invoke-Expression (Get-Line $p '$script:DocumentaryPart = ').Replace('$PSBoundParameters', '$BoundFake')
-    Invoke-Expression (Get-Block $p '^\$isMainFeatureDisc = ' '^\}\s*$')
+    Invoke-Expression (Get-Block $p '^\$isMainFeatureDisc = ' '^\$featureExcludePattern = ')
 
     Invoke-Expression $existsLine
     Assert-Equal $null $featureExists 'Part 1 on disk is not mistaken for Disc 2 already having its Part file'

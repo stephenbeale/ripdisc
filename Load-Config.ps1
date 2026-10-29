@@ -152,18 +152,44 @@ function Find-ExistingMediaFolder {
     return $null
 }
 
+# The name THIS run gives its main file, as a regex: "-Part N" for a documentary part,
+# "-Feature-BluRay" for -Bluray, else "-Feature". Version-specific on purpose: a genre
+# folder can hold the DVD "-Feature" and the Blu-ray "-Feature-BluRay" side by side
+# (Jellyfin shows them as two versions), so one must not count as the other's clash.
+function Get-FeatureNamePattern {
+    param([switch]$Bluray, [int]$Part = 0)
+    if ($Part -gt 0) { return "-Part $Part\.[^.]+$" }
+    if ($Bluray) { return '-Feature-BluRay\.[^.]+$' }
+    return '-Feature\.[^.]+$'
+}
+
+# Any version's main file ("-Feature" or "-Feature-BluRay"). Step 3 never picks one of
+# these as this disc's largest file and never moves one into extras.
+$script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
+
 # The main-feature file already in $FolderPath (e.g. "Scarface-Feature.mp4"), or $null.
 # A Disc 1 rip must never be put in a folder that already holds a film: Step 3 would see
 # "Feature already exists" and sweep the new film into extras (Scarface 1932 into the
-# 1983 film's folder, 2026-10-28). $Pattern is rip-disc's $featurePattern.
+# 1983 film's folder, 2026-10-28). $Pattern is from Get-FeatureNamePattern.
 function Get-ExistingFeatureFile {
-    param([string]$FolderPath, [string]$Pattern = '-Feature(-BluRay)?\.[^.]+$')
+    param([string]$FolderPath, [Parameter(Mandatory)][string]$Pattern)
     if (-not $FolderPath -or -not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return $null }
     $hit = Get-ChildItem -LiteralPath $FolderPath -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match $Pattern -and $_.Extension -match '^\.(mp4|mkv|m4v|avi|mov|wmv)$' } |
         Select-Object -First 1
     if ($hit) { return $hit.Name }
     return $null
+}
+
+# Names of the image files already in $Dir (empty when it does not exist). Taken before
+# a run so Step 3's image clean-up only removes images that appeared during the run and
+# never an existing film's Jellyfin artwork (folder.jpg, backdrop.jpg ...) when a Disc 2,
+# -Extras or continue run writes into that film's folder.
+function Get-ImageFileNames {
+    param([string]$Dir)
+    if (-not $Dir -or -not (Test-Path -LiteralPath $Dir -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $Dir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|gif|bmp)$' } | ForEach-Object { $_.Name })
 }
 
 # ========== FIRST-RUN CHECK ==========
