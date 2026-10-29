@@ -40,6 +40,30 @@ Both PRs MERGED, **neither run on a real disc**.
 7. Idea not done: ripaudio could warn when a GP75N is picked for audio (slower reads).
 8. Still open from the earlier lists below (not repeated): the 2026-10-29 items 1-6 (Step 3 image deletion, continue-rip.ps1 clash/ForeignFeature guard, C# RipDisc.Core lacks #166 fixes, #166 real-disc checks, re-rip 1983 Scarface) and the 2026-10-28 items 1-6 (cable-pull test for #161, README CR lines, Write-Host spacing, real-drive tests, Slow Dance IMDb, ripaudio/ripdisc direction). Note PR #168 has since fixed the image-deletion and continue-rip risks per memory; verify before acting. The untracked `ripdisc-config.json.bak-20261029` is still undecided: do not commit, delete or move.
 
+### 2026-10-29 - Ask for output drive, custom genre folders, offline lookups (PR #169, merged 78c6c6e; 911/911 tests, 17 files)
+
+Trigger: `.\rip-disc.ps1 -Drive G` (no -OutputDrive) sent Jean de Florette to E: silently, via config defaultOutputDrive "E:". The user also wanted unknown switches like -Basketball treated as new folders, and to be told "cannot check title" and carry on when offline. And the "Discovered Metadata" block said `Type: Movie` for a -Documentary run (only the label was wrong; the path was already Documentaries).
+
+**Built:** `Read-OutputDrive` prompt (Enter = config default; the answer is treated as explicit for the continue-rip / ripaudio commands and the [D] relaunch). `-Genre <name>` on both scripts, plus `ValueFromRemainingArguments $UnknownArgs`. `Resolve-CustomGenreArg` asks Y(Enter)/N/A: N = standard DVDs/Bluray folder, and a near-miss typo is flagged via `Get-EditDistance`. Other unknown args exit 1; -Genre with a built-in genre exits 1; a bad folder name exits 1. `Test-InternetConnection` (HTTPS probe, 3 s, live 310 ms) runs once via `Test-OnlineOnce`; offline it skips TheDiscDB/TMDb/IMDb, adds `-Offline` on `Get-SeriesDiscDbLookup` (the hash is still read), drops [R], and `Get-YearLookup` returns $null. `Get-ContentTypeLabel` replaces every inline content-type chain. The helpers live in Load-Config.ps1.
+
+**Tests:** tests/Test-OutputDriveAndGenre.ps1 52/52 (also runs the real rip-disc.ps1 early-exit paths). Test-MovieFolderNaming imports Test-OnlineOnce/Get-YearLookup. C# RipDisc.Core unchanged.
+
+**Still owed (PR #169 test plan):** a real rip with -Basketball, a real run without -OutputDrive, a real offline run.
+
+### 2026-10-29 - First REAL mid-rip drive drop (PR #161 behaviour)
+
+- Jean de Florette DVD on G:. The drive dropped at ~70% of the MKV save (~18:28; STATUS_DEVICE_NOT_CONNECTED). PAUSED prompt -> R -> re-query found "G: is now disc:1 (was disc:0)" and the re-rip started. Verified live: the prompt, retry, and the renumbered-drive lookup.
+- Not yet confirmed: that the retry completes, and that the partial MKV from attempt 1 was removed (check C:\Video\Jean de Florette (1986)\Disc1).
+- Cost: ~18 min of work redone, ~26 min later finish (expected ~19:00 instead of ~18:34); the retry was slightly slower.
+- New cosmetic defect: attempt 1's Write-Progress bar ("Total 21% | Elapsed 6m 18s") stayed on screen into attempt 2. Needs `Write-Progress -Completed` / a reset between attempts.
+- Possibly the same USB instability as the failing F: drive (WD Elements); a wiggle-test script is ready but not run.
+
+### 2026-10-29 - NEXT SESSION items (added after PR #169)
+
+1. Three real checks for PR #169: a real rip with -Basketball, a real run without -OutputDrive, a real offline run.
+2. Confirm the Jean de Florette retry finished and the partial MKV from attempt 1 was removed (C:\Video\Jean de Florette (1986)\Disc1).
+3. Fix the stale Write-Progress bar carried from attempt 1 into attempt 2 (`Write-Progress -Completed` / reset between attempts).
+
 ### 2026-10-29 - Scarface folder clash fix (PR #166, merged 7ff567a) and NEXT SESSION items (main = 7ff567a, 809/809 tests, 16 files)
 
 Trigger: the 2026-10-28 real rip of Scarface (1932), picked from the pick list (title "Scarface", year 1932), went into `F:\DVDs\Scarface` (the 1983 film's folder). Config used plain `title` folder naming and the existing-same-name-folder rule beat the year, so Step 3 saw "Feature already exists" and moved the new film into extras. Log: `C:\Video\logs\Scarface_disc1_20261028_202002.log`. The user later moved the 1932 film to `F:\DVDs\Scarface (1932)\Scarface (1932)-Feature.mp4` (1.89 GB, fine).
