@@ -202,8 +202,8 @@ $tmdb = @(
     [pscustomobject]@{ Title = 'Slow Dance'; Year = '1998'; MediaType = 'movie'; TmdbId = 303; ImdbId = $null; Season = 0; Source = 'TMDb' }
 )
 $c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE' -TmdbCandidates $tmdb
-Assert-Equal 'Slow Dance||||disc label;Slow Dance|2013|movie|tt101000|TMDb;Slow Dance Club|2019|tv||TMDb;Slow Dance|1998|movie||TMDb' (Format-Candidates $c) 'the label stays its own line; same-name search hits are listed separately, never merged into it'
-Assert-Equal 101 $c[1].TmdbId 'TMDb entry keeps its TMDb id'
+Assert-Equal 'Slow Dance|2013|movie|tt101000|TMDb;Slow Dance||||disc label;Slow Dance Club|2019|tv||TMDb;Slow Dance|1998|movie||TMDb' (Format-Candidates $c) 'the label stays its own line, below the first same-name film with a year; hits are never merged into it'
+Assert-Equal 101 $c[0].TmdbId 'TMDb entry keeps its TMDb id'
 
 $c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE'
 Assert-Equal 'Slow Dance||||disc label' (Format-Candidates $c) 'no TMDb key: the cleaned label is still offered'
@@ -232,8 +232,8 @@ Assert-Equal 0 $c[0].Season 'no season for a movie'
 $c = Get-DiscTitleCandidates -DiscLabel 'HEAT' -ImdbCandidates @(
     [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
     [pscustomobject]@{ Title = 'Heat'; Year = '1986'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0093164'; Season = 0; Source = 'IMDb' })
-Assert-Equal 'Heat||||disc label;Heat|1995|movie|tt0113277|IMDb;Heat|1986|movie|tt0093164|IMDb' (Format-Candidates $c) 'label first, then each same-name film on its own line'
-Assert-Equal 'Heat (1995)' (Format-TitleCandidate $c[1]) 'menu line: title and year only; no [Movie], no IMDb id or source (the link line has them)'
+Assert-Equal 'Heat|1995|movie|tt0113277|IMDb;Heat||||disc label;Heat|1986|movie|tt0093164|IMDb' (Format-Candidates $c) 'first same-name film with a year first, then the label, then the other film'
+Assert-Equal 'Heat (1995)' (Format-TitleCandidate $c[0]) 'menu line: title and year only; no [Movie], no IMDb id or source (the link line has them)'
 Assert-Equal 'Slow Dance (2014) [Short]' (Format-TitleCandidate (New-TitleCandidate -Title 'Slow Dance' -Year '2014' -MediaType 'movie' -Kind 'Short' -ImdbId 'tt3453042' -Source 'IMDb')) 'other kinds are still flagged'
 Assert-Equal 'Heat (1995) - exact disc match' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Year '1995' -MediaType 'movie' -Kind 'Movie' -Source 'TheDiscDB + IMDb')) 'a TheDiscDB row says it is an exact disc match'
 Assert-Equal 'Heat - typed' (Format-TitleCandidate (New-TitleCandidate -Title 'Heat' -Source 'typed')) 'a typed title says so'
@@ -247,8 +247,16 @@ Assert-Equal 'Heat - disc label' (Format-TitleCandidate ([pscustomobject]@{ Titl
 $c = Get-DiscTitleCandidates -DiscLabel 'Slow Dance' -ImdbCandidates @(
     [pscustomobject]@{ Title = 'Slow Dance'; Year = '2005'; MediaType = 'tv'; TmdbId = $null; ImdbId = 'tt0481050'; Season = 0; Source = 'IMDb' },
     [pscustomobject]@{ Title = 'Slow Dance'; Year = '2020'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt12892860'; Season = 0; Source = 'IMDb' })
-Assert-Equal 'Slow Dance||||disc label' (Format-Candidates @($c)[0]) 'the default pick is the plain label: no borrowed year, type or id'
+Assert-Equal 'Slow Dance|2020|movie|tt12892860|IMDb;Slow Dance||||disc label;Slow Dance|2005|tv|tt0481050|IMDb' (Format-Candidates $c) 'the same-name TV series is never promoted (Enter must not switch Series mode on); the film is; the label borrows nothing'
 Assert-Equal 3 @($c).Count 'both IMDb hits still offered'
+# Live run 2026-10-31: the user wanted "The Dirty Dozen (1967)" as [1], not the bare label
+$c = Get-DiscTitleCandidates -DiscLabel 'THE_DIRTY_DOZEN' -ImdbCandidates @(
+    [pscustomobject]@{ Title = 'The Dirty Dozen'; Year = '1967'; MediaType = 'movie'; Kind = 'Movie'; TmdbId = $null; ImdbId = 'tt0061578'; Season = 0; Source = 'IMDb' },
+    [pscustomobject]@{ Title = 'The Dirty Dozen'; Year = '1988'; MediaType = 'tv'; Kind = 'TV series'; TmdbId = $null; ImdbId = 'tt0094464'; Season = 0; Source = 'IMDb' })
+Assert-Equal 'The Dirty Dozen|1967|movie|tt0061578|IMDb;The Dirty Dozen||||disc label;The Dirty Dozen|1988|tv|tt0094464|IMDb' (Format-Candidates $c) 'Dirty Dozen: the 1967 film is [1], label [2], TV series [3]'
+$c = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE' -ImdbCandidates @(
+    [pscustomobject]@{ Title = 'Slow Dance'; Year = '2014'; MediaType = 'movie'; Kind = 'Short'; TmdbId = $null; ImdbId = 'tt3453042'; Season = 0; Source = 'IMDb' })
+Assert-Equal 'disc label' @($c)[0].Source 'a [Short] is not promoted above the label'
 $c = Get-DiscTitleCandidates -TmdbCandidates @(
     [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = 949; ImdbId = 'tt0113277'; Season = 0; Source = 'TMDb' }) -ImdbCandidates @(
     [pscustomobject]@{ Title = 'Heat'; Year = '1995'; MediaType = 'movie'; TmdbId = $null; ImdbId = 'tt0113277'; Season = 0; Source = 'IMDb' },
@@ -263,7 +271,7 @@ Write-Host "`nPick prompt" -ForegroundColor Cyan
 
 $list = Get-DiscTitleCandidates -DiscLabel 'SLOW_DANCE' -TmdbCandidates $tmdb
 $pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('')) 6>$null
-Assert-Equal 'Slow Dance|disc label' "$($pick.Title)|$($pick.Source)" 'Enter takes the first suggestion (the plain label)'
+Assert-Equal 'Slow Dance|2013|TMDb' "$($pick.Title)|$($pick.Year)|$($pick.Source)" 'Enter takes the first suggestion (the titled film with a year)'
 $pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('4')) 6>$null
 Assert-Equal 'Slow Dance|1998' "$($pick.Title)|$($pick.Year)" 'a number picks that row'
 $pick = Read-TitleChoice -Candidates $list -ReadInput (New-InputQueue @('9', 'x', '3')) 6>$null

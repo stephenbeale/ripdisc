@@ -442,15 +442,246 @@ function Show-LogFileReminder {
 }
 
 # ========== DISC DISCOVERY FUNCTIONS ==========
+# Turns one line of `makemkvcon -r --progress=-same` output into a status update for the
+# discovery scan, or $null for lines that carry nothing worth showing.
+#   PRGT/PRGC:code,id,"name"  -> overall task / current operation ("Opening DVD disc")
+#   PRGV:current,total,max    -> progress values (max is usually 65536)
+#   MSG:code,flags,n,"text"   -> messages; "Title #N was added" counts titles found
+function ConvertFrom-MakeMkvInfoLine {
+    param([string]$Line)
+    $l = "$Line".Trim()
+    if ($l -match '^PRG[TC]:\d+,\d+,"(.*)"') { return [pscustomobject]@{ Kind = 'Operation'; Text = $Matches[1] } }
+    if ($l -match '^PRGV:(\d+),(\d+),(\d+)') {
+        $max = [double]$Matches[3]
+        if ($max -le 0) { return $null }
+        return [pscustomobject]@{ Kind = 'Progress'; Percent = [int][math]::Min(100, [math]::Floor(100 * [double]$Matches[2] / $max)) }
+    }
+    if ($l -match '^MSG:\d+,\d+,\d+,"(.*?)"') {
+        $text = $Matches[1]
+        if ($text -match '(?i)^Title #\S+ was added') { return [pscustomobject]@{ Kind = 'TitleAdded'; Text = $text } }
+        return [pscustomobject]@{ Kind = 'Message'; Text = $text }
+    }
+    return $null
+}
+
+# Runs `makemkvcon -r info <disc>` with a live status line (elapsed time, current MakeMKV
+# operation, titles found so far) instead of a silent `&` call, so a slow DVD scan does not
+# look like a crash. A hard cap stops a hung drive from blocking forever. Returns the output
+# lines and exit code, or $null on timeout/failure to start.
+function Invoke-MakeMkvInfoWithStatus {
+    param([string]$DiscSource, [int]$TimeoutSec = 600)
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo.FileName = $makemkvconPath
+    $proc.StartInfo.Arguments = "-r --progress=-same info $DiscSource"
+    $proc.StartInfo.UseShellExecute = $false
+    $proc.StartInfo.RedirectStandardOutput = $true
+    $proc.StartInfo.RedirectStandardError = $false
+    $proc.StartInfo.CreateNoWindow = $true
+    try { $proc.Start() | Out-Null } catch {
+        Write-Host "WARNING: could not start MakeMKV: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $null
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $operation = "Starting MakeMKV"
+    $percent = -1
+    $titlesFound = 0
+    $lastHeartbeat = 0
+    $activity = "Scanning disc with MakeMKV ($DiscSource)"
+    $readTask = $proc.StandardOutput.ReadLineAsync()
+    $timedOut = $false
+
+    while ($true) {
+        if ($readTask.Wait(500)) {
+            $line = $readTask.Result
+            if ($null -eq $line) { break }   # EOF: MakeMKV has finished writing
+            $lines.Add($line)
+            $info = ConvertFrom-MakeMkvInfoLine -Line $line
+            if ($info) {
+                switch ($info.Kind) {
+                    'Operation' {
+                        if ($info.Text -and $info.Text -ne $operation) {
+                            $operation = $info.Text
+                            Write-Host ("  [{0}] {1}" -f (Format-ScanElapsed $sw.Elapsed), $operation) -ForegroundColor DarkGray
+                        }
+                    }
+                    'Progress'   { $percent = $info.Percent }
+                    'TitleAdded' { $titlesFound++ }
+                }
+            }
+            $readTask = $proc.StandardOutput.ReadLineAsync()
+        }
+
+        $elapsed = $sw.Elapsed
+        $status = "$operation | elapsed $(Format-ScanElapsed $elapsed)" + $(if ($titlesFound -gt 0) { " | $titlesFound title(s) found" } else { "" })
+        if ($percent -ge 0) {
+            Write-Progress -Activity $activity -Status "$status | $percent%" -PercentComplete $percent
+        } else {
+            Write-Progress -Activity $activity -Status $status
+        }
+        # A plain line every 30 s too: Write-Progress is invisible in some hosts/transcripts
+        if ([int]($elapsed.TotalSeconds / 30) -gt $lastHeartbeat) {
+            $lastHeartbeat = [int]($elapsed.TotalSeconds / 30)
+            Write-Host "  ...still scanning ($(Format-ScanElapsed $elapsed) so far, $titlesFound title(s) found, now: $operation)" -ForegroundColor DarkGray
+        }
+
+        if ($elapsed.TotalSeconds -ge $TimeoutSec) { $timedOut = $true; break }
+    }
+
+    Write-Progress -Activity $activity -Completed
+    if ($timedOut) {
+        try { $proc.Kill() } catch {}
+        Write-Host "WARNING: MakeMKV disc scan gave up after $(Format-ScanElapsed $sw.Elapsed) - carrying on with the disc label only." -ForegroundColor Yellow
+        return $null
+    }
+    $null = $proc.WaitForExit(10000)
+    Write-Host "  Scan finished in $(Format-ScanElapsed $sw.Elapsed) ($titlesFound title(s) found)" -ForegroundColor DarkGray
+    return [pscustomobject]@{ Lines = $lines.ToArray(); ExitCode = $(if ($proc.HasExited) { $proc.ExitCode } else { 0 }) }
+}
+
+# ---- Title lengths straight from the disc's own index files (no MakeMKV, well under 1 s) ----
+function Read-BigEndianUInt {
+    param([byte[]]$Bytes, [int]$Offset, [int]$Size)
+    [uint64]$v = 0
+    for ($k = 0; $k -lt $Size; $k++) { $v = ($v -shl 8) -bor $Bytes[$Offset + $k] }
+    return $v
+}
+
+# DVD: each VIDEO_TS\VTS_nn_0.IFO lists program chains (PGCs); the ones flagged as a title's
+# entry PGC (category bit 31) are what MakeMKV shows as titles. Playback time is BCD hh:mm:ss
+# at PGC offset 4. Returns seconds per title; a bad or obfuscated IFO is skipped, never thrown.
+function Get-DvdTitleDurations {
+    param([string]$VideoTsDir)
+    $out = New-Object System.Collections.Generic.List[int]
+    $bcd = { param($b) (($b -shr 4) * 10) + ($b -band 0x0F) }
+    foreach ($ifo in @(Get-ChildItem -LiteralPath $VideoTsDir -Filter 'VTS_*_0.IFO' -ErrorAction SilentlyContinue)) {
+        try {
+            $b = [IO.File]::ReadAllBytes($ifo.FullName)
+            if ($b.Length -lt 0x100 -or [Text.Encoding]::ASCII.GetString($b, 0, 12) -ne 'DVDVIDEO-VTS') { continue }
+            $pgci = [int](Read-BigEndianUInt $b 0xCC 4) * 2048
+            if ($pgci -le 0 -or $pgci + 8 -gt $b.Length) { continue }
+            $count = [int](Read-BigEndianUInt $b $pgci 2)
+            for ($i = 0; $i -lt $count; $i++) {
+                $e = $pgci + 8 + 8 * $i
+                if ($e + 8 -gt $b.Length) { break }
+                if (($b[$e] -band 0x80) -eq 0) { continue }   # not a title's entry PGC
+                $pgc = $pgci + [int](Read-BigEndianUInt $b ($e + 4) 4)
+                if ($pgc + 8 -gt $b.Length) { continue }
+                $sec = (& $bcd $b[$pgc + 4]) * 3600 + (& $bcd $b[$pgc + 5]) * 60 + (& $bcd $b[$pgc + 6])
+                if ($sec -gt 0) { $out.Add($sec) }
+            }
+        } catch { continue }
+    }
+    return ,$out.ToArray()
+}
+
+# Blu-ray: each BDMV\PLAYLIST\*.mpls is a title; its length is the sum of its play items'
+# OUT_time - IN_time (45 kHz ticks). Returns seconds per playlist; bad files are skipped.
+function Get-BlurayPlaylistDurations {
+    param([string]$PlaylistDir)
+    $out = New-Object System.Collections.Generic.List[int]
+    foreach ($f in @(Get-ChildItem -LiteralPath $PlaylistDir -Filter '*.mpls' -ErrorAction SilentlyContinue)) {
+        try {
+            $b = [IO.File]::ReadAllBytes($f.FullName)
+            if ($b.Length -lt 20 -or [Text.Encoding]::ASCII.GetString($b, 0, 4) -ne 'MPLS') { continue }
+            $pl = [int](Read-BigEndianUInt $b 8 4)
+            if ($pl + 10 -gt $b.Length) { continue }
+            $items = [int](Read-BigEndianUInt $b ($pl + 6) 2)
+            $p = $pl + 10
+            [double]$ticks = 0
+            for ($i = 0; $i -lt $items; $i++) {
+                if ($p + 22 -gt $b.Length) { break }
+                $len = [int](Read-BigEndianUInt $b $p 2)
+                $in = [double](Read-BigEndianUInt $b ($p + 14) 4)
+                $outT = [double](Read-BigEndianUInt $b ($p + 18) 4)
+                if ($outT -gt $in) { $ticks += ($outT - $in) }
+                $p += 2 + $len
+            }
+            $sec = [int][math]::Round($ticks / 45000)
+            if ($sec -gt 0) { $out.Add($sec) }
+        } catch { continue }
+    }
+    return ,$out.ToArray()
+}
+
+# Title lengths (seconds) for the disc in a drive, from whichever structure it has. @() when
+# unknown (no letter, unreadable, data disc).
+function Get-DiscTitleDurations {
+    param([string]$DriveRoot)
+    if (-not $DriveRoot) { return @() }
+    try {
+        $bdmv = Join-Path $DriveRoot 'BDMV\PLAYLIST'
+        if (Test-Path -LiteralPath $bdmv -ErrorAction Stop) { return (Get-BlurayPlaylistDurations -PlaylistDir $bdmv) }
+        $vts = Join-Path $DriveRoot 'VIDEO_TS'
+        if (Test-Path -LiteralPath $vts -ErrorAction Stop) { return (Get-DvdTitleDurations -VideoTsDir $vts) }
+    } catch {}
+    return @()
+}
+
+# "h:mm:ss" / "mm:ss" (MakeMKV TINFO:n,9) to seconds; 0 when unparseable.
+function ConvertTo-DurationSeconds {
+    param([string]$Text)
+    $parts = @("$Text".Trim() -split ':')
+    if ($parts.Count -lt 2 -or ($parts | Where-Object { $_ -notmatch '^\d+$' })) { return 0 }
+    $s = 0
+    foreach ($p in $parts) { $s = $s * 60 + [int]$p }
+    return $s
+}
+
+# Does a disc's title list look like TV episodes? Yes when at least 3 DIFFERENT lengths of
+# 15-70 min sit within 15% of each other (identical lengths are counted once: copy-protected
+# DVDs pad themselves with dozens of fake copies of one title), and any title longer than
+# 75 min is just a play-all of them (70-130% of their sum, the same test SeriesEpisodes uses).
+# A film with a few 20-minute featurettes fails on the second rule: its feature is not a sum.
+# Only a hint - the caller asks the user, never switches Series mode on by itself.
+function Get-SeriesLikelihood {
+    param([int[]]$DurationsSec = @())
+    $result = [pscustomobject]@{ LooksLikeSeries = $false; EpisodeCount = 0; TypicalMinutes = 0; Reason = '' }
+    $distinct = @($DurationsSec | Where-Object { $_ -ge 120 } | Sort-Object -Unique)
+    $mid = @($distinct | Where-Object { $_ -ge 15 * 60 -and $_ -le 70 * 60 })
+    if ($mid.Count -lt 3) { $result.Reason = "only $($mid.Count) title(s) of episode length"; return $result }
+
+    $best = @()
+    foreach ($anchor in $mid) {
+        $group = @($mid | Where-Object { $_ -ge $anchor -and $_ -le $anchor * 1.15 })
+        if ($group.Count -gt $best.Count) { $best = $group }
+    }
+    if ($best.Count -lt 3) { $result.Reason = "no 3 episode-length titles of a similar length"; return $result }
+
+    $sum = ($best | Measure-Object -Sum).Sum
+    $longOnes = @($distinct | Where-Object { $_ -gt 75 * 60 })
+    foreach ($l in $longOnes) {
+        if ($l -lt 0.7 * $sum -or $l -gt 1.3 * $sum) {
+            $result.Reason = "a $([int]($l / 60))-min title that is not a play-all of the others (a film's main feature?)"
+            return $result
+        }
+    }
+    $sorted = @($best | Sort-Object)
+    $result.LooksLikeSeries = $true
+    $result.EpisodeCount = $best.Count
+    $result.TypicalMinutes = [int][math]::Round($sorted[[int][math]::Floor($sorted.Count / 2)] / 60)
+    $result.Reason = "$($best.Count) titles of about $($result.TypicalMinutes) min"
+    return $result
+}
+
+function Format-ScanElapsed {
+    param([TimeSpan]$Span)
+    return ("{0}:{1:00}" -f [int][math]::Floor($Span.TotalMinutes), $Span.Seconds)
+}
+
 function Get-DiscInfo {
     param([string]$DiscSource)
 
     try {
-        $output = & $makemkvconPath -r info $DiscSource 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: MakeMKV info query failed (exit code $LASTEXITCODE)" -ForegroundColor Yellow
+        $scan = Invoke-MakeMkvInfoWithStatus -DiscSource $DiscSource
+        if (-not $scan) { return $null }
+        if ($scan.ExitCode -ne 0) {
+            Write-Host "WARNING: MakeMKV info query failed (exit code $($scan.ExitCode))" -ForegroundColor Yellow
             return $null
         }
+        $output = $scan.Lines
 
         $discType = $null
         $discName = $null
@@ -1113,6 +1344,26 @@ function Get-DiscTitleCandidates {
                 -Description "$($c.Description)" -TmdbId $c.TmdbId -ImdbId $c.ImdbId -Season ([int]$c.Season) -Source $c.Source))
         }
     }
+
+    # Prefer "Title (Year)" over the bare label: when a search found a FEATURE FILM with the
+    # same name and a year, that row goes above the label (so Enter picks "The Dirty Dozen
+    # (1967)", not year-less "The Dirty Dozen"). Only feature films are promoted - a same-name
+    # TV series, short or video stays below the label, so Enter never switches Series mode on
+    # by name alone (label "Slow Dance" vs IMDb's 2005 TV series "Slow Dance").
+    $labelIdx = -1
+    for ($i = 0; $i -lt $merged.Count; $i++) { if ($merged[$i].Source -eq 'disc label') { $labelIdx = $i; break } }
+    if ($labelIdx -ge 0) {
+        $labelKey = ConvertTo-TitleKey $merged[$labelIdx].Title
+        for ($j = $labelIdx + 1; $j -lt $merged.Count; $j++) {
+            $h = $merged[$j]
+            if ($h.Year -and $h.MediaType -eq 'movie' -and (-not $h.Kind -or $h.Kind -eq 'Movie') -and
+                (ConvertTo-TitleKey $h.Title) -eq $labelKey) {
+                $merged.RemoveAt($j)
+                $merged.Insert($labelIdx, $h)
+                break
+            }
+        }
+    }
     return $merged.ToArray()
 }
 
@@ -1590,6 +1841,7 @@ $script:DiscDbLookup = $null
 $titleWasGiven = $title -ne ""
 $script:DiscLabelNote = $null
 $script:PickedTitleNote = $null
+$script:SeriesHintNote = $null
 if ($title -eq "") {
     # No title provided - run full discovery
     $discoverySource = $discSource
@@ -1604,10 +1856,31 @@ if ($title -eq "") {
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "AUTO-DISCOVERY MODE" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "No -title provided. Scanning $driveHint ($discoverySource)..." -ForegroundColor Yellow
-    Write-Host "(This may take a minute while MakeMKV reads the disc)" -ForegroundColor Gray
+    # FAST PATH: discovery only needs the disc's label and type, and Windows can give both
+    # in well under a second (volume label + VIDEO_TS/BDMV folder check). MakeMKV's full
+    # `info` scan reads every title on the disc - minutes on some DVDs - for nothing else
+    # used here (MakeMKV re-reads the disc in Step 1 anyway). Only fall back to the scan when
+    # the letter cannot be trusted (-DriveIndex without -Drive) or Windows gives no label/type.
+    $discInfo = $null
+    $letterTrusted = ($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive'))
+    if ($letterTrusted) {
+        $fastType = Get-DiscTypeLabel -DriveLetter $driveLetter
+        # Live Windows label first: the MakeMKV drive list may come from the 5-minute cache,
+        # so its label could belong to a disc that has since been swapped out.
+        $fastLabel = Get-DiscVolumeLabel -DriveLetter $driveLetter
+        if (-not $fastLabel) { $fastLabel = $script:TargetDiscLabel }
+        if ($fastLabel -and $fastType -in @('DVD-Video', 'Blu-ray')) {
+            $discInfo = @{ DiscType = $fastType; DiscName = $fastLabel; VolumeLabel = $fastLabel; Titles = @(); Fast = $true }
+        }
+    }
 
-    $discInfo = Get-DiscInfo -DiscSource $discoverySource
+    if ($discInfo) {
+        Write-Host "No -title provided. Read the disc label from $driveHint (no full MakeMKV scan needed)" -ForegroundColor Yellow
+    } else {
+        Write-Host "No -title provided. Scanning $driveHint..." -ForegroundColor Yellow
+        Write-Host "(MakeMKV reads every title on the disc - this can take a few minutes; progress is shown below)" -ForegroundColor Gray
+        $discInfo = Get-DiscInfo -DiscSource $discoverySource
+    }
 
     $cleanResult = $null
     $rawLabel = $script:TargetDiscLabel
@@ -1618,7 +1891,7 @@ if ($title -eq "") {
         if ($discInfo.VolumeLabel -and $discInfo.VolumeLabel -ne $discInfo.DiscName) {
             Write-Host "Volume Label: $($discInfo.VolumeLabel)" -ForegroundColor Gray
         }
-        Write-Host "Titles on disc: $($discInfo.Titles.Count)" -ForegroundColor White
+        if (-not $discInfo.Fast) { Write-Host "Titles on disc: $($discInfo.Titles.Count)" -ForegroundColor White }
         if ($discInfo.DiscName) { $rawLabel = $discInfo.DiscName }
 
         # Auto-detect Blu-ray from disc type
@@ -1658,6 +1931,26 @@ if ($title -eq "") {
     if (-not $searchTitle -and $online) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
 
     $candidates = Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates
+
+    # Series hint from title lengths: many similar episode-length titles. The fast path read
+    # no MakeMKV titles, so read the lengths from the disc's IFO/MPLS files instead.
+    $titleSecs = if ($discInfo -and -not $discInfo.Fast -and $discInfo.Titles.Count -gt 0) {
+        @($discInfo.Titles | ForEach-Object { ConvertTo-DurationSeconds $_.Duration })
+    } elseif ($letterTrusted) { @(Get-DiscTitleDurations -DriveRoot "$driveLetter\") } else { @() }
+    $seriesHint = Get-SeriesLikelihood -DurationsSec $titleSecs
+    $script:SeriesHintNote = $null
+    if (@($titleSecs).Count -gt 0) {
+        $realTitles = @($titleSecs | Where-Object { $_ -ge 120 }).Count
+        Write-Host "Titles longer than 2 min: $realTitles" -ForegroundColor White
+    }
+    if ($seriesHint.LooksLikeSeries -and -not $Series) {
+        Write-Host "This disc looks like a TV series: $($seriesHint.Reason)" -ForegroundColor Green
+        $script:SeriesHintNote = "Series hint from title lengths: $($seriesHint.Reason)"
+        # TV rows go first (an exact TheDiscDB match keeps the top spot)
+        $top = @($candidates | Select-Object -First 1 | Where-Object { "$($_.Source)" -match 'TheDiscDB' })
+        $rest = @($candidates | Where-Object { $top -notcontains $_ })
+        $candidates = @($top) + @($rest | Where-Object { $_.MediaType -eq 'tv' }) + @($rest | Where-Object { $_.MediaType -ne 'tv' })
+    }
     # [R] in the pick list re-runs the online searches with the user's own text (adding
     # the year often finds what IMDb's short popularity-ranked list left out). Offline: no [R].
     $searchAgain = if ($online) {
@@ -1684,6 +1977,14 @@ if ($title -eq "") {
     if ($picked.MediaType -eq 'tv' -and -not $Series) {
         $Series = $true
         Write-Host "TV series detected - enabling Series mode" -ForegroundColor Green
+    } elseif ($seriesHint.LooksLikeSeries -and -not $Series -and -not $script:IsGenreSeries) {
+        # Picked a film (or the bare label) but the titles say episodes: ask, never assume
+        Write-Host "`nThe disc has $($seriesHint.Reason) - that looks like TV episodes." -ForegroundColor Yellow
+        $ans = "$(Read-Host 'Rip as a TV series (episode naming S##-E##)? [Y]es / [N]o (Enter = Yes)')".Trim().ToUpper()
+        if ($ans -eq '' -or $ans -eq 'Y') {
+            $Series = $true
+            Write-Host "Series mode enabled" -ForegroundColor Green
+        }
     }
 
     # Apply season/disc hints if not already set by user (TheDiscDB's season wins over the label's)
@@ -2130,6 +2431,7 @@ if ($Series -and -not $script:IsGenreSeries) {
 }
 if ($script:DiscLabelNote) { Write-Log $script:DiscLabelNote }
 if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
+if ($script:SeriesHintNote) { Write-Log $script:SeriesHintNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"

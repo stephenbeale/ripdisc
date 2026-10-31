@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - Fast Auto-Discovery, Scan Progress, "Title (Year)" First, Series Hint From Title Lengths
+
+### Changed
+- Auto-discovery (no `-title`) no longer runs MakeMKV's full `info` scan when Windows can give the disc's label and DVD/Blu-ray type (about 1 s instead of minutes; checked live on The Dirty Dozen DVD). The live Windows label is preferred over the MakeMKV drive list, which may be up to 5 minutes old. The full scan still runs with `-DriveIndex` without `-Drive`, or when Windows has no label or type.
+- Pick list: when a search finds a feature film with the same name as the disc label and a year, that row goes above the bare label, so Enter picks "The Dirty Dozen (1967)". Same-name TV series, shorts and videos are never moved above the label (Enter must not switch Series mode on by name alone).
+
+### Added
+- When the full scan does run it shows a live status: a progress bar with MakeMKV's current operation, elapsed time and titles found, a line per operation change, a "...still scanning" line every 30 s, and a 10-minute limit after which discovery carries on with the label.
+- Series hint: title lengths are read straight from `VIDEO_TS\VTS_*_0.IFO` (DVD) or `BDMV\PLAYLIST\*.mpls` (Blu-ray), or from the full scan. At least 3 different lengths of 15-70 min within 15% of each other, with any title over 75 min being a play-all of them (70-130% of their sum), prints "This disc looks like a TV series", moves TV rows to the top of the pick list, and asks "Rip as a TV series?" (Enter = Yes) when a non-TV row is picked. Logged in the session log.
+- Tests: new `Test-DiscoveryScan.ps1` (36: robot-line parsing, scan runner against a fake and a hung makemkvcon, IFO/MPLS readers on synthetic files, series rules); `Test-TitleSuggestions.ps1` updated for the new order (106).
+
+### Fixed
+- The "Scanning" line showed the disc source twice ("D: (disc:1) (disc:1)").
+
 ## 2026-10-29 - Without -Drive, Use the Drive That Holds the DVD; Name Disconnected Drives
 
 ### Changed
