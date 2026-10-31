@@ -31,6 +31,9 @@
     A series folder (<root>\Silicon Valley), one Season folder, or one DiscN folder
     ("Disc 2" and "<Title>-Disc 2" folders are recognised too; season folders may be
     "Season 2", "Series 2", "<Title> S2" or "<Title> S02").
+    A series folder holding the video files itself (no Season / Disc folders) is offered as
+    a single series: with -Apply it asks before moving the files into "Season 1" (or
+    "Season N" with -Season N; -Yes skips the question), then renames them as usual.
 
 .PARAMETER Title
     Series title used in the new names. Default: the series folder's name.

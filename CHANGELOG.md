@@ -74,6 +74,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Year prompt: after the title was edited to "Duxford the Second World War Years", it offered six unrelated films ("Gundu", "Apocalypse: The Second World War" ...). It now lists only matches whose title is like the typed one (`Test-SimilarTitle`: a near-miss spelling, all of one title's words in the other, or 60% of words shared), and skips the prompt entirely when none are ("No online title close to ..." - folder without a year; `-Year` still sets one). The folder-clash fallback still asks, since it needs a year. A new `[R]` search is not filtered.
 - The `-Basketball` new-folder prompt read "Use F:\? (Y/N/A ...)": `$name?` is a variable name in PowerShell. Now `${name}`.
 
+## 2026-10-31 - rename-series: Offer Season 1 for a Series Folder With Loose Files
+
+### Added
+- `rename-series.ps1` on a series folder with no Season / Disc folders but video files directly in it (real case: `C:\Video\Legacy The True Story of the LA Lakers`) no longer stops at "No Season / DiscN folders found". It says the files need a season folder and will be moved into `<Series>\Season 1` as `<Title>-S01-E##` (`-Season N` picks another season). A dry run shows the planned names and moves nothing; `-Apply` asks `Continue as Season 1? [y/N]` (Enter, n or end of input = nothing moved; `-Yes` = yes), moves only the mp4/mkv files (`._` and other files stay), then renames with the usual manifest and undo script.
+- Tests: 22 new in `Test-SeriesRetroRename.ps1` (157).
+
 ## 2026-10-31 - Existing Folder Table: Two Coloured Lines per Title
 
 ### Changed
