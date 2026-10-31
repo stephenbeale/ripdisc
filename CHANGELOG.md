@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - Ask About Blu-ray Mode When -title Is Given
+
+### Added
+- `rip-disc.ps1 -title ...` without `-Bluray` now checks the disc before ripping; when it has a `BDMV` folder it asks "Rip in Blu-ray mode? [Y]es / [N]o (Enter = Yes)" and logs the answer. Before, only the post-rip 8.5 GB size guard caught this, which misses a Blu-ray whose titles are all smaller (TV episodes, short films) - those were encoded in DVD mode with the PGS subtitles burned in. Auto-discovery (no `-title`) still switches Blu-ray on by itself. Skipped with `-DriveIndex` without `-Drive` (letter unknown).
+- Tests: `Test-ShouldAskBluray` cases in `Test-DiscoveryScan.ps1` (43 total).
+
 ## 2026-10-31 - Fast Auto-Discovery, Scan Progress, "Title (Year)" First, Series Hint From Title Lengths
 
 ### Changed

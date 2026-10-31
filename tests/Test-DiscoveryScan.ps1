@@ -184,5 +184,17 @@ try {
     Remove-Item -Recurse -Force $tmp2 -ErrorAction SilentlyContinue
 }
 
+Write-Host "`nTest-ShouldAskBluray (Blu-ray check when -title is given)" -ForegroundColor Cyan
+. ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName 'Test-ShouldAskBluray')))
+$bd = { 'Blu-ray' }; $dvd = { 'DVD-Video' }
+$script:Looked = $false; $spy = { $script:Looked = $true; 'Blu-ray' }
+Assert-True (Test-ShouldAskBluray -TitleGiven -LetterTrusted -DiscType $bd) "-title, no -Bluray, Blu-ray in the drive: ask"
+Assert-True (-not (Test-ShouldAskBluray -TitleGiven -LetterTrusted -DiscType $dvd)) "DVD in the drive: no question"
+Assert-True (-not (Test-ShouldAskBluray -TitleGiven -Bluray -LetterTrusted -DiscType $bd)) "-Bluray already passed: no question"
+Assert-True (-not (Test-ShouldAskBluray -LetterTrusted -DiscType $bd)) "no -title: discovery handles Blu-ray itself"
+Assert-True (-not (Test-ShouldAskBluray -TitleGiven -DiscType $spy)) "-DriveIndex without -Drive: letter untrusted, no question"
+Assert-True (-not $script:Looked) "the disc is not even looked at when the cheap checks fail"
+Assert-True (-not (Test-ShouldAskBluray -TitleGiven -LetterTrusted -DiscType { '' })) "unreadable disc: no question"
+
 Write-Host "`n$($script:Passed) passed, $($script:Failed) failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed -gt 0) { exit 1 }

@@ -968,6 +968,15 @@ function Get-DiscVolumeLabel {
 # MakeMKV, so it can be shown for every drive in the listing below, not just the one
 # about to be ripped. Best-effort only, like Get-DiscVolumeLabel above: never throws,
 # and a failure/no-media case just returns "" so callers show nothing rather than guess.
+# True when a -title run should ask "Rip in Blu-ray mode?": a title was given (so discovery,
+# which switches Blu-ray on by itself, did not run), -Bluray was not passed, the drive letter
+# can be trusted, and the disc has a BDMV folder. -DiscType is a scriptblock so the disc is
+# only looked at when the cheap checks pass.
+function Test-ShouldAskBluray {
+    param([switch]$TitleGiven, [switch]$Bluray, [switch]$LetterTrusted, [scriptblock]$DiscType)
+    if (-not $TitleGiven -or $Bluray -or -not $LetterTrusted -or -not $DiscType) { return $false }
+    return ("$(& $DiscType)" -eq 'Blu-ray')
+}
 function Get-DiscTypeLabel {
     param([string]$DriveLetter)
 
@@ -1836,6 +1845,28 @@ if (($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) -and (Get-Di
     exit 1
 }
 
+# ========== BLU-RAY CHECK WITH -title ==========
+# Auto-discovery switches Blu-ray mode on by itself (it reads the disc type). With -title it
+# never ran, so a Blu-ray ripped without -Bluray was only caught after the rip by the
+# 8.5 GB size guard - which misses a Blu-ray whose titles are all smaller (TV episodes,
+# short films), and those would be encoded in DVD mode with PGS subtitles burned in. Ask
+# up front instead (Enter = Yes). Same -DriveIndex caveat as the audio CD guard.
+if (Test-ShouldAskBluray -TitleGiven:($title -ne "") -Bluray:$Bluray `
+        -LetterTrusted:($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) `
+        -DiscType { Get-DiscTypeLabel -DriveLetter $driveLetter }) {
+    Write-Host "`n$driveLetter holds a Blu-ray (BDMV folder found), but -Bluray was not passed." -ForegroundColor Yellow
+    Write-Host "In DVD mode HandBrake burns the Blu-ray's PGS subtitles into the picture." -ForegroundColor Gray
+    $bdAnswer = Read-Host "Rip in Blu-ray mode? [Y]es / [N]o (Enter = Yes)"
+    if ($null -eq $bdAnswer -or "$bdAnswer".Trim() -eq '' -or "$bdAnswer".Trim().ToUpper() -eq 'Y') {
+        $Bluray = $true
+        Write-Host "Blu-ray mode enabled" -ForegroundColor Green
+        $script:BlurayPromptNote = "Blu-ray disc detected with -title; user chose Blu-ray mode"
+    } else {
+        Write-Host "Continuing in DVD mode" -ForegroundColor Yellow
+        $script:BlurayPromptNote = "Blu-ray disc detected with -title; user chose DVD mode"
+    }
+}
+
 # Set by auto-discovery (TheDiscDB) or by plain -Series naming further down
 $script:DiscDbLookup = $null
 $titleWasGiven = $title -ne ""
@@ -2432,6 +2463,7 @@ if ($Series -and -not $script:IsGenreSeries) {
 if ($script:DiscLabelNote) { Write-Log $script:DiscLabelNote }
 if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
 if ($script:SeriesHintNote) { Write-Log $script:SeriesHintNote }
+if ($script:BlurayPromptNote) { Write-Log $script:BlurayPromptNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
