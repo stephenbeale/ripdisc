@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - Existing Folder Check: Suspected Duplicates Before Ripping
+
+### Added
+- Before ripping a film (Disc 1, Disc 2+, `-Extras`, genre films; not series) into a title folder that already holds videos, `rip-disc.ps1` shows a table of the disc's titles (lengths from the disc's IFO/MPLS files, or the MakeMKV scan) against the folder's files and its `extras\` (length and size): `ALREADY HAVE?` when a file is within max(3 s, 1%) of a title's length, `new` otherwise, then the folder's files not on this disc, and "N of M titles look like files you already have". Then: Enter = continue as planned, `O` = open the suspected duplicates in the default player (the folder when more than 6), `E` = a different version/edition - rip under `"<title> - <edition>"` (its own folder and file names, e.g. `Erin Brockovich - Blu-ray`), `A` = abort. End of input aborts. Logged in the session log. Trigger: re-ripping Erin Brockovich (already on F: with 4 extras) for its extras would have re-ripped the 2-hour film into `extras\` and added `-1` copies of every extra.
+- Runs before the folder-clash guard, so the table is seen before a Disc 1 rip moves to `Title (Year)`.
+- Tests: new `Test-ExistingFolderCheck.ps1` (33, incl. the real Erin Brockovich lengths); `Test-MovieFolderNaming.ps1` stubs the check out of its clash-guard tests.
+
 ## 2026-10-31 - Ask About Blu-ray Mode When -title Is Given
 
 ### Added

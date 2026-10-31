@@ -209,6 +209,9 @@ try {
     $folderBlock = [scriptblock]::Create($ripText.Substring($start, $end - $start).Replace('exit 1', "throw 'REFUSED'"))
     function Get-NormalizedDriveLetter { param($d) $d }
     function Get-DiscTitleCandidates { @() }
+    # The existing-folder duplicate check (its own tests: Test-ExistingFolderCheck.ps1)
+    # would stop at its prompt here; these tests are about the clash guard after it.
+    function Get-FolderVideoFiles { @() }
     function Get-TMDbTitleCandidates { @() }
     function Get-ImdbTitleCandidates { @() }
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath 'Test-OnlineOnce')))

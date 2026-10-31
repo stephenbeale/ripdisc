@@ -666,6 +666,131 @@ function Get-SeriesLikelihood {
     return $result
 }
 
+# ---- Existing-folder check: does the target folder already hold this disc's titles? ----
+# Video files in a title folder and its subfolders one level down (extras\ etc.), with
+# length and size. -GetSeconds is injectable for tests; the default reads the length from
+# Windows' property system (Get-VideoDurationSeconds, SeriesEpisodes.ps1).
+function Get-FolderVideoFiles {
+    param([string]$Folder, [scriptblock]$GetSeconds = { param($p) Get-VideoDurationSeconds -Path $p }, [int]$Max = 60)
+    if (-not $Folder -or -not (Test-Path -LiteralPath $Folder -PathType Container)) { return @() }
+    $exts = @('.mp4', '.mkv', '.m4v', '.avi', '.ts', '.m2ts')
+    $root = (Get-Item -LiteralPath $Folder).FullName.TrimEnd('\')
+    $files = @(Get-ChildItem -LiteralPath $Folder -File -Recurse -Depth 1 -ErrorAction SilentlyContinue |
+        Where-Object { $exts -contains $_.Extension.ToLowerInvariant() -and -not $_.Name.StartsWith('._') } |
+        Sort-Object @{ Expression = { $_.FullName.Split('\').Count } }, FullName | Select-Object -First $Max)
+    return @($files | ForEach-Object {
+        $secs = $null
+        try { $secs = & $GetSeconds $_.FullName } catch {}
+        [pscustomobject]@{ RelPath = $_.FullName.Substring($root.Length + 1); FullPath = $_.FullName; Seconds = $secs; Bytes = $_.Length }
+    })
+}
+
+# Matches the disc's title lengths against existing files. Identical disc lengths collapse
+# into one row with a Count (copy-protected DVDs repeat one title dozens of times). A file
+# counts as the same title when its length is within max(3 s, 1%) - an encode keeps the
+# title's running time. Each file matches at most one row, closest first.
+function Compare-DiscToFolder {
+    param([int[]]$DiscSeconds = @(), [object[]]$Files = @(), [int]$MinSeconds = 120)
+    $groups = @($DiscSeconds | Where-Object { $_ -ge $MinSeconds } | Group-Object | ForEach-Object {
+        [pscustomobject]@{ Seconds = [int]$_.Name; Count = $_.Count } } | Sort-Object Seconds -Descending)
+    $used = @{}
+    $rows = foreach ($g in $groups) {
+        $tol = [math]::Max(3, $g.Seconds * 0.01)
+        $best = $null; $bestDiff = [double]::MaxValue
+        foreach ($f in $Files) {
+            if ($used.ContainsKey($f.FullPath) -or -not $f.Seconds) { continue }
+            $diff = [math]::Abs([double]$f.Seconds - $g.Seconds)
+            if ($diff -le $tol -and $diff -lt $bestDiff) { $best = $f; $bestDiff = $diff }
+        }
+        if ($best) { $used[$best.FullPath] = $true }
+        [pscustomobject]@{ Seconds = $g.Seconds; Count = $g.Count; Match = $best }
+    }
+    return [pscustomobject]@{
+        Rows      = @($rows)
+        Unmatched = @($Files | Where-Object { -not $used.ContainsKey($_.FullPath) })
+        Matched   = @($rows | Where-Object { $_.Match }).Count
+    }
+}
+
+function Format-FileSize {
+    param([double]$Bytes)
+    if ($Bytes -ge 1GB) { return "{0:N2} GB" -f ($Bytes / 1GB) }
+    return "{0:N0} MB" -f ($Bytes / 1MB)
+}
+
+# Prints the comparison as a table: each disc title, whether a file of that length already
+# exists, and the file's length and size; then the folder's files that match nothing here.
+function Show-DiscFolderComparison {
+    param([object]$Comparison, [string]$Folder, [switch]$NoDiscLengths)
+    Write-Host "`n========================================" -ForegroundColor Yellow
+    Write-Host "THIS TITLE'S FOLDER ALREADY EXISTS" -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "Folder: $Folder" -ForegroundColor White
+    $fmt = "  {0,-9} {1,-14} {2,-48} {3,9} {4,10}"
+    if ($NoDiscLengths) {
+        Write-Host "(This disc's title lengths could not be read, so there is no comparison - files only.)" -ForegroundColor Gray
+    } else {
+        Write-Host ""
+        Write-Host ($fmt -f 'On disc', 'Status', 'Existing file', 'Length', 'Size') -ForegroundColor Cyan
+        foreach ($r in $Comparison.Rows) {
+            $len = (Format-SeriesDuration $r.Seconds) + $(if ($r.Count -gt 1) { " x$($r.Count)" } else { "" })
+            if ($r.Match) {
+                Write-Host ($fmt -f $len, 'ALREADY HAVE?', (Get-ShortText $r.Match.RelPath 48), (Format-SeriesDuration $r.Match.Seconds), (Format-FileSize $r.Match.Bytes)) -ForegroundColor Yellow
+            } else {
+                Write-Host ($fmt -f $len, 'new', '-', '', '') -ForegroundColor Green
+            }
+        }
+    }
+    $others = @($Comparison.Unmatched)
+    if ($others.Count -gt 0) {
+        Write-Host "`n  $(if ($NoDiscLengths) { 'Files in the folder:' } else { 'In the folder but not on this disc:' })" -ForegroundColor Gray
+        foreach ($f in $others) {
+            Write-Host ($fmt -f '', '', (Get-ShortText $f.RelPath 48), (Format-SeriesDuration $f.Seconds), (Format-FileSize $f.Bytes)) -ForegroundColor Gray
+        }
+    }
+    if (-not $NoDiscLengths) {
+        $newCount = @($Comparison.Rows | Where-Object { -not $_.Match }).Count
+        Write-Host "`n  $($Comparison.Matched) of $(@($Comparison.Rows).Count) title(s) on this disc look like files you already have (same length); $newCount look new." -ForegroundColor White
+    }
+}
+
+# What to do about an existing folder. Returns 'continue', 'abort', or an edition label
+# (string) for a different version of the film. O opens the suspected duplicates (or the
+# folder, when there are many) so they can be checked, then asks again.
+function Read-ExistingFolderChoice {
+    param([object]$Comparison, [string]$Folder,
+        [scriptblock]$ReadInput = { param($p) Read-Host $p },
+        [scriptblock]$OpenPath = { param($p) Invoke-Item -LiteralPath $p })
+    while ($true) {
+        Write-Host ""
+        Write-Host "  [Enter] Continue as planned (nothing is overwritten; a same-name file gets -1 added)" -ForegroundColor White
+        Write-Host "  [O]     Open the suspected duplicates to check them" -ForegroundColor White
+        Write-Host "  [E]     This is a different version/edition - rip it under its own name" -ForegroundColor White
+        Write-Host "  [A]     Abort (nothing ripped)" -ForegroundColor Gray
+        $answer = & $ReadInput "Choice"
+        if ($null -eq $answer) { return 'abort' }   # end of input never silently rips
+        switch ("$answer".Trim().ToUpper()) {
+            '' { return 'continue' }
+            'A' { return 'abort' }
+            'O' {
+                $toOpen = @($Comparison.Rows | Where-Object { $_.Match } | ForEach-Object { $_.Match.FullPath })
+                if ($toOpen.Count -eq 0) { $toOpen = @($Comparison.Unmatched | ForEach-Object { $_.FullPath }) }
+                if ($toOpen.Count -eq 0 -or $toOpen.Count -gt 6) {
+                    Write-Host "Opening the folder" -ForegroundColor Gray
+                    & $OpenPath $Folder
+                } else {
+                    foreach ($p in $toOpen) { Write-Host "Opening $p" -ForegroundColor Gray; & $OpenPath $p }
+                }
+            }
+            'E' {
+                $label = "$(& $ReadInput "Edition name, e.g. Blu-ray, Director's Cut, Special Edition (blank to go back)")".Trim()
+                if ($label) { return $label }
+            }
+            default { Write-Host "Please answer Enter, O, E or A." -ForegroundColor Yellow }
+        }
+    }
+}
+
 function Format-ScanElapsed {
     param([TimeSpan]$Span)
     return ("{0}:{1:00}" -f [int][math]::Floor($Span.TotalMinutes), $Span.Seconds)
@@ -2178,6 +2303,37 @@ if (-not $Series) {
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear
     }
 
+    # ========== EXISTING FOLDER: SUSPECTED DUPLICATES ==========
+    # Re-ripping a film you have (for its extras, or a better copy) used to give no warning:
+    # -Extras re-ripped every title, the film included, and Disc 1 silently moved to a
+    # "Title (Year)" folder. Show a table of the disc's titles against the folder's files
+    # (same length = probably the same title) before anything is ripped, and let the user
+    # open the suspected duplicates, rip a different edition under its own name, or stop.
+    if (-not $script:IsGenreSeries) {
+        $existingDir = Join-Path $movieParentDir $script:MediaFolderName
+        $existingFiles = @(Get-FolderVideoFiles -Folder $existingDir)
+        if ($existingFiles.Count -gt 0) {
+            $discSecs = @()
+            if ($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) { $discSecs = @(Get-DiscTitleDurations -DriveRoot "$driveLetter\") }
+            if ($discSecs.Count -eq 0 -and $discInfo -and -not $discInfo.Fast) {
+                $discSecs = @($discInfo.Titles | ForEach-Object { ConvertTo-DurationSeconds $_.Duration })
+            }
+            $comparison = Compare-DiscToFolder -DiscSeconds $discSecs -Files $existingFiles
+            Show-DiscFolderComparison -Comparison $comparison -Folder $existingDir -NoDiscLengths:($discSecs.Count -eq 0)
+            $folderChoice = Read-ExistingFolderChoice -Comparison $comparison -Folder $existingDir
+            $script:ExistingFolderNote = "Existing folder $existingDir`: $($comparison.Matched) of $(@($comparison.Rows).Count) disc title(s) matched existing files by length; choice: $folderChoice"
+            if ($folderChoice -eq 'abort') {
+                Write-Host "Aborted - nothing was ripped." -ForegroundColor Yellow
+                exit 0
+            } elseif ($folderChoice -ne 'continue') {
+                $title = "$title - $folderChoice"
+                $safeTitle = Get-SafeTitle $title
+                $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear
+                Write-Host "Ripping as `"$title`" into $movieParentDir\$($script:MediaFolderName)" -ForegroundColor Green
+            }
+        }
+    }
+
     # ========== NEVER RIP A FILM INTO ANOTHER FILM'S FOLDER ==========
     # A main-feature disc (Disc 1 / a documentary part) must not land in a folder that
     # already has its Feature (or this Part): checked now, before anything is ripped.
@@ -2464,6 +2620,7 @@ if ($script:DiscLabelNote) { Write-Log $script:DiscLabelNote }
 if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
 if ($script:SeriesHintNote) { Write-Log $script:SeriesHintNote }
 if ($script:BlurayPromptNote) { Write-Log $script:BlurayPromptNote }
+if ($script:ExistingFolderNote) { Write-Log $script:ExistingFolderNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
