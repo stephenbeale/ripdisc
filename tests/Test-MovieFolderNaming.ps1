@@ -52,11 +52,12 @@ function Get-ScriptParameterNames {
     return @((Get-ScriptAst $ScriptPath).ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
 }
 
-foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder')) {
+foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder',
+                    'Get-EditDistance', 'ConvertTo-LooseTitleKey', 'Test-NearMissTitle', 'Find-NearMissMediaFolders')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
 }
 foreach ($name in @('New-TitleCandidate', 'Get-TitleCandidateUrl', 'Format-TitleCandidate', 'Show-TitleCandidates',
-                    'Read-FolderYear', 'Get-ContinueRipCommand')) {
+                    'Read-FolderYear', 'Get-ContinueRipCommand', 'Read-NearMissFolderChoice')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $ripDiscPath $name)))
 }
 

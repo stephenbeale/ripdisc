@@ -199,7 +199,7 @@ function Read-OutputDrive {
         Write-Host ("  {0} {1,-20} {2,6} GB free{3}" -f $d.Letter, $(if ($d.Label) { $d.Label } else { '(no label)' }), $d.FreeGB, $mark) -ForegroundColor White
     }
     while ($true) {
-        $answer = & $ReadInput "Output drive letter (Enter = $Default)"
+        $answer = & $ReadInput "Output drive letter (Enter = $($Default.TrimEnd(':')))"
         if ($null -eq $answer -or "$answer".Trim() -eq '') { return $Default }
         $letter = "$answer".Trim().TrimEnd('\').TrimEnd(':').ToUpper()
         if ($letter -match '^[A-Z]$') {
@@ -283,6 +283,47 @@ function Get-TitleYear {
 # The one existing folder for this title under $ParentDir, plain or with a year, so a
 # Disc 2 / extras / continue-rip run lands in the folder the first run made. $null when
 # there is none, or more than one (e.g. two films of the same name) - the caller decides.
+# Spelling-tolerant title comparison: lower case, punctuation/spaces and a leading "the"
+# ignored, then up to 2 letters different for titles of 8+ letters, 1 for 5-7, none for
+# shorter ones (short titles are too easy to confuse: "Heat" / "Head"). Real case
+# 2026-10-31: the Erin Brockovich DVD's label is spelled "Erin Brokovich".
+function ConvertTo-LooseTitleKey {
+    param([string]$Title)
+    $k = "$Title".ToLowerInvariant() -replace '&', ' and '
+    $k = ($k -replace '[^\p{L}\p{Nd}]+', ' ').Trim() -replace '^the\s+', ''
+    return ($k -replace '\s+', '')
+}
+
+function Test-NearMissTitle {
+    param([string]$A, [string]$B)
+    $ka = ConvertTo-LooseTitleKey $A; $kb = ConvertTo-LooseTitleKey $B
+    if (-not $ka -or -not $kb) { return $false }
+    if ($ka -eq $kb) { return $true }
+    # Different numbers = different titles: sequels, parts, issues ("Rocky 2" / "Rocky 3",
+    # "Die Hard 2" / "Die Hard 4.0", "Issue 14" / "Issue 17"). Checked on all 1181 F: folders.
+    if ((([regex]::Matches($ka, '\d+') | ForEach-Object { $_.Value }) -join ',') -ne
+        (([regex]::Matches($kb, '\d+') | ForEach-Object { $_.Value }) -join ',')) { return $false }
+    # One title plus extra words is a different title ("Dumb and Dumber" / "...To")
+    if ($ka.StartsWith($kb) -or $kb.StartsWith($ka)) { return $false }
+    $shorter = [math]::Min($ka.Length, $kb.Length)
+    # 2 letters only for long titles: "Pale Rider" / "Whale Rider" are 2 apart at 9 letters
+    $allowed = if ($shorter -ge 12) { 2 } elseif ($shorter -ge 5) { 1 } else { 0 }
+    if ($allowed -eq 0 -or [math]::Abs($ka.Length - $kb.Length) -gt $allowed) { return $false }
+    return ((Get-EditDistance -A $ka -B $kb) -le $allowed)
+}
+
+# Folders in $ParentDir spelled almost like $SafeTitle (Test-NearMissTitle on the name
+# without its " (YYYY)"), excluding exact matches - Find-ExistingMediaFolder handles those.
+# Lets a typo'd disc label or -title still land in the folder that already holds the film.
+function Find-NearMissMediaFolders {
+    param([string]$ParentDir, [string]$SafeTitle)
+    if (-not $ParentDir -or -not (Test-Path -LiteralPath $ParentDir -PathType Container)) { return @() }
+    $exact = '^' + [regex]::Escape($SafeTitle) + '( \(\d{4}\))?$'
+    return @(Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch $exact -and (Test-NearMissTitle ($_.Name -replace ' \(\d{4}\)$', '') $SafeTitle) } |
+        ForEach-Object { $_.Name })
+}
+
 function Find-ExistingMediaFolder {
     param([string]$ParentDir, [string]$SafeTitle)
     if (-not $ParentDir -or -not (Test-Path -LiteralPath $ParentDir -PathType Container)) { return $null }
