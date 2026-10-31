@@ -111,14 +111,14 @@ Assert-Equal 'continue' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x'
 Assert-Equal 'abort' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x' -ReadInput (New-InputQueue @('a')) -OpenPath $open 6>$null) "A aborts"
 Assert-Equal 'abort' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x' -ReadInput (New-InputQueue @()) -OpenPath $open 6>$null) "end of input aborts, never rips silently"
 Assert-Equal 'continue' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x' -ReadInput (New-InputQueue @('o', '')) -OpenPath $open 6>$null) "O opens, then asks again"
-Assert-Equal 'X:\Film\Erin Brockovich-Feature.mp4|X:\Film\extras\Erin Brockovich-B2_t02.mp4' ($opened -join '|') "O opened exactly the two suspected duplicates"
+Assert-Equal 'X:\Film\Erin Brockovich-Feature.mp4|X:\Film\extras\Erin Brockovich-B2_t02.mp4' ($opened -join '|') "O: one Explorer window per folder (film folder, extras), each with its duplicate highlighted"
 $opened.Clear()
 $many = Compare-DiscToFolder -DiscSeconds (1..8 | ForEach-Object { 600 + $_ * 60 }) -Files (1..8 | ForEach-Object { New-File "e$_.mp4" (600 + $_ * 60) })
 $null = Read-ExistingFolderChoice -Comparison $many -Folder 'F:\Many' -ReadInput (New-InputQueue @('O', 'A')) -OpenPath $open 6>$null
-Assert-Equal 'F:\Many' ($opened -join '|') "more than 6 duplicates: the folder is opened instead"
+Assert-Equal 'X:\Film\e8.mp4' ($opened -join '|') "eight duplicates in one folder: ONE Explorer window, the longest (first-listed) highlighted"
 $opened.Clear()
 $null = Read-ExistingFolderChoice -Comparison (Compare-DiscToFolder -Files $erin) -Folder 'F:\x' -ReadInput (New-InputQueue @('O', 'A')) -OpenPath $open 6>$null
-Assert-Equal 5 $opened.Count "no matches (no disc lengths): O opens the folder's files"
+Assert-Equal 'X:\Film\Erin Brockovich-Feature.mp4|X:\Film\extras\Erin Brockovich-B1_t01.mp4' ($opened -join '|') "no matches (no disc lengths): O shows the folder's files, one window per folder"
 Assert-Equal 'Blu-ray' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x' -ReadInput (New-InputQueue @('e', ' Blu-ray ')) -OpenPath $open 6>$null) "E returns the edition label, trimmed"
 Assert-Equal 'abort' (Read-ExistingFolderChoice -Comparison $c -Folder 'F:\x' -ReadInput (New-InputQueue @('e', '', 'x', 'a')) -OpenPath $open 6>$null) "blank edition goes back; junk re-asks"
 

@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - Misspelled Disc Labels and Titles Find the Existing Folder
+
+### Fixed
+- The Erin Brockovich DVD's label is spelled "Erin Brokovich". The label stayed [1] in the pick list, the year prompt ran the same IMDb search again, and the rip went to a NEW folder `F:\DVDs\Erin Brokovich (2000)` - bypassing `F:\DVDs\Erin Brockovich` and its duplicate check (no table shown). Now:
+  - Pick list: a same-name feature film with a year also goes above the label when the names are a letter or two apart, so [1] is "Erin Brockovich (2000)".
+  - No exact folder but one spelled almost the same: "There is no folder "Erin Brokovich" ..., but one is spelled almost the same: [1] Erin Brockovich - Use it? (Enter = Yes)". Yes also takes that spelling for the file names; N keeps the typed title. Runs before the duplicate check. Logged.
+  - The year prompt reuses the discovery search (cached per search text) instead of searching and listing again.
+- Spelling rule (`Test-NearMissTitle`, Load-Config.ps1): case, punctuation, spaces and a leading "the" ignored; then 1 letter for titles of 5-11 letters, 2 for 12+, none under 5; never when the numbers differ (sequels, parts, issues) or one title is the other plus words ("Dumb and Dumber To"). Audited on all 1181 folders on F:: pairs only "Bridge on the River Kwai" / "The Bridge...", "Hitchiker's" / "The Hitchhiker's Guide...", "Ice Age 3 - Dawn..." / "Ice Age 3 Dawn..." (the first draft paired 63, mostly sequels).
+
+### Changed
+- Existing-folder check `[O]` now shows the suspected duplicates in File Explorer (one window per folder, the file highlighted) instead of starting them in the media player.
+- Output drive prompt shows `(Enter = E)` without the colon.
+
+### Added
+- Tests: new `Test-NearMissTitle.ps1` (37); `Test-ExistingFolderCheck.ps1` updated for Explorer (33); `Test-MovieFolderNaming.ps1` loads the new helpers (125).
+- Live check 2026-10-31: the comparison table on the real Erin Brockovich DVD showed "5 of 5 title(s) ... already have"; [O] opened the files.
+
 ## 2026-10-31 - Existing Folder Check: Suspected Duplicates Before Ripping
 
 ### Added

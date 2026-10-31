@@ -666,6 +666,26 @@ function Get-SeriesLikelihood {
     return $result
 }
 
+# "No folder 'Erin Brokovich', but 'Erin Brockovich' exists - use it?" Returns the chosen
+# folder name, or $null to keep the title as typed (Enter = use the first one shown).
+function Read-NearMissFolderChoice {
+    param([string]$Title, [string]$ParentDir, [string[]]$Folders, [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    Write-Host "`nThere is no folder `"$Title`" in $ParentDir, but one is spelled almost the same:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $Folders.Count; $i++) { Write-Host "  [$($i + 1)] $($Folders[$i])" -ForegroundColor White }
+    Write-Host "  Using it also uses its spelling for the file names (so it matches what you already have)." -ForegroundColor Gray
+    Write-Host "  [N] No - it's a different title; make a new folder `"$Title`"" -ForegroundColor Gray
+    while ($true) {
+        $prompt = if ($Folders.Count -eq 1) { "Use `"$($Folders[0])`"? [Y]es / [N]o (Enter = Yes)" } else { "Folder (1-$($Folders.Count), Enter = 1) or N" }
+        $answer = & $ReadInput $prompt
+        if ($null -eq $answer) { return $null }   # end of input: keep the title as typed
+        $a = "$answer".Trim().ToUpper()
+        if ($a -eq '' -or $a -eq 'Y') { return $Folders[0] }
+        if ($a -eq 'N') { return $null }
+        if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $Folders.Count) { return $Folders[[int]$a - 1] }
+        Write-Host "Please answer Y, N$(if ($Folders.Count -gt 1) { ' or a number' })." -ForegroundColor Yellow
+    }
+}
+
 # ---- Existing-folder check: does the target folder already hold this disc's titles? ----
 # Video files in a title folder and its subfolders one level down (extras\ etc.), with
 # length and size. -GetSeconds is injectable for tests; the default reads the length from
@@ -760,11 +780,15 @@ function Show-DiscFolderComparison {
 function Read-ExistingFolderChoice {
     param([object]$Comparison, [string]$Folder,
         [scriptblock]$ReadInput = { param($p) Read-Host $p },
-        [scriptblock]$OpenPath = { param($p) Invoke-Item -LiteralPath $p })
+        # Opens File Explorer, not the media player: a folder as itself, a file with
+        # explorer /select so it is highlighted in its folder
+        [scriptblock]$OpenPath = { param($p)
+            if (Test-Path -LiteralPath $p -PathType Container) { Start-Process explorer.exe -ArgumentList "`"$p`"" }
+            else { Start-Process explorer.exe -ArgumentList "/select,`"$p`"" } })
     while ($true) {
         Write-Host ""
         Write-Host "  [Enter] Continue as planned (nothing is overwritten; a same-name file gets -1 added)" -ForegroundColor White
-        Write-Host "  [O]     Open the suspected duplicates to check them" -ForegroundColor White
+        Write-Host "  [O]     Show the suspected duplicates in File Explorer" -ForegroundColor White
         Write-Host "  [E]     This is a different version/edition - rip it under its own name" -ForegroundColor White
         Write-Host "  [A]     Abort (nothing ripped)" -ForegroundColor Gray
         $answer = & $ReadInput "Choice"
@@ -775,11 +799,17 @@ function Read-ExistingFolderChoice {
             'O' {
                 $toOpen = @($Comparison.Rows | Where-Object { $_.Match } | ForEach-Object { $_.Match.FullPath })
                 if ($toOpen.Count -eq 0) { $toOpen = @($Comparison.Unmatched | ForEach-Object { $_.FullPath }) }
-                if ($toOpen.Count -eq 0 -or $toOpen.Count -gt 6) {
-                    Write-Host "Opening the folder" -ForegroundColor Gray
+                if ($toOpen.Count -eq 0) {
+                    Write-Host "Opening $Folder in File Explorer" -ForegroundColor Gray
                     & $OpenPath $Folder
                 } else {
-                    foreach ($p in $toOpen) { Write-Host "Opening $p" -ForegroundColor Gray; & $OpenPath $p }
+                    # One Explorer window per folder (the film's folder, extras\), with its
+                    # first suspected duplicate highlighted
+                    foreach ($grp in @($toOpen | Group-Object { Split-Path -Parent $_ })) {
+                        $others = $grp.Count - 1
+                        Write-Host "Showing $($grp.Group[0]) in File Explorer$(if ($others -gt 0) { " (+$others more in that folder)" })" -ForegroundColor Gray
+                        & $OpenPath $grp.Group[0]
+                    }
                 }
             }
             'E' {
@@ -1490,8 +1520,10 @@ function Get-DiscTitleCandidates {
         $labelKey = ConvertTo-TitleKey $merged[$labelIdx].Title
         for ($j = $labelIdx + 1; $j -lt $merged.Count; $j++) {
             $h = $merged[$j]
+            # Spelling-tolerant: the label can be misspelled on the disc itself
+            # ("Erin Brokovich" vs IMDb's "Erin Brockovich"), and the hit has it right
             if ($h.Year -and $h.MediaType -eq 'movie' -and (-not $h.Kind -or $h.Kind -eq 'Movie') -and
-                (ConvertTo-TitleKey $h.Title) -eq $labelKey) {
+                ((ConvertTo-TitleKey $h.Title) -eq $labelKey -or (Test-NearMissTitle $h.Title $merged[$labelIdx].Title))) {
                 $merged.RemoveAt($j)
                 $merged.Insert($labelIdx, $h)
                 break
@@ -1622,7 +1654,18 @@ function Test-OnlineOnce {
 # only takes a typed year or Enter.
 function Get-YearLookup {
     if (-not (Test-OnlineOnce)) { return $null }
-    return { param($q) Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q) }
+    # Results are cached per search text: auto-discovery seeds the cache with the search it
+    # already showed, so the year prompt right after it does not run (and print) the same
+    # IMDb/TMDb search a second time. [R] with new text still searches.
+    if (-not $script:YearLookupCache) { $script:YearLookupCache = @{} }
+    return {
+        param($q)
+        $key = "$q".Trim().ToLowerInvariant()
+        if ($script:YearLookupCache.ContainsKey($key)) { return $script:YearLookupCache[$key] }
+        $r = @(Get-DiscTitleCandidates -TmdbCandidates @(Get-TMDbTitleCandidates -SearchTitle $q) -ImdbCandidates @(Get-ImdbTitleCandidates -SearchTitle $q))
+        $script:YearLookupCache[$key] = $r
+        return $r
+    }
 }
 
 # The year for a "Title (Year)" folder when nothing has supplied one yet. Lists the search
@@ -2087,6 +2130,12 @@ if ($title -eq "") {
     if (-not $searchTitle -and $online) { Write-Host "Disc label too generic for a TMDb search" -ForegroundColor Yellow }
 
     $candidates = Get-DiscTitleCandidates -DiscLabel $rawLabel -DiscDbDisc $discDbDisc -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates
+    # Seed the year prompt's cache with this search, so picking the year-less label does not
+    # repeat it (2026-10-31: "Erin Brokovich" was searched and listed twice)
+    if ($searchTitle -and $online) {
+        if (-not $script:YearLookupCache) { $script:YearLookupCache = @{} }
+        $script:YearLookupCache["$searchTitle".Trim().ToLowerInvariant()] = @(Get-DiscTitleCandidates -TmdbCandidates $tmdbCandidates -ImdbCandidates $imdbCandidates)
+    }
 
     # Series hint from title lengths: many similar episode-length titles. The fast path read
     # no MakeMKV titles, so read the lengths from the disc's IFO/MPLS files instead.
@@ -2281,6 +2330,21 @@ if (-not $Series) {
     # that may be a different film (Scarface 1932 vs Scarface)
     if (-not $Year -and $pickYear -and (Test-Path -LiteralPath (Join-Path $movieParentDir (Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear)) -PathType Container)) {
         $existingFolder = Get-MediaFolderName -SafeTitle $safeTitle -Year $pickYear
+    }
+    # No exact folder, but one spelled almost the same (a typo'd disc label or -title):
+    # offer it, so the film's existing folder - and the duplicate check below - is not
+    # silently bypassed by a new misspelled folder. Yes also takes that folder's spelling.
+    if (-not $existingFolder -and -not (Test-Path -LiteralPath (Join-Path $movieParentDir $safeTitle) -PathType Container)) {
+        $nearFolders = @(Find-NearMissMediaFolders -ParentDir $movieParentDir -SafeTitle $safeTitle)
+        if ($nearFolders.Count -gt 0) {
+            $nearPick = Read-NearMissFolderChoice -Title $title -ParentDir $movieParentDir -Folders $nearFolders
+            if ($nearPick) {
+                $title = $nearPick -replace ' \(\d{4}\)$', ''
+                $safeTitle = Get-SafeTitle $title
+                $existingFolder = $nearPick
+                $script:NearMissFolderNote = "Title spelling taken from existing folder: $nearPick"
+            }
+        }
     }
     if ($Year) {
         $script:FolderYear = $Year
@@ -2621,6 +2685,7 @@ if ($script:PickedTitleNote) { Write-Log $script:PickedTitleNote }
 if ($script:SeriesHintNote) { Write-Log $script:SeriesHintNote }
 if ($script:BlurayPromptNote) { Write-Log $script:BlurayPromptNote }
 if ($script:ExistingFolderNote) { Write-Log $script:ExistingFolderNote }
+if ($script:NearMissFolderNote) { Write-Log $script:NearMissFolderNote }
 Write-Log "Output Drive: $outputDriveLetter"
 Write-Log "MakeMKV Output: $makemkvOutputDir"
 Write-Log "Final Output: $finalOutputDir"
