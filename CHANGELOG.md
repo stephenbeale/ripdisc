@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - rename-series: Offer Season 1 for a Series Folder With Loose Files
+
+### Added
+- `rename-series.ps1` on a series folder with no Season / Disc folders but video files directly in it (real case: `C:\Video\Legacy The True Story of the LA Lakers`) no longer stops at "No Season / DiscN folders found". It says the files need a season folder and will be moved into `<Series>\Season 1` as `<Title>-S01-E##` (`-Season N` picks another season). A dry run shows the planned names and moves nothing; `-Apply` asks `Continue as Season 1? [y/N]` (Enter, n or end of input = nothing moved; `-Yes` = yes), moves only the mp4/mkv files (`._` and other files stay), then renames with the usual manifest and undo script.
+- Tests: 22 new in `Test-SeriesRetroRename.ps1` (157).
+
 ## 2026-10-29 - Without -Drive, Use the Drive That Holds the DVD; Name Disconnected Drives
 
 ### Changed
