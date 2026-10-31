@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-31 - Existing Folder Table: Two Coloured Lines per Title
+
+### Changed
+- The existing-folder comparison now shows each disc title as a pair of lines in different colours: a cyan `DISC` line (number, where the title lives on the disc - `VTS_04 title 1` on a DVD, `playlist 00800.mpls` on a Blu-ray, `MakeMKV title N` from a full scan - and its length), then a magenta `DRIVE` line (the matching file, its length and size) ending in a yellow `ALREADY HAVE? exact length` / `1 s apart`, or a green `NEW - not on the drive`. Files on the drive that match nothing are listed under "On the drive but not on this disc:". When nothing on the disc is new it says so and points at [A]. Shown live with the real Erin Brockovich DVD: 5 pairs, all matched (3 exact, 2 within 1 s).
+- `Get-DvdTitleDurations` / `Get-BlurayPlaylistDurations` / `Get-DiscTitleDurations` take `-Detailed` for `{ Seconds; Source }` objects; `Compare-DiscToFolder` takes `-DiscTitles` and records how far apart each match is.
+
+### Added
+- Tests: `Test-ExistingFolderCheck.ps1` 41, `Test-DiscoveryScan.ps1` 45.
+
 ## 2026-10-31 - Misspelled Disc Labels and Titles Find the Existing Folder
 
 ### Fixed

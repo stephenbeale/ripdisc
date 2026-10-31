@@ -552,9 +552,11 @@ function Read-BigEndianUInt {
 # DVD: each VIDEO_TS\VTS_nn_0.IFO lists program chains (PGCs); the ones flagged as a title's
 # entry PGC (category bit 31) are what MakeMKV shows as titles. Playback time is BCD hh:mm:ss
 # at PGC offset 4. Returns seconds per title; a bad or obfuscated IFO is skipped, never thrown.
+# -Detailed returns objects { Seconds; Source } instead, Source naming where the title
+# lives on the disc ("VTS_01 title 1"), for the existing-folder comparison table.
 function Get-DvdTitleDurations {
-    param([string]$VideoTsDir)
-    $out = New-Object System.Collections.Generic.List[int]
+    param([string]$VideoTsDir, [switch]$Detailed)
+    $out = New-Object System.Collections.Generic.List[object]
     $bcd = { param($b) (($b -shr 4) * 10) + ($b -band 0x0F) }
     foreach ($ifo in @(Get-ChildItem -LiteralPath $VideoTsDir -Filter 'VTS_*_0.IFO' -ErrorAction SilentlyContinue)) {
         try {
@@ -570,18 +572,19 @@ function Get-DvdTitleDurations {
                 $pgc = $pgci + [int](Read-BigEndianUInt $b ($e + 4) 4)
                 if ($pgc + 8 -gt $b.Length) { continue }
                 $sec = (& $bcd $b[$pgc + 4]) * 3600 + (& $bcd $b[$pgc + 5]) * 60 + (& $bcd $b[$pgc + 6])
-                if ($sec -gt 0) { $out.Add($sec) }
+                if ($sec -gt 0) { $out.Add([pscustomobject]@{ Seconds = $sec; Source = "$($ifo.Name.Substring(0, 6)) title $($b[$e] -band 0x7F)" }) }
             }
         } catch { continue }
     }
-    return ,$out.ToArray()
+    if ($Detailed) { return ,$out.ToArray() }
+    return ,[int[]]@($out | ForEach-Object { $_.Seconds })
 }
 
 # Blu-ray: each BDMV\PLAYLIST\*.mpls is a title; its length is the sum of its play items'
 # OUT_time - IN_time (45 kHz ticks). Returns seconds per playlist; bad files are skipped.
 function Get-BlurayPlaylistDurations {
-    param([string]$PlaylistDir)
-    $out = New-Object System.Collections.Generic.List[int]
+    param([string]$PlaylistDir, [switch]$Detailed)
+    $out = New-Object System.Collections.Generic.List[object]
     foreach ($f in @(Get-ChildItem -LiteralPath $PlaylistDir -Filter '*.mpls' -ErrorAction SilentlyContinue)) {
         try {
             $b = [IO.File]::ReadAllBytes($f.FullName)
@@ -600,22 +603,23 @@ function Get-BlurayPlaylistDurations {
                 $p += 2 + $len
             }
             $sec = [int][math]::Round($ticks / 45000)
-            if ($sec -gt 0) { $out.Add($sec) }
+            if ($sec -gt 0) { $out.Add([pscustomobject]@{ Seconds = $sec; Source = "playlist $($f.Name)" }) }
         } catch { continue }
     }
-    return ,$out.ToArray()
+    if ($Detailed) { return ,$out.ToArray() }
+    return ,[int[]]@($out | ForEach-Object { $_.Seconds })
 }
 
 # Title lengths (seconds) for the disc in a drive, from whichever structure it has. @() when
 # unknown (no letter, unreadable, data disc).
 function Get-DiscTitleDurations {
-    param([string]$DriveRoot)
+    param([string]$DriveRoot, [switch]$Detailed)
     if (-not $DriveRoot) { return @() }
     try {
         $bdmv = Join-Path $DriveRoot 'BDMV\PLAYLIST'
-        if (Test-Path -LiteralPath $bdmv -ErrorAction Stop) { return (Get-BlurayPlaylistDurations -PlaylistDir $bdmv) }
+        if (Test-Path -LiteralPath $bdmv -ErrorAction Stop) { return (Get-BlurayPlaylistDurations -PlaylistDir $bdmv -Detailed:$Detailed) }
         $vts = Join-Path $DriveRoot 'VIDEO_TS'
-        if (Test-Path -LiteralPath $vts -ErrorAction Stop) { return (Get-DvdTitleDurations -VideoTsDir $vts) }
+        if (Test-Path -LiteralPath $vts -ErrorAction Stop) { return (Get-DvdTitleDurations -VideoTsDir $vts -Detailed:$Detailed) }
     } catch {}
     return @()
 }
@@ -705,14 +709,16 @@ function Get-FolderVideoFiles {
     })
 }
 
-# Matches the disc's title lengths against existing files. Identical disc lengths collapse
-# into one row with a Count (copy-protected DVDs repeat one title dozens of times). A file
+# Matches the disc's titles against existing files. Identical disc lengths collapse into
+# one row with a Count (copy-protected DVDs repeat one title dozens of times). A file
 # counts as the same title when its length is within max(3 s, 1%) - an encode keeps the
-# title's running time. Each file matches at most one row, closest first.
+# title's running time. Each file matches at most one row, closest first. -DiscTitles takes
+# { Seconds; Source } objects (Get-DiscTitleDurations -Detailed); -DiscSeconds bare lengths.
 function Compare-DiscToFolder {
-    param([int[]]$DiscSeconds = @(), [object[]]$Files = @(), [int]$MinSeconds = 120)
-    $groups = @($DiscSeconds | Where-Object { $_ -ge $MinSeconds } | Group-Object | ForEach-Object {
-        [pscustomobject]@{ Seconds = [int]$_.Name; Count = $_.Count } } | Sort-Object Seconds -Descending)
+    param([int[]]$DiscSeconds = @(), [object[]]$DiscTitles = @(), [object[]]$Files = @(), [int]$MinSeconds = 120)
+    $titles = if (@($DiscTitles).Count -gt 0) { @($DiscTitles) } else { @($DiscSeconds | ForEach-Object { [pscustomobject]@{ Seconds = [int]$_; Source = '' } }) }
+    $groups = @($titles | Where-Object { $_.Seconds -ge $MinSeconds } | Group-Object Seconds | ForEach-Object {
+        [pscustomobject]@{ Seconds = [int]$_.Name; Count = $_.Count; Source = "$($_.Group[0].Source)" } } | Sort-Object Seconds -Descending)
     $used = @{}
     $rows = foreach ($g in $groups) {
         $tol = [math]::Max(3, $g.Seconds * 0.01)
@@ -723,7 +729,8 @@ function Compare-DiscToFolder {
             if ($diff -le $tol -and $diff -lt $bestDiff) { $best = $f; $bestDiff = $diff }
         }
         if ($best) { $used[$best.FullPath] = $true }
-        [pscustomobject]@{ Seconds = $g.Seconds; Count = $g.Count; Match = $best }
+        [pscustomobject]@{ Seconds = $g.Seconds; Count = $g.Count; Source = $g.Source; Match = $best
+                           DiffSeconds = $(if ($best) { [int]$bestDiff } else { $null }) }
     }
     return [pscustomobject]@{
         Rows      = @($rows)
@@ -738,42 +745,62 @@ function Format-FileSize {
     return "{0:N0} MB" -f ($Bytes / 1MB)
 }
 
-# Prints the comparison as a table: each disc title, whether a file of that length already
-# exists, and the file's length and size; then the folder's files that match nothing here.
+# How close a match is, in words: "exact length" / "1 s apart" / "4 s apart".
+function Format-MatchCloseness {
+    param($DiffSeconds)
+    if ($null -eq $DiffSeconds) { return "" }
+    if ($DiffSeconds -eq 0) { return "exact length" }
+    return "$DiffSeconds s apart"
+}
+
+# Prints the comparison two lines per disc title, in different colours:
+#   #1  DISC   VTS_01 title 1                            2:05:55
+#       DRIVE  Erin Brockovich-Feature.mp4               2:05:55   1.35 GB   ALREADY HAVE? exact length
+# A title with no file of its length gets "DRIVE  -  ...  NEW - not on the drive". Then the
+# folder's files that match nothing on this disc, and a one-line summary.
 function Show-DiscFolderComparison {
     param([object]$Comparison, [string]$Folder, [switch]$NoDiscLengths)
     Write-Host "`n========================================" -ForegroundColor Yellow
     Write-Host "THIS TITLE'S FOLDER ALREADY EXISTS" -ForegroundColor Yellow
     Write-Host "========================================" -ForegroundColor Yellow
     Write-Host "Folder: $Folder" -ForegroundColor White
-    $fmt = "  {0,-9} {1,-14} {2,-48} {3,9} {4,10}"
+    $nameW = 44
+    $line = { param($tag, $name, $len, $size) "{0,-4}{1,-7}{2,-$nameW} {3,8} {4,10}" -f $tag, $name[0], (Get-ShortText $name[1] $nameW), $len, $size }
     if ($NoDiscLengths) {
         Write-Host "(This disc's title lengths could not be read, so there is no comparison - files only.)" -ForegroundColor Gray
     } else {
         Write-Host ""
-        Write-Host ($fmt -f 'On disc', 'Status', 'Existing file', 'Length', 'Size') -ForegroundColor Cyan
+        $n = 0
         foreach ($r in $Comparison.Rows) {
-            $len = (Format-SeriesDuration $r.Seconds) + $(if ($r.Count -gt 1) { " x$($r.Count)" } else { "" })
+            $n++
+            $src = if ($r.Source) { $r.Source } else { "title $n" }
+            if ($r.Count -gt 1) { $src += " (x$($r.Count), same length)" }
+            Write-Host ("  " + (& $line "#$n" @('DISC', $src) (Format-SeriesDuration $r.Seconds) '')) -ForegroundColor Cyan
             if ($r.Match) {
-                Write-Host ($fmt -f $len, 'ALREADY HAVE?', (Get-ShortText $r.Match.RelPath 48), (Format-SeriesDuration $r.Match.Seconds), (Format-FileSize $r.Match.Bytes)) -ForegroundColor Yellow
+                Write-Host ("  " + (& $line '' @('DRIVE', $r.Match.RelPath) (Format-SeriesDuration $r.Match.Seconds) (Format-FileSize $r.Match.Bytes))) -ForegroundColor Magenta -NoNewline
+                Write-Host "   ALREADY HAVE? " -ForegroundColor Yellow -NoNewline
+                Write-Host (Format-MatchCloseness $r.DiffSeconds) -ForegroundColor DarkYellow
             } else {
-                Write-Host ($fmt -f $len, 'new', '-', '', '') -ForegroundColor Green
+                Write-Host ("  " + (& $line '' @('DRIVE', '-') '' '')) -ForegroundColor DarkGray -NoNewline
+                Write-Host "   NEW - not on the drive" -ForegroundColor Green
             }
         }
     }
     $others = @($Comparison.Unmatched)
     if ($others.Count -gt 0) {
-        Write-Host "`n  $(if ($NoDiscLengths) { 'Files in the folder:' } else { 'In the folder but not on this disc:' })" -ForegroundColor Gray
+        Write-Host "`n  $(if ($NoDiscLengths) { 'Files in the folder:' } else { 'On the drive but not on this disc:' })" -ForegroundColor Gray
         foreach ($f in $others) {
-            Write-Host ($fmt -f '', '', (Get-ShortText $f.RelPath 48), (Format-SeriesDuration $f.Seconds), (Format-FileSize $f.Bytes)) -ForegroundColor Gray
+            Write-Host ("  " + (& $line '' @('DRIVE', $f.RelPath) (Format-SeriesDuration $f.Seconds) (Format-FileSize $f.Bytes))) -ForegroundColor Gray
         }
     }
     if (-not $NoDiscLengths) {
         $newCount = @($Comparison.Rows | Where-Object { -not $_.Match }).Count
-        Write-Host "`n  $($Comparison.Matched) of $(@($Comparison.Rows).Count) title(s) on this disc look like files you already have (same length); $newCount look new." -ForegroundColor White
+        $total = @($Comparison.Rows).Count
+        $color = if ($newCount -eq 0) { 'Yellow' } else { 'Green' }
+        Write-Host "`n  $($Comparison.Matched) of $total title(s) on this disc match a file you already have (same length); $newCount new." -ForegroundColor $color
+        if ($newCount -eq 0 -and $total -gt 0) { Write-Host "  Nothing new on this disc - [A] aborts without ripping." -ForegroundColor Yellow }
     }
 }
-
 # What to do about an existing folder. Returns 'continue', 'abort', or an edition label
 # (string) for a different version of the film. O opens the suspected duplicates (or the
 # folder, when there are many) so they can be checked, then asks again.
@@ -2378,11 +2405,11 @@ if (-not $Series) {
         $existingFiles = @(Get-FolderVideoFiles -Folder $existingDir)
         if ($existingFiles.Count -gt 0) {
             $discSecs = @()
-            if ($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) { $discSecs = @(Get-DiscTitleDurations -DriveRoot "$driveLetter\") }
+            if ($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) { $discSecs = @(Get-DiscTitleDurations -DriveRoot "$driveLetter\" -Detailed) }
             if ($discSecs.Count -eq 0 -and $discInfo -and -not $discInfo.Fast) {
-                $discSecs = @($discInfo.Titles | ForEach-Object { ConvertTo-DurationSeconds $_.Duration })
+                $i = 0; $discSecs = @($discInfo.Titles | ForEach-Object { $i++; [pscustomobject]@{ Seconds = (ConvertTo-DurationSeconds $_.Duration); Source = "MakeMKV title $i" } })
             }
-            $comparison = Compare-DiscToFolder -DiscSeconds $discSecs -Files $existingFiles
+            $comparison = Compare-DiscToFolder -DiscTitles $discSecs -Files $existingFiles
             Show-DiscFolderComparison -Comparison $comparison -Folder $existingDir -NoDiscLengths:($discSecs.Count -eq 0)
             $folderChoice = Read-ExistingFolderChoice -Comparison $comparison -Folder $existingDir
             $script:ExistingFolderNote = "Existing folder $existingDir`: $($comparison.Matched) of $(@($comparison.Rows).Count) disc title(s) matched existing files by length; choice: $folderChoice"
