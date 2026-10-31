@@ -26,7 +26,7 @@ function Import-FunctionFromScript {
     if (-not $fn) { throw "Function '$FunctionName' not found in $ScriptPath" }
     return $fn.Extent.Text
 }
-foreach ($f in 'Get-FolderVideoFiles', 'Compare-DiscToFolder', 'Format-FileSize', 'Show-DiscFolderComparison', 'Read-ExistingFolderChoice', 'Get-ShortText') {
+foreach ($f in 'Get-FolderVideoFiles', 'Compare-DiscToFolder', 'Format-FileSize', 'Format-MatchCloseness', 'Show-DiscFolderComparison', 'Read-ExistingFolderChoice', 'Get-ShortText') {
     . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $f)))
 }
 
@@ -96,13 +96,23 @@ try {
 Write-Host "`nShow-DiscFolderComparison" -ForegroundColor Cyan
 $c = Compare-DiscToFolder -DiscSeconds @(7556, 1500) -Files $erin
 $text = (Show-DiscFolderComparison -Comparison $c -Folder 'F:\DVDs\Erin Brockovich' 6>&1 | Out-String)
-Assert-True ($text -match 'ALREADY HAVE\?\s+Erin Brockovich-Feature\.mp4\s+2:05:55\s+1\.35 GB') "matched row shows file, length and size"
-Assert-True ($text -match '25:00\s+new') "new row"
-Assert-True ($text -match 'In the folder but not on this disc') "unmatched files listed"
+Assert-True ($text -match 'DRIVE\s+Erin Brockovich-Feature\.mp4\s+2:05:55\s+1\.35 GB\s+ALREADY HAVE\?\s+1 s apart') "drive row: file, length, size, then how close the match is"
+Assert-True ($text -match '#2\s+DISC\s+title 2\s+25:00') "disc row: number, source (bare lengths fall back to title N), length"
+Assert-True ($text -match 'DRIVE\s+-\s+NEW - not on the drive') "a title with no file of its length is NEW"
+Assert-True ($text -match 'On the drive but not on this disc') "unmatched files listed"
 Assert-True ($text -match '1 of 2 title\(s\)') "summary line"
 $text = (Show-DiscFolderComparison -Comparison (Compare-DiscToFolder -Files $erin) -Folder 'F:\x' -NoDiscLengths 6>&1 | Out-String)
 Assert-True ($text -match 'could not be read' -and $text -match 'Files in the folder') "no disc lengths: files-only table"
 
+$c = Compare-DiscToFolder -DiscTitles @([pscustomobject]@{ Seconds = 7555; Source = 'VTS_04 title 1' }, [pscustomobject]@{ Seconds = 1807; Source = 'VTS_05 title 1' }) -Files $erin
+Assert-Equal 'VTS_04 title 1' $c.Rows[0].Source "disc titles keep where they come from"
+Assert-Equal 0 $c.Rows[0].DiffSeconds "exact match: 0 s apart"
+Assert-Equal 1 $c.Rows[1].DiffSeconds "1 s encode drift recorded"
+$text = (Show-DiscFolderComparison -Comparison $c -Folder 'F:\DVDs\Erin Brockovich' 6>&1 | Out-String)
+Assert-True ($text -match '#1\s+DISC\s+VTS_04 title 1\s+2:05:55') "real Erin DVD layout: disc row with its title set"
+Assert-True ($text -match 'ALREADY HAVE\?\s+exact length') "exact length in words"
+Assert-True ($text -match 'Nothing new on this disc - \[A\] aborts') "all matched: says nothing is new"
+Assert-Equal 'exact length|4 s apart|' "$(Format-MatchCloseness 0)|$(Format-MatchCloseness 4)|$(Format-MatchCloseness $null)" "closeness wording"
 Write-Host "`nRead-ExistingFolderChoice" -ForegroundColor Cyan
 $c = Compare-DiscToFolder -DiscSeconds @(7556, 897) -Files $erin
 $opened = New-Object System.Collections.Generic.List[string]

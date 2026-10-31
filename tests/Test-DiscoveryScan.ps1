@@ -162,6 +162,7 @@ try {
     [IO.File]::WriteAllBytes((Join-Path $vts 'VTS_02_0.IFO'), [byte[]](1..50))   # junk: skipped
     $d = @(Get-DiscTitleDurations -DriveRoot $tmp2)
     Assert-Equal '2670,3723' ($d -join ',') "DVD: entry PGCs only, BCD times, junk IFO skipped"
+    Assert-Equal 'VTS_01 title 1=2670|VTS_01 title 2=3723' ((@(Get-DiscTitleDurations -DriveRoot $tmp2 -Detailed) | ForEach-Object { "$($_.Source)=$($_.Seconds)" }) -join '|') "-Detailed: each title says which title set and title it is"
 
     $pl = Join-Path $tmp2 'BD\BDMV\PLAYLIST'; New-Item -ItemType Directory -Path $pl -Force | Out-Null
     # MPLS: 2 play items, 600 s + 720 s at 45 kHz
@@ -179,6 +180,7 @@ try {
     [IO.File]::WriteAllBytes((Join-Path $pl '00001.mpls'), $mb)
     $d = @(Get-DiscTitleDurations -DriveRoot (Join-Path $tmp2 'BD'))
     Assert-Equal '1320' ($d -join ',') "Blu-ray: playlist length is the sum of its play items"
+    Assert-Equal 'playlist 00001.mpls' (@(Get-DiscTitleDurations -DriveRoot (Join-Path $tmp2 'BD') -Detailed))[0].Source "-Detailed Blu-ray: the playlist file"
     Assert-Equal 0 @(Get-DiscTitleDurations -DriveRoot (Join-Path $tmp2 'nothing')).Count "no disc structure: no lengths"
 } finally {
     Remove-Item -Recurse -Force $tmp2 -ErrorAction SilentlyContinue
