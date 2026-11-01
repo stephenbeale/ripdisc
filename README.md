@@ -186,7 +186,7 @@ Enter keeps the standard movie folder. Documentaries, Tutorials, Fitness, Music 
 The year is decided in this order:
 1. `-Year 2014` on the command line is always used, even with style 1.
 2. An existing `Slow Dance` or `Slow Dance (2014)` folder is reused when there is exactly one. A Disc 2 or extras run therefore lands beside Disc 1.
-3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year. Only matches whose title is like yours are listed; when none are, the prompt is skipped and the folder has no year (a search for "Duxford the Second World War Years" used to offer six unrelated war films).
+3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year. Only matches whose title is like yours are listed; when none are, the prompt is skipped and the folder has no year (a search for "Duxford the Second World War Years" used to offer six unrelated war films). The shared words must come in the same order, so "The Story of Concorde" does not match "Concorde: The Untold Story". `N` turns the prompt off for good (`askFolderYear: false`; `setup.ps1` step 7 turns it back on). Years found without asking are still used.
 
 File names follow the folder (`Slow Dance (2014)-title_t00.mp4`). Series folders never get a year. The retry command for a failed run carries `-Year`, so `continue-rip.ps1` rebuilds the same path.
 

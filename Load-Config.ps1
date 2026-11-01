@@ -14,6 +14,7 @@
       $script:Config_DriveLabels     - Hashtable of drive index -> label
       $script:Config_TmdbApiKey      - TMDb API key (may be empty)
       $script:Config_MovieFolderNaming - 'title' or 'title-year' (movie / genre-film folders)
+      $script:Config_AskFolderYear   - $false when the user chose "never ask" at the year prompt
       $script:Config_LibraryFolders  - Media server library folder names on the output drive (may be empty)
 #>
 
@@ -119,6 +120,27 @@ if ($cfg -and $cfg.tmdbApiKey) {
 # Movie / genre-film folder naming (setup.ps1 step 7): 'title' = "Slow Dance",
 # 'title-year' = "Slow Dance (2014)". Series folders are never changed.
 $script:Config_MovieFolderNaming = if ($cfg -and "$($cfg.movieFolderNaming)" -in @('title', 'title-year')) { "$($cfg.movieFolderNaming)" } else { 'title' }
+
+# With 'title-year': ask for the year when nothing found one (default), or never ask -
+# [N] at the year prompt saves askFolderYear = false; setup.ps1 step 7 turns it back on.
+# Years found without asking (the title picked from the list, an existing folder) still count.
+$script:Config_AskFolderYear = -not ($cfg -and $cfg.PSObject.Properties['askFolderYear'] -and $cfg.askFolderYear -eq $false)
+
+# Saves one setting into ripdisc-config.json, keeping every other key. Creates the file if
+# it is missing. Returns $true when written; a failure is reported, never fatal.
+function Save-ConfigSetting {
+    param([string]$Name, $Value, [string]$Path = (Join-Path $PSScriptRoot "ripdisc-config.json"))
+    try {
+        $obj = if (Test-Path -LiteralPath $Path) { Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } else { $null }
+        if (-not $obj) { $obj = [pscustomobject]@{} }
+        $obj | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+        $obj | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+        return $true
+    } catch {
+        Write-Host "WARNING: could not save $Name to $Path - $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
 
 # Media server library folders on the output drive (setup.ps1 step 5), e.g. DVDs,
 # Documentaries, Music. Empty = not set up: the rip-time library prompt scans the drive.
@@ -316,7 +338,13 @@ function Test-SimilarTitle {
     $wa = @((("$A".ToLowerInvariant() -replace '&', ' and ') -replace '[^\p{L}\p{Nd}]+', ' ').Split(' ') | Where-Object { $_ -and $_ -notin $stop } | Select-Object -Unique)
     $wb = @((("$B".ToLowerInvariant() -replace '&', ' and ') -replace '[^\p{L}\p{Nd}]+', ' ').Split(' ') | Where-Object { $_ -and $_ -notin $stop } | Select-Object -Unique)
     if ($wa.Count -eq 0 -or $wb.Count -eq 0) { return $false }
-    $common = @($wa | Where-Object { $_ -in $wb }).Count
+    # The shared words must come in the same order in both titles. Real case 2026-11-01:
+    # "The Story of Concorde" got "Concorde: The Untold Story" (2023) - same two words,
+    # different title.
+    $inA = @($wa | Where-Object { $_ -in $wb })
+    $inB = @($wb | Where-Object { $_ -in $wa })
+    if (($inA -join ' ') -ne ($inB -join ' ')) { return $false }
+    $common = $inA.Count
     if ($common -eq [math]::Min($wa.Count, $wb.Count)) { return $true }
     $union = $wa.Count + $wb.Count - $common
     return ($common / $union) -ge 0.6

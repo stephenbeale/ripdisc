@@ -54,7 +54,7 @@ function Get-ScriptParameterNames {
 
 foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder',
                     'Get-EditDistance', 'ConvertTo-LooseTitleKey', 'Test-NearMissTitle', 'Find-NearMissMediaFolders',
-                    'Test-SimilarTitle')) {
+                    'Test-SimilarTitle', 'Save-ConfigSetting')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
 }
 foreach ($name in @('New-TitleCandidate', 'Get-TitleCandidateUrl', 'Format-TitleCandidate', 'Show-TitleCandidates',
@@ -179,6 +179,38 @@ try {
     Assert-True (Test-SimilarTitle 'Erin Brokovich' 'Erin Brockovich') 'a misspelling is similar'
     Assert-True (-not (Test-SimilarTitle 'Duxford' 'My Oxford Year')) '"Duxford" is not "My Oxford Year"'
     Assert-True (Test-SimilarTitle 'The Good, the Bad and the Ugly' 'Good Bad Ugly') 'punctuation and "the"/"and" ignored'
+
+    # Real case 2026-11-01: typed "The Story of Concorde"; the year prompt offered
+    # "Concorde: The Untold Story" (2023) - the same two words in a different order.
+    Assert-True (-not (Test-SimilarTitle 'The Story of Concorde' 'Concorde: The Untold Story')) '"The Story of Concorde" is not "Concorde: The Untold Story"'
+    $concHits = @(New-TitleCandidate -Title 'Concorde: The Untold Story' -Year '2023' -Kind 'TV mini-series' -Source 'IMDb')
+    $script:Asked = 0
+    Assert-True ($null -eq (Read-FolderYear -Title 'The Story of Concorde' -Candidates $concHits -Search $searchStub -SkipWhenNoSimilar -ReadInput $countingInput 6>$null)) 'Concorde: nothing similar, no year'
+    Assert-Equal 0 $script:Asked 'Concorde: the year prompt is skipped'
+    Assert-True (Test-SimilarTitle 'Story of Concorde' 'The Story of Concorde: Supersonic') 'same words in the same order still match'
+    Assert-True (-not (Test-SimilarTitle 'Bad Good' 'Good Bad Ugly')) 'shared words in a different order: not similar'
+
+    Write-Host "`nYear prompt: [N] never ask again" -ForegroundColor Cyan
+    $script:NeverAsked = 0
+    $never = { $script:NeverAsked++ }
+    Assert-True ($null -eq (Read-FolderYear -Title 'Slow Dance' -Candidates $hits -OnNeverAsk $never -ReadInput (New-InputQueue @('n')) 6>$null)) 'N gives no year'
+    Assert-Equal 1 $script:NeverAsked 'N runs the never-ask action once'
+    Assert-Equal '2014' (Read-FolderYear -Title 'Slow Dance' -Candidates $hits -ReadInput (New-InputQueue @('N', '1')) 6>$null) 'without -OnNeverAsk, N is an invalid choice and re-asks'
+    $script:NeverAsked = 0
+    Assert-True ($null -eq (Read-FolderYear -Title 'Slow Dance' -Candidates $hits -OnNeverAsk $never -ReadInput (New-InputQueue @('')) 6>$null)) 'Enter still means no year for this disc only'
+    Assert-Equal 0 $script:NeverAsked 'Enter does not turn the prompt off'
+
+    $cfgFile = Join-Path $tempRoot 'ripdisc-config.json'
+    '{ "tmdbApiKey": "abc", "movieFolderNaming": "title-year", "libraryFolders": ["DVDs"] }' | Set-Content -LiteralPath $cfgFile -Encoding UTF8
+    Assert-True (Save-ConfigSetting -Name 'askFolderYear' -Value $false -Path $cfgFile) 'Save-ConfigSetting writes'
+    $saved = Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json
+    Assert-True ($saved.askFolderYear -eq $false) 'askFolderYear saved as false'
+    Assert-Equal 'title-year' $saved.movieFolderNaming 'other keys kept: movieFolderNaming'
+    Assert-Equal 'abc' $saved.tmdbApiKey 'other keys kept: tmdbApiKey'
+    Assert-Equal 'DVDs' (@($saved.libraryFolders) -join ',') 'other keys kept: libraryFolders'
+    $newCfg = Join-Path $tempRoot 'new-config.json'
+    Assert-True (Save-ConfigSetting -Name 'askFolderYear' -Value $false -Path $newCfg) 'missing config file is created'
+    Assert-True ((Get-Content -LiteralPath $newCfg -Raw | ConvertFrom-Json).askFolderYear -eq $false) 'new file holds the setting'
 
     # ---------------------------------------------------------------------------
     Write-Host "`nHand-off to continue-rip.ps1" -ForegroundColor Cyan
@@ -361,6 +393,20 @@ try {
     Assert-Equal 'title' $sample.movieFolderNaming 'sample config defaults to plain titles'
     $configText = Get-Content -LiteralPath $configPath -Raw
     Assert-True ($configText -match "-in @\('title', 'title-year'\)") 'Load-Config.ps1 accepts only the two styles (anything else falls back to title)'
+    Assert-True ($setupText -match 'askFolderYear = \[bool\]\$askFolderYear') 'setup.ps1 saves askFolderYear (keeps a "never ask" choice)'
+    Assert-True ($sample.askFolderYear -eq $true) 'sample config asks for the year'
+    $ripText2 = Get-Content -LiteralPath $ripDiscPath -Raw
+    Assert-True ($ripText2.Contains('elseif (-not $script:Config_AskFolderYear)')) 'rip-disc.ps1 skips the year prompt when askFolderYear is false'
+    Assert-True ($ripText2.Contains('-SkipWhenNoSimilar -OnNeverAsk $neverAsk')) 'the main year prompt offers [N]'
+    # Load-Config's askFolderYear read, against real config files
+    foreach ($c in @(@{ J = '{ "askFolderYear": false }'; E = $false }, @{ J = '{ "askFolderYear": true }'; E = $true }, @{ J = '{ }'; E = $true })) {
+        $dir = Join-Path $tempRoot ('lc' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Copy-Item -LiteralPath $configPath, (Join-Path $repoRoot 'MediaLibraries.ps1') -Destination $dir
+        $c.J | Set-Content -LiteralPath (Join-Path $dir 'ripdisc-config.json') -Encoding UTF8
+        $got = & { . (Join-Path $dir 'Load-Config.ps1') *>$null; $script:Config_AskFolderYear }
+        Assert-Equal $c.E $got "Load-Config: $($c.J) -> AskFolderYear $($c.E)"
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

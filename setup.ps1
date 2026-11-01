@@ -382,10 +382,12 @@ Write-Host "  How should movie and genre-film folders be named? (Series folders 
 Write-Host "  The year comes from the title you pick when ripping without -title, from -Year," -ForegroundColor Gray
 Write-Host "  or from a quick lookup prompt; you can always skip it for one disc." -ForegroundColor Gray
 $existingNaming = 'title'
+$existingAskYear = $true
 if (Test-Path $configPath) {
     try {
         $oldCfg = Get-Content $configPath -Raw | ConvertFrom-Json
         if ("$($oldCfg.movieFolderNaming)" -eq 'title-year') { $existingNaming = 'title-year' }
+        if ($oldCfg.PSObject.Properties['askFolderYear'] -and $oldCfg.askFolderYear -eq $false) { $existingAskYear = $false }
     } catch {}
 }
 $namingDefault = if ($existingNaming -eq 'title-year') { '2' } else { '1' }
@@ -398,6 +400,19 @@ while ($true) {
     if ($namingInput.Trim() -eq '1') { $movieFolderNaming = 'title'; break }
     if ($namingInput.Trim() -eq '2') { $movieFolderNaming = 'title-year'; break }
     Write-Host "  Enter 1 or 2." -ForegroundColor Red
+}
+# Ask for the year when the title picked while ripping did not give one? ([N] at the
+# year prompt turns this off; here it can be turned back on.)
+$askFolderYear = $existingAskYear
+if ($movieFolderNaming -eq 'title-year') {
+    $askDefault = if ($existingAskYear) { 'Y' } else { 'N' }
+    while ($true) {
+        $askInput = Read-Host "  Ask for the year when it is not found automatically? [Y/N, Enter = $askDefault]"
+        if ([string]::IsNullOrWhiteSpace($askInput)) { break }
+        if ($askInput.Trim() -ieq 'Y') { $askFolderYear = $true; break }
+        if ($askInput.Trim() -ieq 'N') { $askFolderYear = $false; break }
+        Write-Host "  Enter Y or N." -ForegroundColor Red
+    }
 }
 
 # ========== BUILD DRIVE LABELS ==========
@@ -429,6 +444,7 @@ $config = @{
     driveLabels = $driveLabels
     tmdbApiKey = if ($tmdbKey) { $tmdbKey } else { "" }
     movieFolderNaming = $movieFolderNaming
+    askFolderYear = [bool]$askFolderYear
     libraryFolders = @($libraryFolders)
 }
 
@@ -451,7 +467,7 @@ Write-Host "  Temp root:     $tempRoot" -ForegroundColor Green
 Write-Host "  Input drive:   $inputDrive" -ForegroundColor Green
 Write-Host "  Output drive:  $outputDrive" -ForegroundColor Green
 Write-Host "  Libraries:     $(if ($libraryFolders.Count -gt 0) { $libraryFolders -join ', ' } else { 'Not set (each rip lists the drive''s folders)' })" -ForegroundColor $(if ($libraryFolders.Count -gt 0) { "Green" } else { "Yellow" })
-Write-Host "  Movie folders: $(if ($movieFolderNaming -eq 'title-year') { 'Title (Year)' } else { 'Title' })" -ForegroundColor Green
+Write-Host "  Movie folders: $(if ($movieFolderNaming -eq 'title-year') { "Title (Year)$(if (-not $askFolderYear) { ' - year prompt off' })" } else { 'Title' })" -ForegroundColor Green
 Write-Host "  TMDb API key:  $(if ($tmdbKey) { 'Configured' } else { 'Not set (auto-discovery disabled)' })" -ForegroundColor $(if ($tmdbKey) { "Green" } else { "Yellow" })
 Write-Host ""
 
