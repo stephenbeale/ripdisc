@@ -54,7 +54,7 @@ function Get-ScriptParameterNames {
 
 foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder',
                     'Get-EditDistance', 'ConvertTo-LooseTitleKey', 'Test-NearMissTitle', 'Find-NearMissMediaFolders',
-                    'Test-SimilarTitle')) {
+                    'Test-SimilarTitle', 'Get-LegacySafeTitle', 'Resolve-LegacySafeTitle')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
 }
 foreach ($name in @('New-TitleCandidate', 'Get-TitleCandidateUrl', 'Format-TitleCandidate', 'Show-TitleCandidates',
@@ -181,6 +181,25 @@ try {
     Assert-True (Test-SimilarTitle 'The Good, the Bad and the Ugly' 'Good Bad Ugly') 'punctuation and "the"/"and" ignored'
 
     # ---------------------------------------------------------------------------
+    Write-Host "`nFolders named by the old '_' rule are kept" -ForegroundColor Cyan
+    $st = 'Strike Force: The Story of Sukhoi'
+    Assert-Equal 'Strike Force_ The Story of Sukhoi' (Get-LegacySafeTitle $st) 'old rule: colon -> underscore'
+    $docs = Join-Path $tempRoot 'legacy\Documentaries'
+    $series = Join-Path $tempRoot 'legacy\Series'
+    New-Item -ItemType Directory -Path $docs, $series -Force | Out-Null
+    Assert-Equal 'Strike Force The Story of Sukhoi' (Resolve-LegacySafeTitle -Title $st -SafeTitle 'Strike Force The Story of Sukhoi' -ParentDirs @($docs, $series) 6>$null) 'no old folder: the new name'
+    New-Item -ItemType Directory -Path (Join-Path $docs 'Strike Force_ The Story of Sukhoi (2007)') | Out-Null
+    Assert-Equal 'Strike Force_ The Story of Sukhoi' (Resolve-LegacySafeTitle -Title $st -SafeTitle 'Strike Force The Story of Sukhoi' -ParentDirs @($series, $docs, (Join-Path $tempRoot 'missing')) 6>$null) 'an old "_ (2007)" folder keeps the old name'
+    New-Item -ItemType Directory -Path (Join-Path $series 'Strike Force The Story of Sukhoi') | Out-Null
+    Assert-Equal 'Strike Force The Story of Sukhoi' (Resolve-LegacySafeTitle -Title $st -SafeTitle 'Strike Force The Story of Sukhoi' -ParentDirs @($docs, $series) 6>$null) 'a folder by the new name wins over the old one'
+    Assert-Equal 'Slow Dance' (Resolve-LegacySafeTitle -Title 'Slow Dance' -SafeTitle 'Slow Dance' -ParentDirs @($docs) 6>$null) 'a title the rules agree on is unchanged'
+    New-Item -ItemType Directory -Path (Join-Path $docs 'Film [Cut]') | Out-Null
+    Assert-Equal 'Film [Cut]' (Resolve-LegacySafeTitle -Title 'Film [Cut]' -SafeTitle 'Film Cut' -ParentDirs @($docs) 6>$null) 'an old folder with brackets is found (no wildcard trouble)'
+    $ripSrc = Get-Content -LiteralPath $ripDiscPath -Raw
+    $contSrc = Get-Content -LiteralPath $continuePath -Raw
+    Assert-True ($ripSrc.Contains('$safeTitle = Resolve-LegacySafeTitle -Title $title -SafeTitle $safeTitle')) 'rip-disc.ps1 keeps old "_" folders'
+    Assert-True ($contSrc.Contains('$safeTitle = Resolve-LegacySafeTitle -Title $title -SafeTitle $safeTitle')) 'continue-rip.ps1 keeps old "_" folders'
+
     Write-Host "`nHand-off to continue-rip.ps1" -ForegroundColor Cyan
 
     Assert-True ((Get-ScriptParameterNames $ripDiscPath) -contains 'Year') 'rip-disc.ps1 has -Year'

@@ -611,9 +611,14 @@ function Get-SafeTitle {
     # Callers should build paths/filenames from this; $title itself is left untouched
     # for display text (console output, log message content, window title) so the user
     # always sees their real title, not the sanitized one.
+    #
+    # Illegal characters (and [ ], which PowerShell -Path reads as wildcards) are REMOVED,
+    # not turned into "_": each run becomes a space, then spaces are collapsed. So
+    # "Strike Force: The Story" -> "Strike Force The Story" and "AC/DC" -> "AC DC".
+    # Folders made by the old "_" rule are still found (Resolve-LegacySafeTitle).
     param([string]$Title)
 
-    $safe = ($Title -replace '[\\/:*?"<>|]', '_').TrimEnd(' ', '.')
+    $safe = (($Title -replace '[\\/:*?"<>|\[\]]+', ' ') -replace '\s{2,}', ' ').Trim().TrimEnd(' ', '.')
     if ([string]::IsNullOrWhiteSpace($safe)) {
         $safe = $Title -replace '[\\/:*?"<>|]', '_'
     }
@@ -719,6 +724,10 @@ $tempRoot = $script:Config_TempRoot
 # untouched for display text (console output, log message content, window title) so the
 # user always sees their real title, not the sanitized one.
 $safeTitle = Get-SafeTitle $title
+# A run started before titles dropped ':' etc. used the old "_" name: keep it.
+$legacyParents = @("Series", $script:GenreFolder, (Get-MovieParentFolder -Documentary:$Documentary -Tutorial:$Tutorial -Fitness:$Fitness `
+    -Music:$Music -Surf:$Surf -Genre $Genre -Bluray:$Bluray)) | Where-Object { $_ } | ForEach-Object { Join-Path (Get-NormalizedDriveLetter $OutputDrive) $_ }
+$safeTitle = Resolve-LegacySafeTitle -Title $title -SafeTitle $safeTitle -ParentDirs (@($legacyParents) + @($script:Config_TempRoot))
 
 # Movie / genre-film folder: -Year, else the one existing "<title>" / "<title> (YYYY)"
 # folder, else the plain title. Never asks - rip-disc.ps1 settled the name.

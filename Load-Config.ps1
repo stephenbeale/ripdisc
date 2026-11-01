@@ -445,6 +445,31 @@ function Find-ExistingMediaFolder {
     return $null
 }
 
+# The folder name the old Get-SafeTitle rule gave $Title (illegal characters -> "_",
+# brackets kept): "Strike Force: The Story" -> "Strike Force_ The Story".
+function Get-LegacySafeTitle {
+    param([string]$Title)
+    return ($Title -replace '[\\/:*?"<>|]', '_').TrimEnd(' ', '.')
+}
+
+# $SafeTitle, or the old-rule name when a folder by that name (or "<name> (YYYY)") exists
+# in one of $ParentDirs and none by the new name does - so titles ripped before the rule
+# changed keep their folder (Disc 2 / extras / continue-rip land beside Disc 1).
+function Resolve-LegacySafeTitle {
+    param([string]$Title, [string]$SafeTitle, [string[]]$ParentDirs = @())
+    $old = Get-LegacySafeTitle $Title
+    if (-not $old -or $old -eq $SafeTitle) { return $SafeTitle }
+    $dirs = @($ParentDirs | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
+    foreach ($d in $dirs) { if (Find-ExistingMediaFolder -ParentDir $d -SafeTitle $SafeTitle) { return $SafeTitle } }
+    foreach ($d in $dirs) {
+        if (Find-ExistingMediaFolder -ParentDir $d -SafeTitle $old) {
+            Write-Host "Using the existing folder name `"$old`" (named before titles dropped ':' etc.)" -ForegroundColor Gray
+            return $old
+        }
+    }
+    return $SafeTitle
+}
+
 # The name THIS run gives its main file, as a regex: "-Part N" for a documentary part,
 # "-Feature-BluRay" for -Bluray, else "-Feature". Version-specific on purpose: a genre
 # folder can hold the DVD "-Feature" and the Blu-ray "-Feature-BluRay" side by side

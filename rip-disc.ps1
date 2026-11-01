@@ -358,9 +358,14 @@ function Get-SafeTitle {
     # Callers should build paths/filenames from this; $title itself is left untouched
     # for display text (console output, log message content, window title, TMDb
     # lookups) so the user always sees their real title, not the sanitized one.
+    #
+    # Illegal characters (and [ ], which PowerShell -Path reads as wildcards) are REMOVED,
+    # not turned into "_": each run becomes a space, then spaces are collapsed. So
+    # "Strike Force: The Story" -> "Strike Force The Story" and "AC/DC" -> "AC DC".
+    # Folders made by the old "_" rule are still found (Resolve-LegacySafeTitle).
     param([string]$Title)
 
-    $safe = ($Title -replace '[\\/:*?"<>|]', '_').TrimEnd(' ', '.')
+    $safe = (($Title -replace '[\\/:*?"<>|\[\]]+', ' ') -replace '\s{2,}', ' ').Trim().TrimEnd(' ', '.')
     if ([string]::IsNullOrWhiteSpace($safe)) {
         $safe = $Title -replace '[\\/:*?"<>|]', '_'
     }
@@ -1489,7 +1494,7 @@ function Get-ImdbTitleCandidates {
         return @()
     }
     $kinds = @{ movie = 'Movie'; short = 'Short'; tvSeries = 'TV series'; tvMiniSeries = 'TV mini-series'; tvMovie = 'TV movie'
-                tvSpecial = 'TV special'; tvShort = 'TV short'; video = 'Video' }
+                tvSpecial = 'TV special'; tvShort = 'TV short'; video = 'Direct-to-video' }
     return @(@($response.d) | Where-Object {
             $_ -and "$($_.id)" -match '^tt\d+$' -and $_.l -and
             "$($_.qid)" -notmatch '^(musicVideo|videoGame|podcastSeries|podcastEpisode|tvEpisode)$'
@@ -2367,6 +2372,11 @@ if ($titleWarnings.Count -gt 0) {
 # characters and Windows' silent trailing-dot/space stripping (see Get-SafeTitle) both
 # mean the folder/filenames actually written can differ from $title.
 $safeTitle = Get-SafeTitle $title
+# A title already ripped under the old "_" rule ("Strike Force_ The Story") keeps that
+# folder, so Disc 2 / extras land beside Disc 1 instead of in a new "Strike Force The Story".
+$legacyParents = @("Series", $script:GenreFolder, (Get-MovieParentFolder -Documentary:$Documentary -Tutorial:$Tutorial -Fitness:$Fitness `
+    -Music:$Music -Surf:$Surf -Genre $Genre -Bluray:$Bluray)) | Where-Object { $_ } | ForEach-Object { Join-Path (Get-NormalizedDriveLetter $OutputDrive) $_ }
+$safeTitle = Resolve-LegacySafeTitle -Title $title -SafeTitle $safeTitle -ParentDirs (@($legacyParents) + @($script:Config_TempRoot))
 
 # ========== MOVIE FOLDER NAME (movies and genre films; series folders unchanged) ==========
 # "Slow Dance" or "Slow Dance (2014)". Precedence: -Year; else an existing folder for this
