@@ -264,19 +264,21 @@ function Invoke-SeriesRetroRename {
         if ($next -gt 1 -and (-not $nextBySeason.ContainsKey($key) -or $next -gt $nextBySeason[$key])) { $nextBySeason[$key] = $next }
     }
 
-    $planned = 0; $renamed = 0; $skipped = 0; $declined = 0
+    $planned = 0; $renamed = 0; $skipped = 0; $declined = 0; $failed = 0
     foreach ($x in $results) {
         $planned += @($x.Result.Plan | Where-Object { -not $_.Skip }).Count
         $renamed += [int]$x.Result.Renamed
         $skipped += [int]$x.Result.Skipped
         if ($x.Result.DryRun) { $skipped += @($x.Result.Plan | Where-Object { $_.Skip }).Count }
         if ($x.Result.Declined) { $declined++ }
+        if ($x.Result.Failed) { $failed++ }
     }
     Write-Host ""
     if ($Apply) {
         $tail = ""
         if ($skipped) { $tail += ", skipped $skipped" }
         if ($declined) { $tail += ", $declined folder(s) declined" }
+        if ($failed) { $tail += ", $failed folder(s) NOT renamed (manifest could not be written)" }
         Write-Host "Done: renamed $renamed file(s) in $($units.Count) folder(s)$tail." -ForegroundColor Green
     } else {
         $tail = if ($skipped) { " ($skipped would be skipped - target exists)" } else { "" }

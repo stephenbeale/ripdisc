@@ -380,6 +380,34 @@ try {
     Assert-Equal 0 $undo.Restored 'running undo again (repo script, -ManifestPath) restores nothing new...'
     Assert-Equal 4 $undo.Skipped '...and skips missing/colliding files with warnings instead of failing'
 
+    Write-Host "`nAppending to a manifest with other columns" -ForegroundColor Cyan
+    # Real case 2026-11-01: F:\Series\Silicon Valley\Season 3\Disc1 had a hand-written
+    # manifest with IntermediateName/Notes; Export-Csv -Append failed and the files were
+    # renamed anyway, with no manifest rows to undo them.
+    $handDir = Join-Path $tempRoot 'Series\Hand\Season 3\Disc1'
+    New-Item -ItemType Directory -Path $handDir -Force | Out-Null
+    'Hand - S03E01 - Pilot.mp4', 'Hand - S03E02 - Two.mp4' | ForEach-Object { Set-Content -LiteralPath (Join-Path $handDir $_) -Value $_ }
+    $handManifest = Join-Path $handDir 'rename-manifest.csv'
+    @('"OriginalName","NewName","Kind","OriginalPath","NewPath","Timestamp","IntermediateName","Notes"',
+      '"a_t00.mp4","Hand - S03E01 - Pilot.mp4","Episode","x","y","2026-10-04 10:40:00","Hand-S03-E01.mp4","by hand"') | Set-Content -LiteralPath $handManifest -Encoding UTF8
+    $handResult = Invoke-SeriesEpisodeRename -Directory $handDir -Title 'Hand' -Season 3 -StartEpisode 1 `
+        -ReadInput (New-InputQueue @('y')) -GetDuration { param($p) 1640 } 6>$null
+    $handRows = @(Import-Csv -LiteralPath $handManifest)
+    Assert-Equal 2 $handResult.Renamed 'files renamed after appending to the hand-written manifest'
+    Assert-Equal 3 $handRows.Count 'the new rows were appended (1 old + 2 new)'
+    Assert-Equal 'Hand - S03E02 - Two.mp4' $handRows[2].OriginalName 'appended row keeps the original name'
+    Assert-Equal 'by hand' $handRows[0].Notes 'the old row and its extra columns are kept'
+    Assert-Equal '' $handRows[1].IntermediateName 'new rows get the extra columns, empty'
+
+    $badDir = Join-Path $tempRoot 'Series\Bad\Disc1'
+    New-Item -ItemType Directory -Path $badDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $badDir 'title_t00.mp4') -Value 'x'
+    @('"Foo","Bar"', '"1","2"') | Set-Content -LiteralPath (Join-Path $badDir 'rename-manifest.csv') -Encoding UTF8
+    $badResult = Invoke-SeriesEpisodeRename -Directory $badDir -Title 'Bad' -Season 1 -StartEpisode 1 `
+        -ReadInput (New-InputQueue @('y')) -GetDuration { param($p) 1640 } 6>$null
+    Assert-True ($badResult.Failed -and $badResult.Renamed -eq 0) 'a manifest that cannot be appended to stops the rename'
+    Assert-True (Test-Path -LiteralPath (Join-Path $badDir 'title_t00.mp4')) 'nothing renamed when the manifest was not written'
+
     Write-Host "`nManifest survives a failure part-way through" -ForegroundColor Cyan
 
     $failDir = Join-Path $tempRoot 'Series\Fargo\Disc2'

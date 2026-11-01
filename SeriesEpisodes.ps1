@@ -788,7 +788,25 @@ function Write-RenameManifest {
     })
     if ($rows.Count -eq 0) { return 0 }
     $append = Test-Path -LiteralPath $ManifestPath
-    $rows | Export-Csv -LiteralPath $ManifestPath -NoTypeInformation -Encoding UTF8 -Append:$append
+    if ($append) {
+        # An existing manifest may have other columns (a hand-written one with
+        # IntermediateName/Notes - real case: F:\Series\Silicon Valley\Season 3\Disc1,
+        # 2026-11-01, where the append failed and the files were renamed anyway). Give our
+        # rows the file's extra columns, empty; -Force then lets the append through.
+        # OriginalName/NewName must be there, or undo-rename.ps1 could not use our rows.
+        $header = @((Import-Csv -LiteralPath $ManifestPath | Select-Object -First 1).PSObject.Properties.Name)
+        if ($header.Count -eq 0) {
+            $line = Get-Content -LiteralPath $ManifestPath -TotalCount 1
+            $header = @(("$line" -split ',') | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+        }
+        if ($header.Count -gt 0 -and ($header -notcontains 'OriginalName' -or $header -notcontains 'NewName')) {
+            throw "$ManifestPath has no OriginalName/NewName columns - not appending to it"
+        }
+        foreach ($r in $rows) {
+            foreach ($col in $header) { if (-not $r.PSObject.Properties[$col]) { $r | Add-Member -NotePropertyName $col -NotePropertyValue '' } }
+        }
+    }
+    $rows | Export-Csv -LiteralPath $ManifestPath -NoTypeInformation -Encoding UTF8 -Append:$append -Force:$append -ErrorAction Stop
     return $rows.Count
 }
 
@@ -990,7 +1008,15 @@ function Invoke-SeriesEpisodeRename {
     foreach ($w in $result.Classification.Warnings) { Write-Log "Series rename WARNING: $w" }
 
     $manifestPath = Join-Path $Directory 'rename-manifest.csv'
-    $rowCount = Write-RenameManifest -Plan $plan -ManifestPath $manifestPath
+    # No manifest, no rename: without it undo-rename.ps1 cannot restore the old names.
+    try {
+        $rowCount = Write-RenameManifest -Plan $plan -ManifestPath $manifestPath
+    } catch {
+        Write-Host "  ERROR: could not write the rename manifest ($manifestPath): $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Nothing was renamed - files keep their current names." -ForegroundColor Yellow
+        Write-Log "ERROR: rename manifest not written ($($_.Exception.Message)) - nothing renamed"
+        return [pscustomobject]@{ Renamed = 0; Skipped = 0; Declined = $false; Failed = $true; ManifestPath = $manifestPath; Plan = $plan; DryRun = $false }
+    }
     Write-Host "  Rename manifest: $manifestPath ($rowCount row(s))" -ForegroundColor Gray
     Write-Log "Rename manifest written before renaming: $manifestPath ($rowCount row(s))"
 
