@@ -156,9 +156,27 @@ Copy-Item ripdisc-config.sample.json ripdisc-config.json
 
 If no config file exists, the scripts auto-detect tool locations by searching the PATH, Windows registry, and common install directories.
 
+### Media server libraries
+
+`setup.ps1` (step 5) lists the folders on the output drive and ticks the ones that look like media server (Jellyfin/Plex) libraries: they hold video files, loose or in title folders, or have a library-like name (DVDs, Documentaries, Series, Music ...). Press Enter to accept, or type the numbers you want. The names are saved as `libraryFolders`.
+
+When `rip-disc.ps1` is run without `-OutputDrive`, it asks for the drive and then for the library:
+
+```
+Which library on F:?
+  [1] Movies - F:\DVDs or F:\Bluray, by disc type  (default)
+  [2] F:\Basketball
+  [3] F:\Documentaries
+  [4] F:\Series  (TV series - S##-E## episode naming)
+  [N] New folder
+  [A] Abort
+```
+
+Enter keeps the standard movie folder. Documentaries, Tutorials, Fitness, Music and Surf act like the matching switch (`-Documentary` etc.). Series turns on `-Series`. Any other folder is used like `-Genre <folder>`. The prompt is skipped when a type switch was given. Without `libraryFolders` it scans the drive on every run: the folders that look like libraries are listed, and `[O]` shows the rest.
+
 ### Movie folder naming
 
-`setup.ps1` (step 6) asks how movie and genre-film folders are named. The choice is saved as `movieFolderNaming` in `ripdisc-config.json`:
+`setup.ps1` (step 7) asks how movie and genre-film folders are named. The choice is saved as `movieFolderNaming` in `ripdisc-config.json`:
 
 | Choice | `movieFolderNaming` | Folder |
 |--------|---------------------|--------|
@@ -168,7 +186,7 @@ If no config file exists, the scripts auto-detect tool locations by searching th
 The year is decided in this order:
 1. `-Year 2014` on the command line is always used, even with style 1.
 2. An existing `Slow Dance` or `Slow Dance (2014)` folder is reused when there is exactly one. A Disc 2 or extras run therefore lands beside Disc 1.
-3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year.
+3. With style 2: the year of the title you picked during auto-discovery. Otherwise a prompt lists TMDb/IMDb matches with years, descriptions and links. Pick a row, type a year, `R` to search again, or press Enter for no year. Only matches whose title is like yours are listed; when none are, the prompt is skipped and the folder has no year (a search for "Duxford the Second World War Years" used to offer six unrelated war films).
 
 File names follow the folder (`Slow Dance (2014)-title_t00.mp4`). Series folders never get a year. The retry command for a failed run carries `-Year`, so `continue-rip.ps1` rebuilds the same path.
 

@@ -122,6 +122,22 @@ if (-not $PSBoundParameters.ContainsKey('OutputDrive')) {
     $OutputDrive = Read-OutputDrive -Default $script:Config_DefaultOutputDrive -Drives (Get-OutputDriveChoices)
     $script:OutputDriveExplicit = $true
     $script:LaunchParams['OutputDrive'] = $OutputDrive
+
+    # Second step: which library on that drive (Documentaries, Music, Series ...), unless a
+    # type switch (-Series, -Documentary, -Genre, -Basketball ...) already said. Enter keeps
+    # the standard DVDs / Bluray folder. The list is setup.ps1's libraryFolders, else the
+    # drive's own folders. The answer becomes the matching switch, so the continue-rip
+    # command and the [D] restart carry it.
+    if (-not ($Series -or $Documentary -or $Tutorial -or $Fitness -or $Music -or $Surf -or $Genre -or $UnknownArgs.Count -gt 0)) {
+        $library = Read-LibraryChoice -Drive ("$OutputDrive".TrimEnd('\').TrimEnd(':').ToUpper() + ':') -Configured $script:Config_LibraryFolders
+        if ($null -eq $library) { Write-Host "Aborted." -ForegroundColor Yellow; exit 0 }
+        switch ($library.Kind) {
+            'series' { $Series = $true; $script:LaunchParams['Series'] = $true }
+            'switch' { Set-Variable -Name $library.Value -Value ([switch]$true); $script:LaunchParams[$library.Value] = $true }
+            'genre'  { $Genre = $library.Value; $script:LaunchParams['Genre'] = $Genre }
+        }
+        if ($library.Folder) { Write-Host "Library: $($library.Folder)" -ForegroundColor Green }
+    }
 }
 
 # ========== NEW GENRE FOLDER (-Basketball) ==========
@@ -1699,10 +1715,21 @@ function Get-YearLookup {
 # hits that have a year; a row number takes that row's year, a typed 4-digit year is used
 # as-is, R searches again. Enter / S / end of input mean "no year" - never an abort, the
 # rip goes ahead with a plain "Title" folder. Returns the year string, or $null.
+#
+# Only hits whose title is like $Title are offered (Test-SimilarTitle): a search on an
+# edited title such as "Duxford the Second World War Years" returned six unrelated films.
+# With -SkipWhenNoSimilar and an online search that found nothing similar, the prompt is
+# not shown at all and the folder has no year (-Year still sets one). A new [R] search is
+# the user's own wording, so its hits are not filtered.
 function Read-FolderYear {
-    param([string]$Title, [object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null)
+    param([string]$Title, [object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null,
+          [switch]$SkipWhenNoSimilar)
 
-    $Candidates = @($Candidates | Where-Object { $_ -and $_.Year })
+    $Candidates = @($Candidates | Where-Object { $_ -and $_.Year -and (Test-SimilarTitle $Title $_.Title) })
+    if ($SkipWhenNoSimilar -and $Search -and $Candidates.Count -eq 0) {
+        Write-Host "`nNo online title close to `"$Title`" - folder named without a year (add -Year YYYY to set one)." -ForegroundColor Gray
+        return $null
+    }
     $show = $true
     while ($true) {
         if ($show) {
@@ -2388,7 +2415,7 @@ if (-not $Series) {
             $script:FolderYear = Get-TitleYear $safeTitle
         } else {
             $yearLookup = Get-YearLookup
-            $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup
+            $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup -SkipWhenNoSimilar
             if ($chosenYear) { $script:FolderYear = $chosenYear }
         }
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear

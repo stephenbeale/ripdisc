@@ -14,6 +14,7 @@
       $script:Config_DriveLabels     - Hashtable of drive index -> label
       $script:Config_TmdbApiKey      - TMDb API key (may be empty)
       $script:Config_MovieFolderNaming - 'title' or 'title-year' (movie / genre-film folders)
+      $script:Config_LibraryFolders  - Media server library folder names on the output drive (may be empty)
 #>
 
 $configFilePath = Join-Path $PSScriptRoot "ripdisc-config.json"
@@ -115,9 +116,13 @@ if ($cfg -and $cfg.tmdbApiKey) {
     $script:Config_TmdbApiKey = $env:TMDB_API_KEY
 }
 
-# Movie / genre-film folder naming (setup.ps1 step 6): 'title' = "Slow Dance",
+# Movie / genre-film folder naming (setup.ps1 step 7): 'title' = "Slow Dance",
 # 'title-year' = "Slow Dance (2014)". Series folders are never changed.
 $script:Config_MovieFolderNaming = if ($cfg -and "$($cfg.movieFolderNaming)" -in @('title', 'title-year')) { "$($cfg.movieFolderNaming)" } else { 'title' }
+
+# Media server library folders on the output drive (setup.ps1 step 5), e.g. DVDs,
+# Documentaries, Music. Empty = not set up: the rip-time library prompt scans the drive.
+$script:Config_LibraryFolders = @(if ($cfg -and $cfg.libraryFolders) { @($cfg.libraryFolders) | ForEach-Object { "$_".Trim() } | Where-Object { $_ } })
 
 # ========== FOLDER NAMING HELPERS (shared by rip-disc.ps1 and continue-rip.ps1) ==========
 # Folder under the output drive that holds a movie / genre film.
@@ -210,6 +215,113 @@ function Read-OutputDrive {
     }
 }
 
+# ========== MEDIA SERVER LIBRARIES (setup.ps1 step 5, and the rip-time library prompt) ==========
+# Top-level folders of the output drive that a media server (Jellyfin/Plex) uses as
+# libraries: F:\DVDs, F:\Documentaries, F:\Music ... Saved by setup.ps1 as libraryFolders
+# (folder names, not paths, so they follow whichever output drive is picked).
+
+# Test-LikelyLibraryFolder / Get-DriveLibraryCandidates live in MediaLibraries.ps1 (shared with setup.ps1)
+. (Join-Path $PSScriptRoot 'MediaLibraries.ps1')
+
+# What picking library folder $Name means for the rip: the built-in genre switch for
+# Documentaries/Tutorials/Fitness/Music/Surf, Series for the TV series folder, the standard
+# movie folder (DVDs or Bluray, by disc type) for DVDs/Bluray, else a -Genre folder.
+# Returns @{ Kind = 'movie' | 'series' | 'switch' | 'genre'; Value = switch name | folder }.
+function ConvertTo-LibraryChoice {
+    param([string]$Name)
+    switch -Regex ($Name) {
+        '^(?i)(dvds|bluray)$'      { return @{ Kind = 'movie';  Value = '' } }
+        '^(?i)series$'             { return @{ Kind = 'series'; Value = 'Series' } }
+        '^(?i)documentaries$'      { return @{ Kind = 'switch'; Value = 'Documentary' } }
+        '^(?i)tutorials$'          { return @{ Kind = 'switch'; Value = 'Tutorial' } }
+        '^(?i)fitness$'            { return @{ Kind = 'switch'; Value = 'Fitness' } }
+        '^(?i)music$'              { return @{ Kind = 'switch'; Value = 'Music' } }
+        '^(?i)surf$'               { return @{ Kind = 'switch'; Value = 'Surf' } }
+    }
+    return @{ Kind = 'genre'; Value = $Name }
+}
+
+# Asks which library the rip goes into, after the output-drive prompt. Row 1 is always
+# the standard movie folder (DVDs / Bluray by disc type) and Enter takes it, so the old
+# behaviour is one keypress away. $Configured = libraryFolders from setup.ps1; when empty
+# the drive's folders are scanned and the likely libraries listed (marked *), with the
+# others behind [O]. [N] types a new folder. Returns a ConvertTo-LibraryChoice result
+# plus Folder (the folder name), or $null on [A]bort.
+function Read-LibraryChoice {
+    param([string]$Drive, [string[]]$Configured = @(), [object[]]$Candidates = $null,
+          [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    $Drive = "$Drive".TrimEnd('\')
+    $fromConfig = @($Configured | Where-Object { $_ }).Count -gt 0
+    if ($fromConfig) {
+        $all = @($Configured | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = "$_"; Likely = $true } })
+    } else {
+        if ($null -eq $Candidates) { $Candidates = @(Get-DriveLibraryCandidates -Drive $Drive) }
+        $all = @($Candidates)
+    }
+    # DVDs / Bluray are row 1 already
+    $all = @($all | Where-Object { $_.Name -notmatch '^(?i)(dvds|bluray)$' })
+    $showAll = -not $fromConfig -and @($all | Where-Object { $_.Likely }).Count -eq 0
+    $show = $true
+    while ($true) {
+        $rows = @(if ($showAll -or $fromConfig) { $all } else { $all | Where-Object { $_.Likely } })
+        $hidden = $all.Count - $rows.Count
+        if ($show) {
+            Write-Host "`nWhich library on ${Drive}?" -ForegroundColor Cyan
+            Write-Host "  [1] Movies - $Drive\DVDs or $Drive\Bluray, by disc type  (default)" -ForegroundColor White
+            for ($i = 0; $i -lt $rows.Count; $i++) {
+                $kind = ConvertTo-LibraryChoice $rows[$i].Name
+                $note = if ($kind.Kind -eq 'series') { "  (TV series - S##-E## episode naming)" } elseif (-not $fromConfig -and -not $rows[$i].Likely) { "  (no video found)" } else { "" }
+                Write-Host ("  [{0}] {1}\{2}{3}" -f ($i + 2), $Drive, $rows[$i].Name, $note) -ForegroundColor White
+            }
+            if ($hidden -gt 0) { Write-Host "  [O] Other folders on $Drive ($hidden more)" -ForegroundColor Gray }
+            Write-Host "  [N] New folder" -ForegroundColor Gray
+            Write-Host "  [A] Abort" -ForegroundColor Gray
+            if (-not $fromConfig) { Write-Host "  (setup.ps1 can save your library folders so this list is always the same)" -ForegroundColor DarkGray }
+            $show = $false
+        }
+        $answer = & $ReadInput "Library (Enter = 1)"
+        if ($null -eq $answer -or "$answer".Trim() -eq '' -or "$answer".Trim() -eq '1') { return @{ Kind = 'movie'; Value = ''; Folder = '' } }
+        $answer = "$answer".Trim()
+        if ($answer -match '^\d+$' -and [int]$answer -ge 2 -and [int]$answer -le $rows.Count + 1) {
+            $name = $rows[[int]$answer - 2].Name
+            $c = ConvertTo-LibraryChoice $name
+            $c.Folder = $name
+            return $c
+        }
+        $key = $answer.ToUpper()
+        if ($key -eq 'O' -and $hidden -gt 0) { $showAll = $true; $show = $true; continue }
+        if ($key -eq 'A') { return $null }
+        if ($key -eq 'N') {
+            $text = & $ReadInput "New folder name under $Drive\ (blank to go back)"
+            if ($null -eq $text) { return @{ Kind = 'movie'; Value = ''; Folder = '' } }
+            $text = "$text".Trim()
+            if (-not $text) { $show = $true; continue }
+            if (Test-GenreFolderName $text) { $c = ConvertTo-LibraryChoice $text; $c.Folder = $text; return $c }
+            Write-Host "Not a usable folder name: '$text'" -ForegroundColor Red
+            continue
+        }
+        Write-Host "Invalid choice. Enter 1-$($rows.Count + 1)$(if ($hidden -gt 0) { ', O' }), N or A." -ForegroundColor Red
+    }
+}
+
+# Spelling- and word-tolerant "is this search hit the same title?" for the year prompt:
+# the same title (Test-NearMissTitle), one title's words all inside the other's
+# ("Scarface" / "Scarface: The World Is Yours"), or most words shared. Real case
+# 2026-11-01: "Duxford the Second World War Years" got "Gundu" and "Apocalypse: The
+# Second World War" as year choices - none of them that film.
+function Test-SimilarTitle {
+    param([string]$A, [string]$B)
+    if (Test-NearMissTitle $A $B) { return $true }
+    $stop = @('the', 'a', 'an', 'of', 'and', 'in', 'on', 'at', 'to', 'for', 'with')
+    $wa = @((("$A".ToLowerInvariant() -replace '&', ' and ') -replace '[^\p{L}\p{Nd}]+', ' ').Split(' ') | Where-Object { $_ -and $_ -notin $stop } | Select-Object -Unique)
+    $wb = @((("$B".ToLowerInvariant() -replace '&', ' and ') -replace '[^\p{L}\p{Nd}]+', ' ').Split(' ') | Where-Object { $_ -and $_ -notin $stop } | Select-Object -Unique)
+    if ($wa.Count -eq 0 -or $wb.Count -eq 0) { return $false }
+    $common = @($wa | Where-Object { $_ -in $wb }).Count
+    if ($common -eq [math]::Min($wa.Count, $wb.Count)) { return $true }
+    $union = $wa.Count + $wb.Count - $common
+    return ($common / $union) -ge 0.6
+}
+
 # Arguments the parameter list did not take ($UnknownArgs). A single bare switch such as
 # -Basketball is offered as a new genre folder (<drive>\Basketball\<Title>); the user
 # confirms, or says no and the rip goes to the standard folder. Returns
@@ -237,7 +349,7 @@ function Resolve-CustomGenreArg {
     Write-Host "  [N] No  - rip into the standard folder ($drive\DVDs or $drive\Bluray)" -ForegroundColor White
     Write-Host "  [A] Abort" -ForegroundColor White
     while ($true) {
-        $answer = & $ReadInput "Use $drive\$name? (Y/N/A, Enter = Y)"
+        $answer = & $ReadInput "Use $drive\${name}? (Y/N/A, Enter = Y)"
         if ($null -eq $answer) { return $result }
         switch ("$answer".Trim().ToUpper()) {
             { $_ -in @('Y', '') } { $result.Genre = $name; return $result }

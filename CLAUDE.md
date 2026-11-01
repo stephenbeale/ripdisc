@@ -19,6 +19,14 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-01 - Library prompt, setup library folders, year prompt similarity (branch `feature/library-picker`, worktree `ripdisc-library`)
+
+Trigger: real Duxford DVD run. The user wanted to pick a library (Documentaries, Music ...) after the output drive, setup.ps1 to ask for library folders and suggest them, and the year prompt (after editing the title to "Duxford the Second World War Years") offered six unrelated films - skip it when nothing is similar.
+
+**Built:** `Read-LibraryChoice` / `ConvertTo-LibraryChoice` / `Test-SimilarTitle` (Load-Config.ps1); `MediaLibraries.ps1` (scan + "likely library" heuristic, shared with setup.ps1); setup step 5/7 saves `libraryFolders`; `Read-FolderYear` filters by similarity and `-SkipWhenNoSimilar` (the main year prompt only, not the clash fallback). Library prompt only runs when the output drive was prompted and no type switch was given. Also fixed `$name?` in the -Basketball prompt.
+
+**Checked live (worktree):** setup.ps1 with scripted answers on the real F: (ticks correct, config written to the worktree's own git-ignored config); real rip-disc.ps1 via a fake Read-Host: drive F -> library list -> Documentaries -> discovery (D: empty). Full suite 1144/1144 across 23 files. **Not run on a real rip**; user's main-checkout config has no `libraryFolders` yet (run setup.ps1 or the prompt scans F: each run).
+
 ### 2026-10-29 (late) - Rip stats, auto drive pick (PRs #170, #171) and NEXT SESSION items (main = 35606dc, all 19 test files pass)
 
 Both PRs MERGED, **neither run on a real disc**.
