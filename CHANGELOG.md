@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
+
+### Added
+- After the output-drive prompt, `rip-disc.ps1` asks which library on that drive the rip goes into (`Read-LibraryChoice`, Load-Config.ps1). Enter keeps the standard DVDs / Bluray folder. Documentaries / Tutorials / Fitness / Music / Surf set the matching switch, Series sets `-Series`, any other folder becomes `-Genre <folder>`, and `[N]` types a new folder. The choice is carried into the `[D]` restart and the continue-rip command. Not asked when a type switch (-Series, -Documentary, -Genre, -Basketball ...) was given, or when `-OutputDrive` was given.
+- `setup.ps1` step 5 (now 7 steps): lists the output drive's folders, ticks the likely libraries, and saves the chosen names as `libraryFolders`. Without it, the rip prompt scans the drive on each run (likely folders first, `[O]` for the rest).
+- New `MediaLibraries.ps1` (`Test-LikelyLibraryFolder`, `Get-DriveLibraryCandidates`), shared by Load-Config.ps1 and setup.ps1. A folder is "likely" when it holds video files (loose, or up to two folders down, at most 12 sub-folders checked) or has a library-like name. Checked on the real F: (0.9 s): DVDs, Bluray, Documentaries, Series, Music, Surf, Basketball, TV ... ticked; Payslips, Audiobooks, Exeter Uni Essays, New folder not.
+- Tests: new `Test-MediaLibraries.ps1` 37; `Test-MovieFolderNaming.ps1` 140.
+
+### Fixed
+- Year prompt: after the title was edited to "Duxford the Second World War Years", it offered six unrelated films ("Gundu", "Apocalypse: The Second World War" ...). It now lists only matches whose title is like the typed one (`Test-SimilarTitle`: a near-miss spelling, all of one title's words in the other, or 60% of words shared), and skips the prompt entirely when none are ("No online title close to ..." - folder without a year; `-Year` still sets one). The folder-clash fallback still asks, since it needs a year. A new `[R]` search is not filtered.
+- The `-Basketball` new-folder prompt read "Use F:\? (Y/N/A ...)": `$name?` is a variable name in PowerShell. Now `${name}`.
+
 ## 2026-10-31 - Existing Folder Table: Two Coloured Lines per Title
 
 ### Changed

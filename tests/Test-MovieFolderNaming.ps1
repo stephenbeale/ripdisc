@@ -53,7 +53,8 @@ function Get-ScriptParameterNames {
 }
 
 foreach ($name in @('Get-MovieParentFolder', 'Get-MediaFolderName', 'Get-TitleYear', 'Find-ExistingMediaFolder',
-                    'Get-EditDistance', 'ConvertTo-LooseTitleKey', 'Test-NearMissTitle', 'Find-NearMissMediaFolders')) {
+                    'Get-EditDistance', 'ConvertTo-LooseTitleKey', 'Test-NearMissTitle', 'Find-NearMissMediaFolders',
+                    'Test-SimilarTitle')) {
     . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
 }
 foreach ($name in @('New-TitleCandidate', 'Get-TitleCandidateUrl', 'Format-TitleCandidate', 'Show-TitleCandidates',
@@ -155,6 +156,29 @@ try {
     $searchStub = { param($q) $script:Searched += $q; @(New-TitleCandidate -Title 'Slow Dance' -Year '2014' -Kind 'Short' -Source 'IMDb') }
     Assert-Equal '2014' (Read-FolderYear -Title 'Slow Dance' -Candidates @() -Search $searchStub -ReadInput (New-InputQueue @('r', 'slow dance surf', '1')) 6>$null) 'R searches again and the new rows can be picked'
     Assert-Equal 'slow dance surf' ($script:Searched -join ';') 'the typed search text is used'
+
+    # Real case 2026-11-01: the title was edited to "Duxford the Second World War Years" and
+    # the year prompt offered six unrelated war films (and "Gundu").
+    $duxTitle = 'Duxford the Second World War Years'
+    $duxHits = @(
+        (New-TitleCandidate -Title 'Apocalypse: The Second World War' -Year '2009' -Source 'IMDb'),
+        (New-TitleCandidate -Title 'Gundu' -Year '2019' -Source 'IMDb'),
+        (New-TitleCandidate -Title 'The Second World War in Colour' -Year '1999' -Source 'IMDb'),
+        (New-TitleCandidate -Title 'Unsolved Mysteries of World War II' -Year '1992' -Source 'IMDb'),
+        (New-TitleCandidate -Title 'Fighter Aces of the Second World War' -Year '2010' -Source 'IMDb'),
+        (New-TitleCandidate -Title 'The Complete History of the Second World War' -Year '2017' -Source 'IMDb'))
+    foreach ($h in $duxHits) { Assert-True (-not (Test-SimilarTitle $duxTitle $h.Title)) "not similar: $($h.Title)" }
+    $script:Asked = 0
+    $countingInput = { param($p) $script:Asked++; '1' }
+    Assert-True ($null -eq (Read-FolderYear -Title $duxTitle -Candidates $duxHits -Search $searchStub -SkipWhenNoSimilar -ReadInput $countingInput 6>$null)) 'Duxford: nothing similar online, no year'
+    Assert-Equal 0 $script:Asked 'Duxford: the year prompt is skipped, nothing is asked'
+    Assert-Equal '1999' (Read-FolderYear -Title $duxTitle -Candidates $duxHits -Search $searchStub -ReadInput (New-InputQueue @('1999')) 6>$null) 'without -SkipWhenNoSimilar (folder clash) it still asks, and a typed year works'
+    Assert-Equal '2005' (Read-FolderYear -Title 'Slow Dance' -Candidates (@($hits) + $duxHits) -Search $searchStub -SkipWhenNoSimilar -ReadInput (New-InputQueue @('2')) 6>$null) 'unrelated rows are dropped from the list, similar ones stay in order'
+    Assert-Equal '2014' (Read-FolderYear -Title 'Slow Dance' -Candidates @() -SkipWhenNoSimilar -ReadInput (New-InputQueue @('2014')) 6>$null) 'offline (no search): still asks, so a year can be typed'
+    Assert-True (Test-SimilarTitle 'Scarface' 'Scarface: The World Is Yours') 'all words of one title in the other: similar'
+    Assert-True (Test-SimilarTitle 'Erin Brokovich' 'Erin Brockovich') 'a misspelling is similar'
+    Assert-True (-not (Test-SimilarTitle 'Duxford' 'My Oxford Year')) '"Duxford" is not "My Oxford Year"'
+    Assert-True (Test-SimilarTitle 'The Good, the Bad and the Ugly' 'Good Bad Ugly') 'punctuation and "the"/"and" ignored'
 
     # ---------------------------------------------------------------------------
     Write-Host "`nHand-off to continue-rip.ps1" -ForegroundColor Cyan
@@ -332,7 +356,7 @@ try {
 
     $setupText = Get-Content -LiteralPath $setupPath -Raw
     Assert-True ($setupText -match 'movieFolderNaming = \$movieFolderNaming') 'setup.ps1 saves movieFolderNaming'
-    Assert-True ($setupText -match '\[6/6\] Movie folder naming' -and $setupText -notmatch '/5\]') 'setup steps renumbered to 6'
+    Assert-True ($setupText -match '\[7/7\] Movie folder naming' -and $setupText -match '\[5/7\] Media server library folders' -and $setupText -notmatch '/6\]') 'setup steps renumbered to 7 (libraries are step 5)'
     $sample = Get-Content -LiteralPath (Join-Path $repoRoot 'ripdisc-config.sample.json') -Raw | ConvertFrom-Json
     Assert-Equal 'title' $sample.movieFolderNaming 'sample config defaults to plain titles'
     $configText = Get-Content -LiteralPath $configPath -Raw

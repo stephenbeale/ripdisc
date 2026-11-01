@@ -118,7 +118,7 @@ function Show-ManualDownloadHelp {
 }
 
 # ========== DETECT / INSTALL MAKEMKV ==========
-Write-Host "[1/6] Looking for MakeMKV..." -ForegroundColor White
+Write-Host "[1/7] Looking for MakeMKV..." -ForegroundColor White
 
 $makemkvSearchPaths = @(
     "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
@@ -182,7 +182,7 @@ if ($makemkvPath) {
 }
 
 # ========== DETECT / INSTALL HANDBRAKE CLI ==========
-Write-Host "`n[2/6] Looking for HandBrakeCLI..." -ForegroundColor White
+Write-Host "`n[2/7] Looking for HandBrakeCLI..." -ForegroundColor White
 
 $handbrakeSearchPaths = @(
     "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe",
@@ -243,7 +243,7 @@ if ($handbrakePath) {
 }
 
 # ========== CONFIGURE TEMP ROOT ==========
-Write-Host "`n[3/6] Temp working directory" -ForegroundColor White
+Write-Host "`n[3/7] Temp working directory" -ForegroundColor White
 Write-Host ""
 Write-Host "  MakeMKV rips raw files here before encoding. These files are large" -ForegroundColor Gray
 Write-Host "  (a DVD is ~4-8 GB, a Blu-ray can be 25-50 GB) but are deleted" -ForegroundColor Gray
@@ -264,7 +264,7 @@ if (!(Test-Path $tempRoot)) {
 }
 
 # ========== CONFIGURE DRIVES ==========
-Write-Host "`n[4/6] Default drive letters" -ForegroundColor White
+Write-Host "`n[4/7] Default drive letters" -ForegroundColor White
 Write-Host ""
 Write-Host "  Input drive  = your DVD/Blu-ray disc drive" -ForegroundColor Gray
 Write-Host "  Output drive = where encoded files are saved (e.g. a media hard drive)" -ForegroundColor Gray
@@ -312,8 +312,51 @@ Write-Host "  Default output drive: $defaultOutputDrive" -ForegroundColor Gray
 $outputDriveInput = Read-Host "  Press Enter to accept, or type your output drive letter (e.g. F:)"
 $outputDrive = if ($outputDriveInput) { $outputDriveInput.TrimEnd(":") + ":" } else { $defaultOutputDrive }
 
+# ========== CONFIGURE MEDIA SERVER LIBRARIES ==========
+. (Join-Path $PSScriptRoot "MediaLibraries.ps1")
+Write-Host "`n[5/7] Media server library folders" -ForegroundColor White
+Write-Host ""
+Write-Host "  Which folders on $outputDrive are libraries in your media server (Jellyfin/Plex)?" -ForegroundColor Gray
+Write-Host "  Each rip asks which one to use (Enter = the standard DVDs / Bluray folder)." -ForegroundColor Gray
+Write-Host "  Leave this empty and each rip lists the drive's folders instead." -ForegroundColor Gray
+$existingLibraries = @()
+if (Test-Path $configPath) {
+    try { $existingLibraries = @((Get-Content $configPath -Raw | ConvertFrom-Json).libraryFolders | Where-Object { $_ }) } catch {}
+}
+$libraryCandidates = @(Get-DriveLibraryCandidates -Drive $outputDrive)
+$libraryFolders = @()
+if ($libraryCandidates.Count -eq 0) {
+    Write-Host "  No folders found on $outputDrive (is it connected?) - skipped; run setup.ps1 again later." -ForegroundColor Yellow
+    $libraryFolders = $existingLibraries
+} else {
+    # Pre-ticked: the saved list when there is one, else the folders that look like libraries
+    $ticked = @(for ($i = 0; $i -lt $libraryCandidates.Count; $i++) {
+        $c = $libraryCandidates[$i]
+        $on = if ($existingLibraries.Count -gt 0) { $c.Name -in $existingLibraries } else { $c.Likely }
+        if ($on) { $i + 1 }
+    })
+    Write-Host ""
+    for ($i = 0; $i -lt $libraryCandidates.Count; $i++) {
+        $mark = if (($i + 1) -in $ticked) { '[x]' } else { '[ ]' }
+        Write-Host ("    {0,2}. {1} {2}\{3}" -f ($i + 1), $mark, $outputDrive, $libraryCandidates[$i].Name) -ForegroundColor White
+    }
+    Write-Host "  [x] = suggested (holds video, or named like a library)" -ForegroundColor DarkGray
+    while ($true) {
+        $libInput = Read-Host "  Enter = accept [x], or type the numbers to use (e.g. 1,3,5), or 0 for none"
+        if ([string]::IsNullOrWhiteSpace($libInput)) { $picked = $ticked; break }
+        if ($libInput.Trim() -eq '0') { $picked = @(); break }
+        $nums = @($libInput -split '[,\s]+' | Where-Object { $_ })
+        if (@($nums | Where-Object { $_ -notmatch '^\d+$' -or [int]$_ -lt 1 -or [int]$_ -gt $libraryCandidates.Count }).Count -eq 0) {
+            $picked = @($nums | ForEach-Object { [int]$_ } | Select-Object -Unique)
+            break
+        }
+        Write-Host "  Enter numbers from 1 to $($libraryCandidates.Count), separated by commas." -ForegroundColor Red
+    }
+    $libraryFolders = @($picked | Sort-Object | ForEach-Object { $libraryCandidates[$_ - 1].Name })
+}
+
 # ========== CONFIGURE TMDB API KEY ==========
-Write-Host "`n[5/6] TMDb API key (optional)" -ForegroundColor White
+Write-Host "`n[6/7] TMDb API key (optional)" -ForegroundColor White
 Write-Host ""
 Write-Host "  TMDb (The Movie Database) lets RipDisc auto-detect the title," -ForegroundColor Gray
 Write-Host "  type (movie/series), and season from your disc. Without it," -ForegroundColor Gray
@@ -334,7 +377,7 @@ if ($existingKey) {
 }
 
 # ========== CONFIGURE MOVIE FOLDER NAMING ==========
-Write-Host "`n[6/6] Movie folder naming" -ForegroundColor White
+Write-Host "`n[7/7] Movie folder naming" -ForegroundColor White
 Write-Host "  How should movie and genre-film folders be named? (Series folders are not changed.)" -ForegroundColor Gray
 Write-Host "  The year comes from the title you pick when ripping without -title, from -Year," -ForegroundColor Gray
 Write-Host "  or from a quick lookup prompt; you can always skip it for one disc." -ForegroundColor Gray
@@ -386,6 +429,7 @@ $config = @{
     driveLabels = $driveLabels
     tmdbApiKey = if ($tmdbKey) { $tmdbKey } else { "" }
     movieFolderNaming = $movieFolderNaming
+    libraryFolders = @($libraryFolders)
 }
 
 $config | ConvertTo-Json -Depth 3 | Set-Content -Path $configPath -Encoding UTF8
@@ -406,6 +450,7 @@ Write-Host "  HandBrakeCLI:  $(if ($handbrakeOk) { $handbrakePath } else { 'NOT 
 Write-Host "  Temp root:     $tempRoot" -ForegroundColor Green
 Write-Host "  Input drive:   $inputDrive" -ForegroundColor Green
 Write-Host "  Output drive:  $outputDrive" -ForegroundColor Green
+Write-Host "  Libraries:     $(if ($libraryFolders.Count -gt 0) { $libraryFolders -join ', ' } else { 'Not set (each rip lists the drive''s folders)' })" -ForegroundColor $(if ($libraryFolders.Count -gt 0) { "Green" } else { "Yellow" })
 Write-Host "  Movie folders: $(if ($movieFolderNaming -eq 'title-year') { 'Title (Year)' } else { 'Title' })" -ForegroundColor Green
 Write-Host "  TMDb API key:  $(if ($tmdbKey) { 'Configured' } else { 'Not set (auto-discovery disabled)' })" -ForegroundColor $(if ($tmdbKey) { "Green" } else { "Yellow" })
 Write-Host ""

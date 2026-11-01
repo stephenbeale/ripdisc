@@ -9,5 +9,6 @@
     "1": "External drive"
   },
   "tmdbApiKey": "",
-  "movieFolderNaming": "title"
+  "movieFolderNaming": "title",
+  "libraryFolders": ["DVDs", "Bluray", "Documentaries", "Music", "Series"]
 }
