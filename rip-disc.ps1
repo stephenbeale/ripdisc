@@ -1721,9 +1721,12 @@ function Get-YearLookup {
 # With -SkipWhenNoSimilar and an online search that found nothing similar, the prompt is
 # not shown at all and the folder has no year (-Year still sets one). A new [R] search is
 # the user's own wording, so its hits are not filtered.
+#
+# -OnNeverAsk adds "[N] Never ask again": N runs that scriptblock (rip-disc.ps1 saves
+# askFolderYear = false) and returns $null, so this folder has no year either.
 function Read-FolderYear {
     param([string]$Title, [object[]]$Candidates = @(), [scriptblock]$ReadInput = { param($p) Read-Host $p }, [scriptblock]$Search = $null,
-          [switch]$SkipWhenNoSimilar)
+          [switch]$SkipWhenNoSimilar, [scriptblock]$OnNeverAsk = $null)
 
     $Candidates = @($Candidates | Where-Object { $_ -and $_.Year -and (Test-SimilarTitle $Title $_.Title) })
     if ($SkipWhenNoSimilar -and $Search -and $Candidates.Count -eq 0) {
@@ -1742,12 +1745,14 @@ function Read-FolderYear {
             Write-Host "  [YYYY] Type the year (e.g. 2014)" -ForegroundColor Gray
             if ($Search) { Write-Host "  [R] Search again (e.g. add a word like `"surf`")" -ForegroundColor Gray }
             Write-Host "  [S] or Enter: no year - folder `"$Title`"" -ForegroundColor Gray
+            if ($OnNeverAsk) { Write-Host "  [N] Never ask again - no year unless the title picked from the list has one (setup.ps1 turns it back on)" -ForegroundColor Gray }
             $show = $false
         }
         $answer = & $ReadInput "Row, year, or Enter for no year"
         if ($null -eq $answer) { return $null }
         $answer = "$answer".Trim()
         if ($answer -eq '' -or $answer -ieq 'S') { return $null }
+        if ($answer -ieq 'N' -and $OnNeverAsk) { & $OnNeverAsk; return $null }
         if ($answer -match '^(18|19|20)\d{2}$') { return $answer }
         if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $Candidates.Count) { return "$($Candidates[[int]$answer - 1].Year)" }
         if ($answer -ieq 'R' -and $Search) {
@@ -1758,7 +1763,7 @@ function Read-FolderYear {
             continue
         }
         $rows = if ($Candidates.Count -gt 0) { "1-$($Candidates.Count), " } else { "" }
-        Write-Host "Invalid choice. Enter $rows a year like 2014,$(if ($Search) { ' R,' }) or S." -ForegroundColor Red
+        Write-Host "Invalid choice. Enter $rows a year like 2014,$(if ($Search) { ' R,' })$(if ($OnNeverAsk) { ' N,' }) or S." -ForegroundColor Red
     }
 }
 
@@ -2413,9 +2418,17 @@ if (-not $Series) {
         } elseif (Get-TitleYear $safeTitle) {
             # The title already says which year ("Musica Surfica (2008)") - no need to ask
             $script:FolderYear = Get-TitleYear $safeTitle
+        } elseif (-not $script:Config_AskFolderYear) {
+            Write-Host "No year for `"$title`" - the year prompt is off (setup.ps1 step 7 turns it back on; -Year YYYY sets one)." -ForegroundColor Gray
         } else {
             $yearLookup = Get-YearLookup
-            $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup -SkipWhenNoSimilar
+            $neverAsk = {
+                $script:Config_AskFolderYear = $false
+                if (Save-ConfigSetting -Name 'askFolderYear' -Value $false) {
+                    Write-Host "OK - the year prompt is off for good. Run setup.ps1 (step 7) to turn it back on." -ForegroundColor Green
+                }
+            }
+            $chosenYear = Read-FolderYear -Title $title -Candidates @(if ($yearLookup) { & $yearLookup $title }) -Search $yearLookup -SkipWhenNoSimilar -OnNeverAsk $neverAsk
             if ($chosenYear) { $script:FolderYear = $chosenYear }
         }
         $script:MediaFolderName = Get-MediaFolderName -SafeTitle $safeTitle -Year $script:FolderYear

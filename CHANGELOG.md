@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-01 - Year Prompt: Word Order and "Never Ask Again"
+
+### Fixed
+- Year prompt: the typed title "The Story of Concorde" got "Concorde: The Untold Story" (2023, a TV mini-series) as a year choice, because both titles share the words "story" and "concorde". `Test-SimilarTitle` now also needs the shared words to come in the same order in both titles. "Scarface" / "Scarface: The World Is Yours" still match.
+
+### Added
+- `[N] Never ask again` at the year prompt: saves `askFolderYear: false` in `ripdisc-config.json` (new `Save-ConfigSetting`, keeps every other key) and gives this folder no year. Later rips name folders without a year unless one is found without asking (the title picked from the list, an existing folder, `-Year`). The folder-clash fallback still asks, because it needs a year. `setup.ps1` step 7 asks "Ask for the year when it is not found automatically?" with style 2, keeps the saved choice and can turn it back on.
+- Tests: `Test-MovieFolderNaming.ps1` 164 (the Concorde case fails on the old code).
+
 ## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
 
 ### Added
