@@ -19,6 +19,28 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-01 (evening) - Year-match order, title sanitising, manifest append (PRs #182, #183, #184 all OPEN)
+
+**Open PRs (none merged this session; real-rip checks owed for all):**
+- #182 `fix/year-match-word-order` (4b6759b, main checkout): `Test-SimilarTitle` needs shared words in the same order (typed "The Story of Concorde" was offered "Concorde: The Untold Story" (2023)). Year prompt [N] "Never ask again" saves `askFolderYear=false` via new `Save-ConfigSetting` (Load-Config.ps1); setup.ps1 step 7 asks/keeps it; sample config `askFolderYear:true`. 1168 tests / 23 files pass.
+- #183 `fix/title-sanitize-no-underscore` (53314fa, worktree `ripdisc-sanitize`): `Get-SafeTitle` (rip-disc.ps1 + continue-rip.ps1) removes `\ / : * ? " < > | [ ]` (run becomes a space, spaces collapsed) instead of `_`; `Get-LegacySafeTitle`/`Resolve-LegacySafeTitle` keep existing `_` folders; IMDb kind "video" shown as [Direct-to-video]. The live Strike Force rip ran on old code, so `F:\Documentaries\Strike Force_ The Story of Sukhoi (2007)` exists with `_`; rename offered, user has NOT decided - do not rename.
+- #184 `fix/manifest-append-columns` (570b924, worktree `ripdisc-manifest`): `Write-RenameManifest` appends to manifests with extra columns; if the manifest cannot be written nothing is renamed. Trigger: rename-series on `F:\Series\Silicon Valley\Season 3\Disc1` at 18:26 renamed "Silicon Valley - S03E0N - <title>.mp4" to "Silicon Valley-S03-E0N.mp4" while the manifest append failed. The 5 rows were hand-added (backup `rename-manifest.backup-20261101.csv` beside it). Episode titles lost from names; user undecided whether to restore. Do NOT run undo-rename.ps1 there (it would undo ALL rows back to raw A1_t00 names).
+
+**Findings:**
+- Slow start: rip-disc.ps1's own pre-rip work is ~12 s; MakeMKV "Scanning CD-ROM devices" took 41 s because the BU40N and the second GP75N dropped off USB (PnP Present=False). Hardware, not code.
+- Mistake: a scripted test answered "A" at "Press Enter to continue" (does not abort) and started a 2nd MakeMKV on D: during the "Super Carrier Airport at Sea" rip, ~17:11:33-17:12:20 (killed). Check that rip's log for read errors around then. Never script rip-disc.ps1 past the Ready-to-rip prompt.
+- Set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` in `C:\Users\sjbeale\.claude\settings.json` env.
+- Untracked `ripdisc-config.json.bak-20261029` and git-ignored `ripdisc-config.json` in the main checkout: leave alone.
+
+**Ideas not done:** "Pick a title" prompt should accept typed text as the title (user typed one, got "Invalid choice"); warn before MakeMKV when disconnected drives will slow the scan; rename-series should leave already-titled S##E## files alone.
+
+**NEXT SESSION:**
+1. Real-rip checks for #182 (year prompt order + never-ask), then review/merge #182, #183, #184 (stacked-PR merge gotcha: check bases).
+2. Ask user: rename `Strike Force_ The Story of Sukhoi (2007)` to the new no-underscore name? Restore Silicon Valley S03 episode titles?
+3. Check the Super Carrier Airport at Sea rip log for read errors ~17:11-17:12.
+4. Fix the USB drop-offs (BU40N, GP75N) - see WD/USB hardware memory.
+5. Implement the "Pick a title" free-text option and the disconnected-drive warning.
+
 ### 2026-11-01 - Library prompt, setup library folders, year prompt similarity (branch `feature/library-picker`, worktree `ripdisc-library`)
 
 Trigger: real Duxford DVD run. The user wanted to pick a library (Documentaries, Music ...) after the output drive, setup.ps1 to ask for library folders and suggest them, and the year prompt (after editing the title to "Duxford the Second World War Years") offered six unrelated films - skip it when nothing is similar.
