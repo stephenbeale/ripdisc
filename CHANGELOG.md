@@ -56,6 +56,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - MakeMKV drive-list cache (`%TEMP%\makemkv-drive-cache.txt`) is now written only for a real `makemkvcon(64).exe`, and its first line records which makemkvcon wrote it; a cache from another path (or an old one without the line) is ignored (`Read-DriveCache` / `Write-DriveCache`). Found live: a test run against a fake makemkvcon cached "Z: FAKE DRIVE" and the user's next real run failed "Drive D: not found".
 - Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 33 (17 new).
 
+## 2026-11-01 - Titles Drop ':' Instead of Adding '_'; "[Direct-to-video]"
+
+### Changed
+- Folder and file names drop characters Windows cannot use (`\ / : * ? " < > |`) and square brackets instead of turning them into `_`. Each run of them becomes a space and double spaces are collapsed: "Strike Force: The Story of Sukhoi" -> `Strike Force The Story of Sukhoi` (was `Strike Force_ The Story of Sukhoi`), "AC/DC" -> `AC DC`. Round brackets are kept. Same change in `rip-disc.ps1` and `continue-rip.ps1`.
+- A title already ripped under the old rule keeps its folder: `Resolve-LegacySafeTitle` (Load-Config.ps1) uses the old `_` name when a folder by it (or `<name> (YYYY)`) exists under Series, the genre folder, the movie folder or the temp root, and none by the new name does. So Disc 2, extras and continue-rip runs land beside Disc 1.
+- The pick list shows IMDb's "video" kind as `[Direct-to-video]` (was `[Video]`): IMDb's label for a film released straight to video/DVD rather than in cinemas.
+- Tests: `Test-TitleAndDriveSanitization.ps1` 49, `Test-MovieFolderNaming.ps1` 148.
+
 ## 2026-11-01 - Year Prompt: Word Order and "Never Ask Again"
 
 ### Fixed

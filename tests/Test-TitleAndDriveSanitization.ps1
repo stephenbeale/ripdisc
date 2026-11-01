@@ -85,9 +85,14 @@ foreach ($scriptPath in @($ripDiscPath, $continuePath)) {
 
     Write-Host "`nGet-SafeTitle - illegal path characters ($scriptName)" -ForegroundColor Cyan
     Assert-Equal 'The Matrix' (Get-SafeTitle 'The Matrix') 'a plain title is untouched'
-    Assert-Equal 'Movie_ Subtitle' (Get-SafeTitle 'Movie: Subtitle') 'colon is replaced'
-    Assert-Equal 'The Arena Hawaii 05_06 Highlight Reel - ASL' (Get-SafeTitle 'The Arena Hawaii 05/06 Highlight Reel - ASL') 'slash is replaced (regression, PR #131)'
-    Assert-Equal 'A_B_C_D_E_F_G_H_' (Get-SafeTitle 'A\B/C:D*E?F"G<H>') 'every illegal character is replaced'
+    Assert-Equal 'Movie Subtitle' (Get-SafeTitle 'Movie: Subtitle') 'colon is removed, no underscore'
+    Assert-Equal 'Strike Force The Story of Sukhoi' (Get-SafeTitle 'Strike Force: The Story of Sukhoi') 'real case 2026-11-01: no "Strike Force_ The Story"'
+    Assert-Equal 'AC DC Live' (Get-SafeTitle 'AC/DC: Live') 'a character between two words becomes a space'
+    Assert-Equal 'The Arena Hawaii 05 06 Highlight Reel - ASL' (Get-SafeTitle 'The Arena Hawaii 05/06 Highlight Reel - ASL') 'slash is replaced (regression, PR #131)'
+    Assert-Equal 'A B C D E F G H' (Get-SafeTitle 'A\B/C:D*E?F"G<H>') 'every illegal character is removed'
+    Assert-Equal 'Film Directors Cut' (Get-SafeTitle 'Film [Directors Cut]') 'square brackets are removed'
+    Assert-Equal 'Who Me' (Get-SafeTitle 'Who? Me?') 'a question mark is removed, no double space'
+    Assert-Equal 'Alien (1979)' (Get-SafeTitle 'Alien (1979)') 'round brackets are kept'
 
     Write-Host "`nGet-SafeTitle - trailing dot/space (the 'W.' bug) ($scriptName)" -ForegroundColor Cyan
     Assert-Equal 'W' (Get-SafeTitle 'W.') 'a trailing dot is stripped, matching what Windows actually creates on disk'
