@@ -1249,9 +1249,9 @@ function Resolve-EpisodeNames {
     return ,$names
 }
 
-# Builds the final episode filename. Jellyfin's documented pattern is
+# Builds the final episode filename. Jellyfin's and Plex's documented pattern is
 # "Series - S01E04 - Episode Name", so the separator is " - " when a name is present.
-# With no name the existing "<title>-E04.ext" shape is kept unchanged.
+# With no name: "<title>-S01E04.ext" (Jellyfin, unchanged), "<title> - S01E04.ext" (Plex).
 function Get-EpisodeFileName {
     param(
         [string]$Title,
@@ -1265,7 +1265,8 @@ function Get-EpisodeFileName {
         $safeName = ($EpisodeName -replace '[\\/:*?"<>|]', '').Trim()
         if ($safeName) { return "$Title - $EpisodeTag - $safeName$Extension" }
     }
-    return "$Title-$EpisodeTag$Extension"
+    $separator = if ("$($script:Config_MediaServer)" -eq 'plex') { ' - ' } else { '-' }
+    return "$Title$separator$EpisodeTag$Extension"
 }
 
 # ========== TITLE SUGGESTIONS ==========
@@ -2457,7 +2458,9 @@ if (-not $Series) {
     # already has its Feature (or this Part): checked now, before anything is ripped.
     # Falls back to "Title (Year)" (picked year, else asked), and stops if that clashes too.
     if (-not $Extras -and (($Disc -eq 1) -or $script:DocumentaryPart)) {
-        $clashPattern = Get-FeatureNamePattern -Bluray:$Bluray -Part $(if ($script:DocumentaryPart) { $Disc } else { 0 })
+        # Plex's main file is named after its folder, so the pattern is built per folder.
+        $clashPart = if ($script:DocumentaryPart) { $Disc } else { 0 }
+        $clashPattern = Get-FeatureNamePattern -Bluray:$Bluray -Part $clashPart -FolderName $script:MediaFolderName
         $clashFile = Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $script:MediaFolderName) -Pattern $clashPattern
         if ($clashFile) {
             Write-Host "`n$movieParentDir\$($script:MediaFolderName) already holds $clashFile - this disc will NOT be put there." -ForegroundColor Yellow
@@ -2468,7 +2471,7 @@ if (-not $Series) {
             }
             $altName = if ($altYear) { Get-MediaFolderName -SafeTitle $safeTitle -Year $altYear } else { "" }
             if (-not $altName -or $altName -eq $script:MediaFolderName -or
-                (Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $altName) -Pattern $clashPattern)) {
+                (Get-ExistingFeatureFile -FolderPath (Join-Path $movieParentDir $altName) -Pattern (Get-FeatureNamePattern -Bluray:$Bluray -Part $clashPart -FolderName $altName))) {
                 Write-Host "ERROR: no free folder for `"$title`" - nothing was ripped and nothing was changed." -ForegroundColor Red
                 Write-Host "  Run again with -Year <year> or a different -title." -ForegroundColor Yellow
                 exit 1
@@ -2536,7 +2539,7 @@ $previewSeason = if ($Season -gt 0) { "\Season $Season" } else { "" }
 $outputFolderPreview = if ($script:IsGenreSeries) { "$previewDrive\$($script:GenreFolder)\$safeTitle$previewSeason" }
     elseif ($Series) { "$previewDrive\Series\$safeTitle$previewSeason\Disc$Disc" }
     else { Join-Path $movieParentDir $script:MediaFolderName }
-if ($Extras -and -not $Series) { $outputFolderPreview = Join-Path $outputFolderPreview "extras" }
+if ($Extras -and -not $Series) { $outputFolderPreview = Join-Path $outputFolderPreview (Get-MovieExtrasFolderName) }
 Write-Host "Output folder: $outputFolderPreview" -ForegroundColor White
 if ($script:IsGenreSeries) {
     if ($Season -gt 0) {
@@ -2665,7 +2668,7 @@ if ($script:IsGenreSeries) {
 
 # Extras: encode directly into extras subdirectory of the title folder
 if ($Extras -and -not $Series) {
-    $finalOutputDir = Join-Path $finalOutputDir "extras"
+    $finalOutputDir = Join-Path $finalOutputDir (Get-MovieExtrasFolderName)
 }
 
 # Fail fast if the path didn't come out usable. A malformed or empty -OutputDrive can
@@ -2988,6 +2991,9 @@ function Stop-WithError {
     exit 1
 }
 
+# The film's own folder (the parent of an -Extras run's extras folder): Plex names the
+# main file after it.
+$mainFolderName = if ($Extras -and -not $Series) { Split-Path (Split-Path $finalOutputDir -Parent) -Leaf } else { Split-Path $finalOutputDir -Leaf }
 $contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
 # Genre types (Documentary/Tutorial/Fitness/Music/Surf) are treated like movies for file organization (Feature file, extras subfolder)
 # unless combined with -Series (genre series / box sets), which are organized like Series: every file is an episode, none is "the Feature"
@@ -2998,15 +3004,18 @@ $script:ForeignFeature = $false
 # can share a (genre) folder as two versions. $featureExcludePattern keeps every existing main
 # file - earlier parts, either version's Feature - from being picked as this disc's largest
 # file or swept into extras.
+# Plex (mediaServer "plex") names the main file after its folder instead: "<Folder>.mp4",
+# "<Folder> - BluRay.mp4", "<Folder> - ptN.mp4" (see Get-FeatureNamePattern).
+$plexNaming = "$($script:Config_MediaServer)" -eq 'plex'
 if ($script:DocumentaryPart) {
-    $featurePattern = Get-FeatureNamePattern -Part $Disc
-    $featureSuffix = "-Part $Disc"
+    $featurePattern = Get-FeatureNamePattern -Part $Disc -FolderName $mainFolderName
+    $featureSuffix = if ($plexNaming) { " - pt$Disc" } else { "-Part $Disc" }
 } else {
-    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray
-    $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
+    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray -FolderName $mainFolderName
+    $featureSuffix = if ($plexNaming) { $(if ($Bluray) { " - BluRay" } else { "" }) } else { "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" }) }
 }
-$featureExcludePattern = '-Part \d+\.[^.]+$|' + $script:AnyFeaturePattern
-$extrasDir = Join-Path $finalOutputDir "extras"
+$featureExcludePattern = Get-AnyMainFilePattern -FolderName $mainFolderName
+$extrasDir = Join-Path $finalOutputDir (Get-MovieExtrasFolderName)
 
 # For disc 2+, ensure parent dir and extras folder exist upfront (disc 1 may still be running)
 if (-not $isMainFeatureDisc -and -not $Series) {
@@ -4390,9 +4399,9 @@ if ($script:IsGenreSeries) {
             Write-Host "Non-feature videos found: $($nonFeatureVideos.Count)" -ForegroundColor White
             $nonFeatureVideos | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
 
-            if (!(Test-Path "extras")) {
+            if (!(Test-Path -LiteralPath $extrasDir)) {
                 Write-Host "Creating extras directory..." -ForegroundColor Yellow
-                md extras | Out-Null
+                New-Item -ItemType Directory -Path $extrasDir | Out-Null
                 Write-Host "Extras directory created" -ForegroundColor Green
             } else {
                 Write-Host "Extras directory already exists" -ForegroundColor Gray
@@ -4431,7 +4440,7 @@ if ($script:IsGenreSeries) {
         }
 
         # Exclude Feature file (may have been created by disc 1)
-        $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notmatch '-Feature(-BluRay)?\.[^.]+$' }
+        $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notmatch $featureExcludePattern }
         if ($videoFiles) {
             Write-Host "Videos to move: $($videoFiles.Count)" -ForegroundColor White
             foreach ($video in $videoFiles) {

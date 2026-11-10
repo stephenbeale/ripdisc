@@ -554,8 +554,8 @@ function Enable-ConsoleClose {
 # ========== HELPER FUNCTIONS ==========
 # Builds the final episode filename. Must stay byte-identical in behaviour to the copy in
 # rip-disc.ps1, or resuming a rip would name episodes differently from the original run.
-# Jellyfin's documented pattern is "Series - S01E04 - Episode Name"; with no name the
-# existing "<title>-E04.ext" shape is kept unchanged.
+# Jellyfin's and Plex's documented pattern is "Series - S01E04 - Episode Name"; with no
+# name: "<title>-S01E04.ext" (Jellyfin, unchanged), "<title> - S01E04.ext" (Plex).
 function Get-EpisodeFileName {
     param(
         [string]$Title,
@@ -569,7 +569,8 @@ function Get-EpisodeFileName {
         $safeName = ($EpisodeName -replace '[\\/:*?"<>|]', '').Trim()
         if ($safeName) { return "$Title - $EpisodeTag - $safeName$Extension" }
     }
-    return "$Title-$EpisodeTag$Extension"
+    $separator = if ("$($script:Config_MediaServer)" -eq 'plex') { ' - ' } else { '-' }
+    return "$Title$separator$EpisodeTag$Extension"
 }
 
 function Get-UniqueFilePath {
@@ -790,7 +791,7 @@ if ($script:IsGenreSeries) {
 
 # Extras: encode directly into extras subdirectory of the title folder
 if ($Extras -and -not $Series) {
-    $finalOutputDir = Join-Path $finalOutputDir "extras"
+    $finalOutputDir = Join-Path $finalOutputDir (Get-MovieExtrasFolderName)
 }
 
 # Fail fast if the path didn't come out usable. A malformed or empty -OutputDrive can
@@ -897,6 +898,9 @@ function Stop-WithError {
     exit 1
 }
 
+# The film's own folder (the parent of an -Extras run's extras folder): Plex names the
+# main file after it.
+$mainFolderName = if ($Extras -and -not $Series) { Split-Path (Split-Path $finalOutputDir -Parent) -Leaf } else { Split-Path $finalOutputDir -Leaf }
 $contentType = Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray
 # Re-evaluate: the interactive prompts above can set -Documentary/-Series after the early definition.
 $script:DocumentaryPart = [bool]$Documentary -and (-not $Series) -and (-not $Extras) -and $PSBoundParameters.ContainsKey('Disc')
@@ -905,17 +909,20 @@ $isMainFeatureDisc = (-not $Series) -and (($Disc -eq 1) -or $script:DocumentaryP
 # Same rules as rip-disc.ps1: $featurePattern is THIS run's name only (DVD and Blu-ray versions can
 # share a genre folder); $featureExcludePattern keeps every existing main file out of the largest-file
 # pick and out of extras.
+# Plex (mediaServer "plex") names the main file after its folder instead: "<Folder>.mp4",
+# "<Folder> - BluRay.mp4", "<Folder> - ptN.mp4" (see Get-FeatureNamePattern).
+$plexNaming = "$($script:Config_MediaServer)" -eq 'plex'
 if ($script:DocumentaryPart) {
-    $featurePattern = Get-FeatureNamePattern -Part $Disc
-    $featureSuffix = "-Part $Disc"
+    $featurePattern = Get-FeatureNamePattern -Part $Disc -FolderName $mainFolderName
+    $featureSuffix = if ($plexNaming) { " - pt$Disc" } else { "-Part $Disc" }
 } else {
-    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray
-    $featureSuffix = "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" })
+    $featurePattern = Get-FeatureNamePattern -Bluray:$Bluray -FolderName $mainFolderName
+    $featureSuffix = if ($plexNaming) { $(if ($Bluray) { " - BluRay" } else { "" }) } else { "-Feature" + $(if ($Bluray) { "-BluRay" } else { "" }) }
 }
-$featureExcludePattern = '-Part \d+\.[^.]+$|' + $script:AnyFeaturePattern
+$featureExcludePattern = Get-AnyMainFilePattern -FolderName $mainFolderName
 $script:ForeignFeature = $false
 $script:FeatureIsOurs = $false
-$extrasDir = Join-Path $finalOutputDir "extras"
+$extrasDir = Join-Path $finalOutputDir (Get-MovieExtrasFolderName)
 
 # ========== WINDOW TITLE ==========
 if ($Series) {
@@ -1832,9 +1839,9 @@ if ($StartFromStepNumber -le 3) {
                 Write-Host "Non-feature videos found: $($nonFeatureVideos.Count)" -ForegroundColor White
                 $nonFeatureVideos | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
 
-                if (!(Test-Path "extras")) {
+                if (!(Test-Path -LiteralPath $extrasDir)) {
                     Write-Host "Creating extras directory..." -ForegroundColor Yellow
-                    md extras | Out-Null
+                    New-Item -ItemType Directory -Path $extrasDir | Out-Null
                     Write-Host "Extras directory created" -ForegroundColor Green
                 } else {
                     Write-Host "Extras directory already exists" -ForegroundColor Gray
@@ -1871,7 +1878,7 @@ if ($StartFromStepNumber -le 3) {
                 Write-Host "Extras directory already exists" -ForegroundColor Gray
             }
 
-            $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notmatch '-Feature(-BluRay)?\.[^.]+$' }
+            $videoFiles = Get-ChildItem -File | Where-Object { $_.Extension -match '\.(mp4|avi|mkv|mov|wmv)$' -and $_.Name -notmatch $featureExcludePattern }
             if ($videoFiles) {
                 Write-Host "Videos to move: $($videoFiles.Count)" -ForegroundColor White
                 foreach ($video in $videoFiles) {

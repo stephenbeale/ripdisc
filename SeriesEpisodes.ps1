@@ -19,6 +19,13 @@
 # the disc part keeps two discs' -Extra01 apart. Concurrent rips of different discs only
 # ever create distinct names there, and renames never overwrite. The manifest stays in
 # the DiscN folder, recording each extra's path relative to it (..\..\Season 0\<name>).
+#
+# Plex naming (ripdisc-config.json "mediaServer": "plex", read by Load-Config.ps1 into
+# $script:Config_MediaServer): episodes <Title> - S02E05.mkv, specials <Title> - S00E01.mkv
+# in the series-level "Specials" folder, extras (same -S02-D1-Extra01 names) in the
+# series-level "Other" folder - Plex parses every file in a specials folder as an episode,
+# so extras go in its catch-all extras folder instead. Files in either server's form count
+# as already renamed, so switching the setting never renames or renumbers a file twice.
 
 # Series-level folder for extras. Must match undo-rename.ps1's NewName whitelist.
 $script:SeriesExtrasFolder = 'Season 0'
@@ -28,6 +35,10 @@ $script:SeriesLegacySpecialsFolder = 'Specials'
 # Where PR #143 put extras (DiscN\extras\). Still read so extras moved there by an older
 # run keep their numbers, and still accepted by undo-rename.ps1 for older manifests.
 $script:SeriesLegacyExtrasFolder = 'extras'
+# Plex's series-level folders (mediaServer "plex"). Must match undo-rename.ps1's whitelist.
+# 'Specials' is also the PR #152 legacy name above, so it is read for either server.
+$script:PlexSeriesSpecialsFolder = 'Specials'
+$script:PlexSeriesExtrasFolder = 'Other'
 
 # The "Season 0" folder for a folder of episodes, as a path RELATIVE to it: up past DiscN,
 # then up past Season N, to the series folder. "..\..\Season 0" for Season N\DiscN,
@@ -61,6 +72,7 @@ function Get-SeriesDiscFromDirectory {
 # Season 0 folder as Season 00, episode ##.
 function Get-SeriesSpecialFileName {
     param([string]$Title, [int]$Special, [string]$Extension)
+    if ("$($script:Config_MediaServer)" -eq 'plex') { return "{0} - S00E{1:D2}{2}" -f $Title, $Special, $Extension }
     return "{0}-S00-E{1:D2}{2}" -f $Title, $Special, $Extension
 }
 
@@ -68,7 +80,8 @@ function Get-SeriesSpecialFileName {
 function Get-SeriesTakenSpecials {
     param([string]$SpecialsDir, [string]$Title)
     if (-not (Test-Path -LiteralPath $SpecialsDir -PathType Container)) { return @() }
-    $pattern = '^' + [regex]::Escape($Title) + '-S00-E(\d+)\.(?:mp4|mkv)$'
+    # Either server's form (Jellyfin -S00-E01, Plex " - S00E01").
+    $pattern = '^' + [regex]::Escape($Title) + '(?:-S00-E| - S00E)(\d+)\.(?:mp4|mkv)$'
     return @(Get-ChildItem -LiteralPath $SpecialsDir -File | Where-Object { $_.Name -match $pattern } |
         ForEach-Object { [int]([regex]::Match($_.Name, $pattern).Groups[1].Value) })
 }
@@ -83,6 +96,7 @@ function Get-SeriesSeasonTag {
 
 function Get-SeriesEpisodeFileName {
     param([string]$Title, [int]$Season, [int]$Episode, [string]$Extension)
+    if ("$($script:Config_MediaServer)" -eq 'plex') { return "{0} - {1}E{2:D2}{3}" -f $Title, (Get-SeriesSeasonTag $Season), $Episode, $Extension }
     return "{0}-{1}-E{2:D2}{3}" -f $Title, (Get-SeriesSeasonTag $Season), $Episode, $Extension
 }
 
@@ -120,11 +134,12 @@ function Get-SeriesExtraLabel {
 # leave already-renamed files alone (e.g. re-running organize after a failure part-way
 # through) and to reserve their numbers so nothing is ever numbered twice. Extras may
 # carry a disc part (-D2-, absent on PR #143-era names) and a TheDiscDB name after the
-# number (-Extra01-Making Of).
+# number (-Extra01-Making Of). A Plex-style episode (<Title> - S02E05) also counts, whatever
+# the setting, so changing mediaServer never renames or renumbers a finished file.
 function Get-SeriesNamePattern {
     param([string]$Title, [int]$Season)
     $tag = Get-SeriesSeasonTag $Season
-    return '^' + [regex]::Escape($Title) + '-' + $tag + '-(?:E(?<ep>\d+)|(?:D(?<disc>\d+)-)?Extra(?<extra>\d+)(?:-[^\\/]+)?)\.(?:mp4|mkv)$'
+    return '^' + [regex]::Escape($Title) + '(?:-' + $tag + '-(?:E(?<ep>\d+)|(?:D(?<disc>\d+)-)?Extra(?<extra>\d+)(?:-[^\\/]+)?)| - ' + $tag + 'E(?<ep>\d+))\.(?:mp4|mkv)$'
 }
 
 # ---------------------------------------------------------------------------
@@ -167,7 +182,7 @@ function Get-SuggestedStartEpisode {
             } catch { }
         }
         foreach ($name in $names) {
-            if ($name -match '-S\d+-E(\d+)\.(?:mp4|mkv)$') {
+            if ($name -match '(?:-S\d+-E| - S\d+E)(\d+)\.(?:mp4|mkv)$') {
                 $n = [int]$Matches[1]
                 if ($n -gt $max) { $max = $n }
             }
@@ -609,7 +624,14 @@ function Get-SeriesTitleClassification {
 function New-SeriesRenamePlan {
     param([object]$Classification, [string]$Title, [int]$Season, [string]$Directory)
 
-    $specialsRel = Get-SeriesSpecialsRelativeDir -Directory $Directory
+    # Jellyfin: extras and specials share Season 0. Plex: specials in Specials, extras in Other.
+    if ("$($script:Config_MediaServer)" -eq 'plex') {
+        $specialsRel = Get-SeriesSpecialsRelativeDir -Directory $Directory -Folder $script:PlexSeriesSpecialsFolder
+        $extrasRel = Get-SeriesSpecialsRelativeDir -Directory $Directory -Folder $script:PlexSeriesExtrasFolder
+    } else {
+        $specialsRel = Get-SeriesSpecialsRelativeDir -Directory $Directory
+        $extrasRel = $specialsRel
+    }
     $disc = Get-SeriesDiscFromDirectory -Directory $Directory
     $plan = @(foreach ($item in $Classification.Items) {
         $ext = [System.IO.Path]::GetExtension($item.Name)
@@ -624,7 +646,7 @@ function New-SeriesRenamePlan {
             $newName = "$specialsRel\$fileName"
         } else {
             $fileName = Get-SeriesExtraFileName -Title $Title -Season $Season -Extra $item.ExtraNumber -Extension $ext -Label $item.Label -Disc $disc
-            $newName = "$specialsRel\$fileName"
+            $newName = "$extrasRel\$fileName"
         }
         # GetFullPath folds the ..\ segments so NewPath (manifest, messages) is a clean path.
         $newPath = [System.IO.Path]::GetFullPath((Join-Path $Directory $newName))
@@ -899,8 +921,10 @@ function Invoke-SeriesEpisodeRename {
     $disc = Get-SeriesDiscFromDirectory -Directory $Directory
     $extrasDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory)))
     $legacySpecialsDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory -Folder $script:SeriesLegacySpecialsFolder)))
+    # Plex's extras folder (Other) is read whatever the setting, like the legacy folders.
+    $plexExtrasDir = [System.IO.Path]::GetFullPath((Join-Path $Directory (Get-SeriesSpecialsRelativeDir -Directory $Directory -Folder $script:PlexSeriesExtrasFolder)))
     $legacyExtrasDir = Join-Path $Directory $script:SeriesLegacyExtrasFolder
-    foreach ($dir in @($extrasDir, $legacySpecialsDir, $legacyExtrasDir)) {
+    foreach ($dir in @($extrasDir, $legacySpecialsDir, $plexExtrasDir, $legacyExtrasDir)) {
         if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
         foreach ($f in @(Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -match '^\.(mp4|mkv)$' })) {
             if (-not ($f.Name -match $pattern) -or -not $Matches['extra']) { continue }
@@ -1009,7 +1033,10 @@ function Invoke-SeriesEpisodeRename {
     $specials = @($plan | Where-Object { $_.Kind -eq 'Special' -and -not $_.Skip }).Count
     $specialsText = if ($specials) { ", $specials special(s)" } else { "" }
     Write-Host "Renamed $($outcome.Renamed) file(s) ($episodes episode(s), $extras extra(s)$specialsText)$(if ($outcome.Skipped) { ", skipped $($outcome.Skipped)" })" -ForegroundColor Green
-    if ($extras + $specials -gt 0) { Write-Host "  Extras / specials moved to: $extrasDir" -ForegroundColor Gray }
+    if ($extras + $specials -gt 0) {
+        $movedTo = @($plan | Where-Object { $_.Kind -ne 'Episode' -and -not $_.Skip } | ForEach-Object { Split-Path $_.NewPath -Parent } | Select-Object -Unique)
+        Write-Host "  Extras / specials moved to: $($movedTo -join ', ')" -ForegroundColor Gray
+    }
     Write-Host "  To undo: & `"$(Join-Path $Directory 'undo-rename.ps1')`"   (add -WhatIf to preview)" -ForegroundColor Gray
     Write-Log "Series rename: $($outcome.Renamed) renamed, $($outcome.Skipped) skipped"
 

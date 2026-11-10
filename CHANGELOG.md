@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-10 - Media Server Naming: Jellyfin or Plex
+
+### Added
+- New `mediaServer` setting in `ripdisc-config.json`: `jellyfin` (default, unchanged output) or `plex`. `setup.ps1` asks for it as step 8 (now 8 steps) and shows it in the summary; the sample config has `"mediaServer": "jellyfin"`. Any other value, or no value, means Jellyfin, so existing configs keep their layout.
+- Plex naming: the movie main file is named after its folder (`Heat (1995).mp4`, `Heat (1995) - BluRay.mkv`, documentary parts `Cream - pt2.mp4`); movie extras and `-Extras` runs use `Other\`; plain `-Series` episodes are `Fargo - S01E03.mp4`, specials `Fargo - S00E01.mp4` in the series-level `Specials\` folder, and extras keep their `-S01-D1-Extra01` names in the series-level `Other\` folder; genre-series episodes without a name get `Title - S01E04.mp4`.
+- Load-Config.ps1: `Get-MovieExtrasFolderName`, `Get-AnyMainFilePattern`; `Get-FeatureNamePattern` takes `-FolderName` (needed for Plex). Both rip scripts work out the film folder (`$mainFolderName`) for Step 3 and the pre-rip clash check, which now builds the fallback `Title (Year)` folder's own pattern.
+- Tests: new `Test-MediaServerNaming.ps1` (config read, movie and series names, the real Step 3 blocks of both scripts in Plex mode, a Plex rename end to end then undo, setup and sample config). `Test-MovieFolderNaming.ps1` and `Test-DocumentaryPartNaming.ps1` updated for the new helpers and setup step numbers.
+
+### Changed
+- Episodes in either server's form count as already renamed (`Get-SeriesNamePattern`, `Get-SeriesTakenSpecials`, `Get-SuggestedStartEpisode`, rename-series numbering carry-over), and Step 3 never sweeps either form of a main file into extras, so changing the setting never renames or renumbers finished files.
+- Step 3's Disc 2+ move to extras now also leaves `-Part N` main files alone (it used to exclude only `-Feature` files), and Disc 1 creates the extras folder by its full path rather than relative to the current folder.
+- `undo-rename.ps1` accepts `..\Other\` / `..\..\Other\` rows.
+
+### Not done
+- Not run on Windows or a real disc. The Plex forms follow Plex's naming guides from memory (support.plex.tv was unreachable from the build session): check the series-level `Specials` and `Other` folders and the `- pt2` part token in a real Plex library.
+- The C# `RipDisc.Core` path always writes the Jellyfin layout.
+
 ## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
 
 ### Added

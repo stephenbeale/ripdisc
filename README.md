@@ -335,6 +335,26 @@ script falls back to querying Windows for the same drive letter before giving up
 # after Disc1's episodes pre-filled (press Enter to accept)
 ```
 
+### Media server naming (Jellyfin or Plex)
+
+`setup.ps1` (step 8) asks which media server reads your library. The choice is saved as `mediaServer` in `ripdisc-config.json` (`jellyfin`, the default, or `plex`). Plex matches a film by its file name, knows only its own extras folder names, and documents episodes as `S01E03` with no dash, so the names differ:
+
+| What | `jellyfin` (default) | `plex` |
+|------|----------------------|--------|
+| Movie main file | `Heat (1995)\Heat (1995)-Feature.mp4` | `Heat (1995)\Heat (1995).mp4` |
+| Blu-ray main file | `Heat (1995)-Feature-BluRay.mkv` | `Heat (1995) - BluRay.mkv` |
+| Documentary part (`-documentary -disc 2`) | `Cream-Part 2.mp4` | `Cream - pt2.mp4` |
+| Movie extras folder | `Heat (1995)\extras\` | `Heat (1995)\Other\` |
+| Series episode | `Fargo-S01-E03.mp4` | `Fargo - S01E03.mp4` |
+| Series special | `Season 0\Fargo-S00-E01.mp4` | `Specials\Fargo - S00E01.mp4` |
+| Series extra | `Season 0\Fargo-S01-D1-Extra01.mp4` | `Other\Fargo-S01-D1-Extra01.mp4` |
+| Genre-series episode, no name | `The Blues-S01E04.mp4` | `The Blues - S01E04.mp4` |
+
+- Files already on the drive are **not renamed** when you change the setting. Episodes in either form count as already named (their numbers stay reserved), and a film folder's main file in either form is never swept into extras or taken for a new disc's film.
+- Series extras go in a separate `Other` folder under Plex because Plex reads every file in a specials folder as an episode.
+- `undo-rename.ps1` accepts the `Specials` and `Other` paths.
+- The C# version (`RipDisc.exe`) always writes the Jellyfin layout.
+
 ### TV series episode naming (`-series`)
 
 At the end of a plain `-series` rip (Step 3), the files in the disc's `DiscN` folder are renamed:
@@ -645,6 +665,7 @@ The PowerShell scripts are the primary implementation. The C# version covers cor
 | `-Tutorial` / `-Fitness` / `-Music` / `-Surf` flags | Yes | No |
 | Genre series (`-Documentary`/etc. combined with `-Series`) | Yes | No |
 | `-Extras` flag (direct output to extras dir) | Yes | No |
+| `mediaServer` setting (Jellyfin or Plex file naming) | Yes | No (always Jellyfin) |
 | `-StartEpisode` parameter | Yes | No |
 | Episode naming (`S02-E01`), extras detection, rename manifest + undo | Yes | No |
 | TheDiscDB disc lookup for series naming (`-NoDiscDb`) | Yes | No |

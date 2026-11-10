@@ -37,7 +37,7 @@ function Get-Block {
 
 # Shared helpers the decision block calls (Load-Config.ps1, dot-sourced by both scripts)
 $cfgAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'Load-Config.ps1'), [ref]$null, [ref]$null)
-$cfgAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-FeatureNamePattern' }, $true) | ForEach-Object { . ([scriptblock]::Create($_.Extent.Text)) }
+$cfgAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in @('Get-FeatureNamePattern', 'Get-AnyMainFilePattern') }, $true) | ForEach-Object { . ([scriptblock]::Create($_.Extent.Text)) }
 $script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
 
 function Get-Line {

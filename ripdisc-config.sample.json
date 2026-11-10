@@ -10,5 +10,6 @@
   },
   "tmdbApiKey": "",
   "movieFolderNaming": "title",
-  "libraryFolders": ["DVDs", "Bluray", "Documentaries", "Music", "Series"]
+  "libraryFolders": ["DVDs", "Bluray", "Documentaries", "Music", "Series"],
+  "mediaServer": "jellyfin"
 }

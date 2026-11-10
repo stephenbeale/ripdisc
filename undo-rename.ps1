@@ -13,7 +13,8 @@
     recorded as ..\..\Season 0\<name> (..\Season 0\<name> when there is no Season or
     DiscN level); manifests from before that (PR #143) record extras\<name>. Undo moves
     them back into the DiscN folder and removes the Season 0 / Specials / extras folder if that
-    leaves it empty. Those shapes are the only paths accepted.
+    leaves it empty. With Plex naming (mediaServer "plex") specials go to "Specials" and
+    extras to "Other", recorded the same way. Those shapes are the only paths accepted.
 
     Safe by default:
       - a file that is missing is skipped with a warning (e.g. a rename that never ran
@@ -59,10 +60,11 @@ foreach ($row in $rows) {
     $newName = "$($row.NewName)"
     $originalName = "$($row.OriginalName)"
 
-    # Bare names only, except that NewName may sit in the series-level Season 0 (or older Specials) folder (one
+    # Bare names only, except that NewName may sit in the series-level Season 0 (Plex naming:
+    # Specials or Other; older runs: Specials) folder (one
     # or two levels up) or a PR #143-era extras subfolder - a row pointing anywhere else
     # (other folders, other .. paths, rooted paths) is refused, not followed.
-    $newNameOk = ($newName -match '^(?:extras[\\/]|(?:\.\.[\\/]){1,2}(?:Season 0|Specials)[\\/])?[^\\/:]+$') -and ($newName -notmatch '(^|[\\/])\.\.?$')
+    $newNameOk = ($newName -match '^(?:extras[\\/]|(?:\.\.[\\/]){1,2}(?:Season 0|Specials|Other)[\\/])?[^\\/:]+$') -and ($newName -notmatch '(^|[\\/])\.\.?$')
     if (-not $newName -or -not $originalName -or -not $newNameOk -or $originalName -match '[\\/:]') {
         Write-Warning "Skipping malformed row: '$originalName' / '$newName'"
         $skipped++

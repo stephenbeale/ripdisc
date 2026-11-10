@@ -207,7 +207,7 @@ try {
     # ---------------------------------------------------------------------------
     Write-Host "`nNever rip a film into another film's folder (Scarface 1932, 2026-10-28)" -ForegroundColor Cyan
 
-    foreach ($name in @('Get-ExistingFeatureFile', 'Get-FeatureNamePattern', 'Get-ImageFileNames')) {
+    foreach ($name in @('Get-ExistingFeatureFile', 'Get-FeatureNamePattern', 'Get-AnyMainFilePattern', 'Get-MovieExtrasFolderName', 'Get-ImageFileNames')) {
         . ([scriptblock]::Create((Import-FunctionFromScript $configPath $name)))
     }
     $script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
@@ -290,7 +290,7 @@ try {
         $leaf = Split-Path $path -Leaf
         $text = Get-Content -LiteralPath $path -Raw
         $s = $text.IndexOf('# Naming of the main file')
-        $e = $text.IndexOf('$extrasDir = Join-Path $finalOutputDir "extras"', $s)
+        $e = $text.IndexOf('$extrasDir = Join-Path $finalOutputDir (Get-MovieExtrasFolderName)', $s)
         $patBlock = [scriptblock]::Create($text.Substring($s, $e - $s))
         foreach ($case in @(@{ BD = $false; Part = $false; D = 1; Own = 'Cream-Feature.mp4'; Other = 'Cream-Feature-BluRay.mp4' },
                             @{ BD = $true; Part = $false; D = 1; Own = 'Cream-Feature-BluRay.mp4'; Other = 'Cream-Feature.mp4' },
@@ -356,7 +356,7 @@ try {
 
     $setupText = Get-Content -LiteralPath $setupPath -Raw
     Assert-True ($setupText -match 'movieFolderNaming = \$movieFolderNaming') 'setup.ps1 saves movieFolderNaming'
-    Assert-True ($setupText -match '\[7/7\] Movie folder naming' -and $setupText -match '\[5/7\] Media server library folders' -and $setupText -notmatch '/6\]') 'setup steps renumbered to 7 (libraries are step 5)'
+    Assert-True ($setupText -match '\[7/8\] Movie folder naming' -and $setupText -match '\[5/8\] Media server library folders' -and $setupText -match '\[8/8\] Media server' -and $setupText -notmatch '/7\]') 'setup steps renumbered to 8 (libraries are step 5, media server step 8)'
     $sample = Get-Content -LiteralPath (Join-Path $repoRoot 'ripdisc-config.sample.json') -Raw | ConvertFrom-Json
     Assert-Equal 'title' $sample.movieFolderNaming 'sample config defaults to plain titles'
     $configText = Get-Content -LiteralPath $configPath -Raw

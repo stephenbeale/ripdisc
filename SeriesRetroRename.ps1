@@ -252,11 +252,12 @@ function Invoke-SeriesRetroRename {
         # Carry numbering forward: planned (not skipped) episodes plus anything already renamed.
         $planMax = 0
         foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Episode' -and -not $_.Skip })) {
-            $m = [regex]::Match($p.NewName, '-E(\d+)\.[^.\\]+$')
+            # Jellyfin "-S02-E05" or Plex " - S02E05" (mediaServer setting).
+            $m = [regex]::Match($p.NewName, '(?:-|S\d+)E(\d+)\.[^.\\]+$')
             if ($m.Success -and [int]$m.Groups[1].Value -gt $planMax) { $planMax = [int]$m.Groups[1].Value }
         }
         foreach ($p in @($r.Plan | Where-Object { $_.Kind -eq 'Special' -and -not $_.Skip })) {
-            $sm = [regex]::Match($p.NewName, '-S00-E(\d+)\.[^.\\]+$')
+            $sm = [regex]::Match($p.NewName, '(?:-S00-|S00)E(\d+)\.[^.\\]+$')
             if ($sm.Success) { $plannedSpecials += [int]$sm.Groups[1].Value }
         }
         $folderMax = Get-SeriesFolderMaxEpisode -Directory $u.Directory -Title $u.Title -Season $u.Season

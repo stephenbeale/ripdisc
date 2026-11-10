@@ -19,6 +19,12 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-10 - Media server naming setting, Jellyfin or Plex (branch `ccr-5515b911-1w0quh`, cloud session)
+
+Trigger: the user asked how Plex naming differs from Jellyfin and chose to let users pick. New `mediaServer` config (`jellyfin` default = unchanged output, `plex`), setup.ps1 step 8/8. Plex: main file `<Folder>.mp4` / `<Folder> - BluRay` / `<Folder> - ptN`, movie extras `Other\`, episodes `Title - S01E03`, specials `Specials\Title - S00E01`, series extras `Other\` (same -D#-Extra## names). Either form counts as already renamed, so switching never renames finished files. Helpers: `Get-MovieExtrasFolderName`, `Get-AnyMainFilePattern`, `Get-FeatureNamePattern -FolderName` (Load-Config.ps1); `$script:PlexSeries*Folder` (SeriesEpisodes.ps1); undo whitelist adds `Other`. C# RipDisc.Core unchanged (always Jellyfin).
+
+**NOT RUN:** the cloud container had no PowerShell (downloading it was refused), so neither the new `tests/Test-MediaServerNaming.ps1` nor the updated Test-MovieFolderNaming / Test-DocumentaryPartNaming has been run. Run the full suite on Windows first. support.plex.tv was unreachable too: the Plex forms are from memory - check `Specials`, show-level `Other` extras and `- pt2` in a real Plex library.
+
 ### 2026-11-01 - Library prompt, setup library folders, year prompt similarity (branch `feature/library-picker`, worktree `ripdisc-library`)
 
 Trigger: real Duxford DVD run. The user wanted to pick a library (Documentaries, Music ...) after the output drive, setup.ps1 to ask for library folders and suggest them, and the year prompt (after editing the title to "Duxford the Second World War Years") offered six unrelated films - skip it when nothing is similar.

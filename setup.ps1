@@ -118,7 +118,7 @@ function Show-ManualDownloadHelp {
 }
 
 # ========== DETECT / INSTALL MAKEMKV ==========
-Write-Host "[1/7] Looking for MakeMKV..." -ForegroundColor White
+Write-Host "[1/8] Looking for MakeMKV..." -ForegroundColor White
 
 $makemkvSearchPaths = @(
     "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
@@ -182,7 +182,7 @@ if ($makemkvPath) {
 }
 
 # ========== DETECT / INSTALL HANDBRAKE CLI ==========
-Write-Host "`n[2/7] Looking for HandBrakeCLI..." -ForegroundColor White
+Write-Host "`n[2/8] Looking for HandBrakeCLI..." -ForegroundColor White
 
 $handbrakeSearchPaths = @(
     "C:\ProgramData\chocolatey\bin\HandBrakeCLI.exe",
@@ -243,7 +243,7 @@ if ($handbrakePath) {
 }
 
 # ========== CONFIGURE TEMP ROOT ==========
-Write-Host "`n[3/7] Temp working directory" -ForegroundColor White
+Write-Host "`n[3/8] Temp working directory" -ForegroundColor White
 Write-Host ""
 Write-Host "  MakeMKV rips raw files here before encoding. These files are large" -ForegroundColor Gray
 Write-Host "  (a DVD is ~4-8 GB, a Blu-ray can be 25-50 GB) but are deleted" -ForegroundColor Gray
@@ -264,7 +264,7 @@ if (!(Test-Path $tempRoot)) {
 }
 
 # ========== CONFIGURE DRIVES ==========
-Write-Host "`n[4/7] Default drive letters" -ForegroundColor White
+Write-Host "`n[4/8] Default drive letters" -ForegroundColor White
 Write-Host ""
 Write-Host "  Input drive  = your DVD/Blu-ray disc drive" -ForegroundColor Gray
 Write-Host "  Output drive = where encoded files are saved (e.g. a media hard drive)" -ForegroundColor Gray
@@ -314,7 +314,7 @@ $outputDrive = if ($outputDriveInput) { $outputDriveInput.TrimEnd(":") + ":" } e
 
 # ========== CONFIGURE MEDIA SERVER LIBRARIES ==========
 . (Join-Path $PSScriptRoot "MediaLibraries.ps1")
-Write-Host "`n[5/7] Media server library folders" -ForegroundColor White
+Write-Host "`n[5/8] Media server library folders" -ForegroundColor White
 Write-Host ""
 Write-Host "  Which folders on $outputDrive are libraries in your media server (Jellyfin/Plex)?" -ForegroundColor Gray
 Write-Host "  Each rip asks which one to use (Enter = the standard DVDs / Bluray folder)." -ForegroundColor Gray
@@ -356,7 +356,7 @@ if ($libraryCandidates.Count -eq 0) {
 }
 
 # ========== CONFIGURE TMDB API KEY ==========
-Write-Host "`n[6/7] TMDb API key (optional)" -ForegroundColor White
+Write-Host "`n[6/8] TMDb API key (optional)" -ForegroundColor White
 Write-Host ""
 Write-Host "  TMDb (The Movie Database) lets RipDisc auto-detect the title," -ForegroundColor Gray
 Write-Host "  type (movie/series), and season from your disc. Without it," -ForegroundColor Gray
@@ -377,7 +377,7 @@ if ($existingKey) {
 }
 
 # ========== CONFIGURE MOVIE FOLDER NAMING ==========
-Write-Host "`n[7/7] Movie folder naming" -ForegroundColor White
+Write-Host "`n[7/8] Movie folder naming" -ForegroundColor White
 Write-Host "  How should movie and genre-film folders be named? (Series folders are not changed.)" -ForegroundColor Gray
 Write-Host "  The year comes from the title you pick when ripping without -title, from -Year," -ForegroundColor Gray
 Write-Host "  or from a quick lookup prompt; you can always skip it for one disc." -ForegroundColor Gray
@@ -397,6 +397,29 @@ while ($true) {
     if ([string]::IsNullOrWhiteSpace($namingInput)) { break }
     if ($namingInput.Trim() -eq '1') { $movieFolderNaming = 'title'; break }
     if ($namingInput.Trim() -eq '2') { $movieFolderNaming = 'title-year'; break }
+    Write-Host "  Enter 1 or 2." -ForegroundColor Red
+}
+
+# ========== CONFIGURE MEDIA SERVER NAMING ==========
+Write-Host "`n[8/8] Media server" -ForegroundColor White
+Write-Host "  Which media server reads your library? File names follow its rules:" -ForegroundColor Gray
+Write-Host "    1. Jellyfin   Heat-Feature.mp4, extras\, Fargo-S01-E03.mp4, Season 0\" -ForegroundColor White
+Write-Host "    2. Plex       Heat.mp4, Other\, Fargo - S01E03.mp4, Specials\ and Other\" -ForegroundColor White
+Write-Host "  Files already ripped are not renamed." -ForegroundColor Gray
+$existingServer = 'jellyfin'
+if (Test-Path $configPath) {
+    try {
+        $oldCfg = Get-Content $configPath -Raw | ConvertFrom-Json
+        if ("$($oldCfg.mediaServer)".Trim().ToLower() -eq 'plex') { $existingServer = 'plex' }
+    } catch {}
+}
+$serverDefault = if ($existingServer -eq 'plex') { '2' } else { '1' }
+$mediaServer = $existingServer
+while ($true) {
+    $serverInput = Read-Host "  Choice [1-2, Enter = $serverDefault]"
+    if ([string]::IsNullOrWhiteSpace($serverInput)) { break }
+    if ($serverInput.Trim() -eq '1') { $mediaServer = 'jellyfin'; break }
+    if ($serverInput.Trim() -eq '2') { $mediaServer = 'plex'; break }
     Write-Host "  Enter 1 or 2." -ForegroundColor Red
 }
 
@@ -430,6 +453,7 @@ $config = @{
     tmdbApiKey = if ($tmdbKey) { $tmdbKey } else { "" }
     movieFolderNaming = $movieFolderNaming
     libraryFolders = @($libraryFolders)
+    mediaServer = $mediaServer
 }
 
 $config | ConvertTo-Json -Depth 3 | Set-Content -Path $configPath -Encoding UTF8
@@ -452,6 +476,7 @@ Write-Host "  Input drive:   $inputDrive" -ForegroundColor Green
 Write-Host "  Output drive:  $outputDrive" -ForegroundColor Green
 Write-Host "  Libraries:     $(if ($libraryFolders.Count -gt 0) { $libraryFolders -join ', ' } else { 'Not set (each rip lists the drive''s folders)' })" -ForegroundColor $(if ($libraryFolders.Count -gt 0) { "Green" } else { "Yellow" })
 Write-Host "  Movie folders: $(if ($movieFolderNaming -eq 'title-year') { 'Title (Year)' } else { 'Title' })" -ForegroundColor Green
+Write-Host "  Media server:  $(if ($mediaServer -eq 'plex') { 'Plex' } else { 'Jellyfin' })" -ForegroundColor Green
 Write-Host "  TMDb API key:  $(if ($tmdbKey) { 'Configured' } else { 'Not set (auto-discovery disabled)' })" -ForegroundColor $(if ($tmdbKey) { "Green" } else { "Yellow" })
 Write-Host ""
 

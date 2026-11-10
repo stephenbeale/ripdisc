@@ -15,6 +15,7 @@
       $script:Config_TmdbApiKey      - TMDb API key (may be empty)
       $script:Config_MovieFolderNaming - 'title' or 'title-year' (movie / genre-film folders)
       $script:Config_LibraryFolders  - Media server library folder names on the output drive (may be empty)
+      $script:Config_MediaServer     - 'jellyfin' (default) or 'plex': which server's file naming to write
 #>
 
 $configFilePath = Join-Path $PSScriptRoot "ripdisc-config.json"
@@ -123,6 +124,18 @@ $script:Config_MovieFolderNaming = if ($cfg -and "$($cfg.movieFolderNaming)" -in
 # Media server library folders on the output drive (setup.ps1 step 5), e.g. DVDs,
 # Documentaries, Music. Empty = not set up: the rip-time library prompt scans the drive.
 $script:Config_LibraryFolders = @(if ($cfg -and $cfg.libraryFolders) { @($cfg.libraryFolders) | ForEach-Object { "$_".Trim() } | Where-Object { $_ } })
+
+# Media server whose naming rules the output follows (setup.ps1 step 8):
+#   'jellyfin' (default, what RipDisc has always written):
+#       DVDs\Heat\Heat-Feature.mp4, Heat-Feature-BluRay.mp4, Heat-Part 2.mp4, Heat\extras\...
+#       Series\Fargo\Season 1\Disc1\Fargo-S01-E03.mp4, extras and specials in Season 0
+#   'plex':
+#       DVDs\Heat\Heat.mp4, Heat - BluRay.mp4, Heat - pt2.mp4, Heat\Other\...
+#       Series\Fargo\Season 1\Disc1\Fargo - S01E03.mp4, specials in Specials, extras in Other
+# Plex matches a film by its FILE name and knows only its own extras folder names
+# ("Other" is the catch-all), and its documented episode token is S01E03 with no dash.
+# Anything else in the config falls back to 'jellyfin', so existing libraries never change.
+$script:Config_MediaServer = if ($cfg -and "$($cfg.mediaServer)".Trim().ToLower() -in @('jellyfin', 'plex')) { "$($cfg.mediaServer)".Trim().ToLower() } else { 'jellyfin' }
 
 # ========== FOLDER NAMING HELPERS (shared by rip-disc.ps1 and continue-rip.ps1) ==========
 # Folder under the output drive that holds a movie / genre film.
@@ -445,19 +458,46 @@ function Find-ExistingMediaFolder {
     return $null
 }
 
-# The name THIS run gives its main file, as a regex: "-Part N" for a documentary part,
-# "-Feature-BluRay" for -Bluray, else "-Feature". Version-specific on purpose: a genre
-# folder can hold the DVD "-Feature" and the Blu-ray "-Feature-BluRay" side by side
-# (Jellyfin shows them as two versions), so one must not count as the other's clash.
+# The name THIS run gives its main file, as a regex. Jellyfin: "-Part N" for a documentary
+# part, "-Feature-BluRay" for -Bluray, else "-Feature" (any folder name before it). Plex:
+# the file is named after its folder - "<Folder>.ext", "<Folder> - BluRay.ext",
+# "<Folder> - ptN.ext" - so -FolderName is needed. Version-specific on purpose: a genre
+# folder can hold the DVD and the Blu-ray main file side by side (both servers show them
+# as two versions), so one must not count as the other's clash.
 function Get-FeatureNamePattern {
-    param([switch]$Bluray, [int]$Part = 0)
+    param([switch]$Bluray, [int]$Part = 0, [string]$FolderName = "", [string]$MediaServer = $script:Config_MediaServer)
+    if ("$MediaServer" -eq 'plex') {
+        if (-not $FolderName) { throw "Get-FeatureNamePattern: Plex naming needs -FolderName (the main file is named after its folder)" }
+        $suffix = if ($Part -gt 0) { " - pt$Part" } elseif ($Bluray) { ' - BluRay' } else { '' }
+        return '^' + [regex]::Escape($FolderName + $suffix) + '\.[^.]+$'
+    }
     if ($Part -gt 0) { return "-Part $Part\.[^.]+$" }
     if ($Bluray) { return '-Feature-BluRay\.[^.]+$' }
     return '-Feature\.[^.]+$'
 }
 
-# Any version's main file ("-Feature" or "-Feature-BluRay"). Step 3 never picks one of
-# these as this disc's largest file and never moves one into extras.
+# Movie extras folder inside a film's folder: Jellyfin reads "extras"; Plex does not, and
+# "Other" is its catch-all extras folder.
+function Get-MovieExtrasFolderName {
+    param([string]$MediaServer = $script:Config_MediaServer)
+    if ("$MediaServer" -eq 'plex') { return 'Other' }
+    return 'extras'
+}
+
+# Every main-file name either server's naming gives a film in $FolderName, as a regex:
+# Jellyfin "-Feature", "-Feature-BluRay", "-Part N" and Plex "<Folder>", "<Folder> - BluRay",
+# "<Folder> - ptN". Both servers' forms whatever the setting, so a main file written under
+# the other setting is never picked as this disc's largest file or swept into extras.
+function Get-AnyMainFilePattern {
+    param([string]$FolderName = "")
+    $pattern = '-Part \d+\.[^.]+$|' + $script:AnyFeaturePattern
+    if ($FolderName) { $pattern += '|^' + [regex]::Escape($FolderName) + '(?: - BluRay| - pt\d+)?\.[^.]+$' }
+    return $pattern
+}
+
+# Any version's Jellyfin main file ("-Feature" or "-Feature-BluRay"). Step 3 never picks one
+# of these as this disc's largest file and never moves one into extras (Get-AnyMainFilePattern
+# adds the Part and Plex forms).
 $script:AnyFeaturePattern = '-Feature(-BluRay)?\.[^.]+$'
 
 # The main-feature file already in $FolderPath (e.g. "Scarface-Feature.mp4"), or $null.
