@@ -241,6 +241,14 @@ function ConvertTo-LibraryChoice {
     return @{ Kind = 'genre'; Value = $Name }
 }
 
+# True when a library folder looks like a music library ("Music", "Music Videos", "Live
+# music" ...), so rip-disc.ps1 offers ripaudio first when one is picked.
+function Test-MusicLibraryFolder {
+    param([string]$Folder)
+    if (-not $Folder) { return $false }
+    return ((Split-Path "$Folder".TrimEnd('\') -Leaf) -match '(?i)music')
+}
+
 # Asks which library the rip goes into, after the output-drive prompt. Row 1 is always
 # the standard movie folder (DVDs / Bluray by disc type) and Enter takes it, so the old
 # behaviour is one keypress away. $Configured = libraryFolders from setup.ps1; when empty

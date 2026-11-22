@@ -26,9 +26,10 @@ function Import-FunctionFromScript {
     return $fn.Extent.Text
 }
 
-foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives')) {
+foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives', 'Get-WindowsOpticalDrives', 'Get-AudioCdShortcutDrive', 'Get-CyanripBusyDrives')) {
     . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $name)))
 }
+. ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath (Join-Path $repoRoot 'Load-Config.ps1') -FunctionName 'Test-MusicLibraryFolder')))
 
 $script:Passed = 0
 $script:Failed = 0
@@ -111,6 +112,65 @@ Assert-Equal 2 $missing.Count 'two drives are not connected'
 Assert-Equal 'HL-DT-ST BD-RE BU40N' $missing[0] 'the missing BU40N is named, without " USB Device"'
 Assert-Equal 'HL-DT-ST DVDRAM GP75N (another one)' $missing[1] 'a missing twin of a connected drive says "another one"'
 Assert-Equal 0 @(Get-DisconnectedOpticalDrives -Devices @((& $dev 'HL-DT-ST BD-RE BU40N' $true))).Count 'all connected: nothing listed'
+
+Write-Host "`nGet-AudioCdShortcutDrive (before MakeMKV is asked anything)" -ForegroundColor Cyan
+# 2026-11-22: audio CDs in both D: and G:, no -Drive - MakeMKV's lookup timed out at 60 s
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = 'Audio CD'; 'G:' = 'Audio CD' }) 'two audio CDs, no -Drive: hand the default D: to ripaudio without MakeMKV'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = 'Audio CD'; 'G:' = 'DVD-Video' }) 'no -Drive and a DVD in G: - carry on, the auto drive pick takes G:'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = 'Audio CD'; 'G:' = 'Blu-ray' }) 'no -Drive and a Blu-ray in G: - carry on'
+Assert-Equal 'G:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = ''; 'G:' = 'Audio CD' }) 'no -Drive, default empty, only an audio CD elsewhere: hand that one over'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = ''; 'G:' = '' }) 'no discs at all: carry on (the normal path reports it)'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{ 'D:' = 'DVD-Video'; 'G:' = 'Audio CD' }) 'no -Drive, DVD in the default: carry on'
+Assert-Equal 'G:' (Get-AudioCdShortcutDrive -TargetLetter 'G:' -DriveGiven -DiscTypes @{ 'D:' = 'DVD-Video'; 'G:' = 'Audio CD' }) '-Drive G with an audio CD: hand over even though D: has a DVD (guard offers [D])'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DriveGiven -DiscTypes @{ 'D:' = 'DVD-Video'; 'G:' = 'Audio CD' }) '-Drive D with a DVD: carry on'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DriveGiven -DiscTypes @{ 'D:' = ''; 'G:' = 'Audio CD' }) '-Drive D (empty) is never second-guessed'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'd' -DiscTypes @{ 'D:' = 'Audio CD' }) 'a bare lower-case letter works'
+Assert-Equal '' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes @{}) 'Windows listed no drives: carry on'
+
+Write-Host "`nGet-WindowsOpticalDrives" -ForegroundColor Cyan
+$cd = { param($drive, $loaded, $vol) [pscustomobject]@{ Drive = $drive; Name = 'HL-DT-ST DVDRAM GP75N USB Device'; MediaLoaded = $loaded; VolumeName = $vol } }
+$w = @(Get-WindowsOpticalDrives -Devices @((& $cd 'G:' $true 'Audio CD'), (& $cd 'D:' $true 'Audio CD'), (& $cd 'E:' $false 'OLD'), (& $cd '' $false '')))
+Assert-Equal 3 $w.Count 'rows for each lettered drive, none for a drive without a letter'
+Assert-Equal 'D:' $w[0].Letter 'sorted by letter'
+Assert-Equal 'Audio CD' $w[0].DiscName 'volume name used as the disc name'
+Assert-Equal '' $w[1].DiscName 'no media: no disc name, even if WMI kept an old label'
+Assert-Equal $false $w[0].Busy 'never marked busy (the check is skipped while MakeMKV runs)'
+$others = @(Get-OtherDiscDrives -DrvLines $w -CurrentLetter 'D:' -GetDiscType (New-TypeMap @{ 'G:' = 'Audio CD' }))
+Assert-Equal 'G:' $others[0].Letter 'Windows rows work with Get-OtherDiscDrives (the guard''s [D] / other-audio-CD lists)'
+
+Write-Host "`nTest-MusicLibraryFolder" -ForegroundColor Cyan
+Assert-Equal $true (Test-MusicLibraryFolder 'Music') 'Music'
+Assert-Equal $true (Test-MusicLibraryFolder 'Music Videos') 'Music Videos'
+Assert-Equal $true (Test-MusicLibraryFolder 'Live music') 'Live music (any case)'
+Assert-Equal $true (Test-MusicLibraryFolder 'F:\Music\') 'a full path: the folder name counts'
+Assert-Equal $false (Test-MusicLibraryFolder 'Documentaries') 'Documentaries'
+Assert-Equal $false (Test-MusicLibraryFolder 'F:\Music\Concerts') 'only the library folder itself, not a parent'
+Assert-Equal $false (Test-MusicLibraryFolder '') 'no folder (the Movies row)'
+
+Write-Host "`nrip-disc.ps1 order" -ForegroundColor Cyan
+$ripText = [IO.File]::ReadAllText($ripDiscPath)
+$preAt = $ripText.IndexOf('# ========== AUDIO CD CHECK BEFORE MAKEMKV ==========')
+$musicAt = $ripText.IndexOf('# ========== MUSIC LIBRARY OFFER ==========')
+$queryAt = $ripText.IndexOf('$drvProc.StartInfo.Arguments = "-r info disc:9999"')
+Assert-Equal $true ($preAt -gt 0 -and $preAt -lt $queryAt) 'the audio CD check runs before the MakeMKV drive query'
+Assert-Equal $true ($musicAt -gt $preAt -and $musicAt -lt $queryAt) 'the music library offer runs before the MakeMKV drive query'
+Assert-Equal $true ($ripText.IndexOf('$script:MusicLibraryChosen = Test-MusicLibraryFolder') -gt 0) 'the library pick sets the music flag'
+
+Write-Host "`nBusy drives (ripaudio already ripping)" -ForegroundColor Cyan
+# The real command line seen 2026-11-22 while ripaudio ripped D:
+$live = '"C:\Users\x\cyanrip.exe" -D "Tom Jones and Jools Holland" -o flac -d D: -s 0 -N'
+Assert-Equal 'D:' ((Get-CyanripBusyDrives -CommandLines @($live)) -join ',') 'the drive comes from -d, not the -D output folder'
+Assert-Equal 'D:,G:' ((Get-CyanripBusyDrives -CommandLines @($live, 'cyanrip.exe -d g -s 0')) -join ',') 'two rips; a bare letter without the colon'
+Assert-Equal '' ((Get-CyanripBusyDrives -CommandLines @('cyanrip.exe -D "Disc D" -o flac')) -join ',') 'only -D (output folder): nothing busy'
+Assert-Equal 0 @(Get-CyanripBusyDrives -CommandLines @()).Count 'no cyanrip running: nothing busy'
+$two = @{ 'D:' = 'Audio CD'; 'G:' = 'Audio CD' }
+Assert-Equal 'G:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('D:')) 'default D: busy ripping: hand over the free G: (the 2026-11-22 case)'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('G:')) 'G: busy: the default D: is still used'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('D:', 'G:')) 'every audio CD drive busy: the default (the guard then says why)'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DriveGiven -DiscTypes $two -BusyLetters @('D:')) '-Drive D is never second-guessed, even when busy'
+$ripText2 = [IO.File]::ReadAllText($ripDiscPath)
+Assert-Equal $true ($ripText2.Contains('-DiscTypes $winTypes -BusyLetters $cyBusy')) 'the pre-check passes the busy drives'
+Assert-Equal $true ($ripText2.Contains('$freeAudio = @($audioDrives | Where-Object { -not $_.Busy })')) 'the music offer only offers free drives'
 
 Write-Host "`n$script:Passed passed, $script:Failed failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }

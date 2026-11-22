@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-22 - Audio CDs Caught Before MakeMKV, Music Library Offers ripaudio, 20 s Drive Lookup with Retry
+
+### Fixed
+- Two cold USB drives both holding audio CDs made MakeMKV's `info disc:9999` drive lookup run past its 60 s timeout (it retries "ILLEGAL MODE FOR THIS TRACK" reads on each CD), so the run died before the audio CD guard after the lookup was reached. A new check runs first, from Windows alone (`Get-WindowsOpticalDrives`, `Get-DiscTypeLabel`, `Get-AudioCdShortcutDrive`): with `-Drive`, an audio CD in that drive; without, an audio CD and no DVD / Blu-ray anywhere, goes straight to the ripaudio hand-off. Live on the real drives: 2 s, MakeMKV never started (was a 60 s timeout). Skipped while another MakeMKV is running; the guard after the lookup still covers that.
+
+### Changed
+- The audio CD guard is now `Invoke-AudioCdGuard`, shared by both places. It also says when another drive holds an audio CD too, and its `[D]` list offers only DVD / Blu-ray drives (data discs were offered before).
+- Startup drive lookup: 20 s per attempt (was 60 s, then exit), with a "waiting for the drive... Ns / 20s" countdown, then `[R] Retry` (Enter) / `[A] Abort`, up to 3 attempts. A cold drive keeps spinning up while we wait, so the retry is usually quick. No retry offer when a leftover makemkvcon is holding the drive. `Wait-ProcessWithTimeout` gained `-OnTick`. The mid-rip re-query after a disconnect keeps its 60 s.
+
+### Added
+- Picking a library whose folder name contains "music" (`Test-MusicLibraryFolder`, Load-Config.ps1) offers `[R]` rip the audio CD with rip-audio.ps1 before MakeMKV runs; Enter carries on (a concert DVD / Blu-ray).
+- The music-library offer and the audio CD check skip drives ripaudio is already ripping (`Get-CyanripBusyDrives`, from cyanrip's `-d X:` command lines). Found live: with ripaudio ripping D:, the offer still picked D: and ripaudio stopped "D: is busy" although G: held a free audio CD. Now it says "D: is already being ripped by ripaudio" and offers G:; when every audio CD drive is busy it says so and offers no [R].
+- MakeMKV drive-list cache (`%TEMP%\makemkv-drive-cache.txt`) is now written only for a real `makemkvcon(64).exe`, and its first line records which makemkvcon wrote it; a cache from another path (or an old one without the line) is ignored (`Read-DriveCache` / `Write-DriveCache`). Found live: a test run against a fake makemkvcon cached "Z: FAKE DRIVE" and the user's next real run failed "Drive D: not found".
+- Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 33 (17 new).
+
 ## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
 
 ### Added
