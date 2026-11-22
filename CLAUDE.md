@@ -19,6 +19,14 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-22 - Audio CD check before MakeMKV, music library offer, 20 s lookup + retry (branch `fix/audio-cd-before-makemkv`, worktree `ripdisc-audio-guard`)
+
+Trigger: real run, Music library picked, audio CDs in both GP75N drives (D:, G:); "MakeMKV drive query timed out after 60s". MakeMKV retries ILLEGAL MODE reads on audio CDs; with both drives cold that passed 60 s, so the audio CD guard (after the lookup) was never reached. Warm, the same query took 5 s. BU40N was not connected (PnP) at the time.
+
+**Built:** Windows-only pre-check before the lookup (`Get-WindowsOpticalDrives`, `Get-AudioCdShortcutDrive`, `Invoke-AudioCdGuard` shared with the old guard); music-library offer (`Test-MusicLibraryFolder` in Load-Config.ps1, flag set at the library prompt, offer shown in the pre-check); startup lookup 20 s x up to 3 attempts with countdown and [R]etry (user asked for 20 s max).
+
+**Checked live:** real drives, both audio CDs, scripted Read-Host: music offer -> Enter -> guard for D: with "also an audio CD in G:", 2 s, no MakeMKV. Countdown/retry run against a fake makemkvcon (25 s hang, then answers) via a temporary worktree config (removed). Full suite passes. **Not run:** the [R] hand-off into rip-audio.ps1; the retry on a real slow drive.
+
 ### 2026-11-01 - Library prompt, setup library folders, year prompt similarity (branch `feature/library-picker`, worktree `ripdisc-library`)
 
 Trigger: real Duxford DVD run. The user wanted to pick a library (Documentaries, Music ...) after the output drive, setup.ps1 to ask for library folders and suggest them, and the year prompt (after editing the title to "Duxford the Second World War Years") offered six unrelated films - skip it when nothing is similar.

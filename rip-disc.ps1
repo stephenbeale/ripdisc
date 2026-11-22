@@ -137,6 +137,9 @@ if (-not $PSBoundParameters.ContainsKey('OutputDrive')) {
             'genre'  { $Genre = $library.Value; $script:LaunchParams['Genre'] = $Genre }
         }
         if ($library.Folder) { Write-Host "Library: $($library.Folder)" -ForegroundColor Green }
+        # A music library usually means an audio CD - offered ripaudio before MakeMKV runs
+        # (see MUSIC LIBRARY OFFER below; the helper functions are defined further down).
+        $script:MusicLibraryChosen = Test-MusicLibraryFolder -Folder $library.Folder
     }
 }
 
@@ -1021,11 +1024,16 @@ function Select-MatchedDrive {
 function Wait-ProcessWithTimeout {
     param(
         [System.Diagnostics.Process]$Process,
-        [double]$TimeoutSec
+        [double]$TimeoutSec,
+        # Optional: called with the whole seconds waited so far, once per second (a countdown)
+        [scriptblock]$OnTick = $null
     )
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastTick = 0
     while (-not $Process.HasExited -and $sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
         Start-Sleep -Milliseconds 250
+        $secs = [int][math]::Floor($sw.Elapsed.TotalSeconds)
+        if ($OnTick -and $secs -gt $lastTick) { $lastTick = $secs; & $OnTick $secs }
     }
     if (-not $Process.HasExited) {
         try { $Process.Kill() } catch {}
@@ -1318,6 +1326,107 @@ function Get-OtherDiscDrives {
         if (-not $type) { continue }
         [pscustomobject]@{ Letter = "${letter}:"; DiscName = "$($d.DiscName)"; DiscType = $type }
     })
+}
+
+# Optical drives as Windows sees them, shaped like the MakeMKV drive listing's rows
+# (Letter, DiscName, Busy) so Get-OtherDiscDrives works on either. Used before MakeMKV is
+# asked anything. Bounded WMI call, as in Get-DiscVolumeLabel. -Devices is a seam for tests.
+function Get-WindowsOpticalDrives {
+    param([object[]]$Devices = $null)
+    try {
+        if ($null -eq $Devices) { $Devices = @(Get-CimInstance Win32_CDROMDrive -ErrorAction Stop -OperationTimeoutSec 5) }
+    } catch {
+        return @()
+    }
+    $rows = @(foreach ($d in @($Devices)) {
+        if (-not $d -or "$($d.Drive)" -notmatch '^[A-Za-z]:$') { continue }
+        $name = if ($d.MediaLoaded -and $d.VolumeName) { "$($d.VolumeName)" } else { "" }
+        [pscustomobject]@{ Letter = "$($d.Drive)".ToUpper(); Name = "$($d.Name)"; DiscName = $name; Busy = $false }
+    })
+    return @($rows | Sort-Object Letter)
+}
+
+# Decides, from Windows' disc types alone (no MakeMKV), whether to go straight to the audio
+# CD hand-off. Returns the drive letter to hand over, or "" to carry on to MakeMKV:
+# - -Drive given: only when that drive holds an audio CD.
+# - no -Drive: only when no drive holds a DVD/Blu-ray (otherwise the auto drive pick after
+#   the MakeMKV lookup takes the video disc). The default drive first, else the first
+#   drive holding an audio CD.
+# -DiscTypes maps "D:" -> Get-DiscTypeLabel's answer.
+function Get-AudioCdShortcutDrive {
+    param([string]$TargetLetter, [switch]$DriveGiven, [hashtable]$DiscTypes = @{})
+    $target = "$TargetLetter".TrimEnd(':', '\').ToUpper() + ':'
+    if ($DriveGiven) {
+        if ("$($DiscTypes[$target])" -eq 'Audio CD') { return $target }
+        return ""
+    }
+    $letters = @($DiscTypes.Keys | Sort-Object)
+    foreach ($l in $letters) { if ("$($DiscTypes[$l])" -in @('DVD-Video', 'Blu-ray')) { return "" } }
+    if ("$($DiscTypes[$target])" -eq 'Audio CD') { return $target }
+    foreach ($l in $letters) { if ("$($DiscTypes[$l])" -eq 'Audio CD') { return "$l" } }
+    return ""
+}
+
+# Runs rip-audio.ps1 from the sibling ripaudio checkout on one drive and exits with its code.
+function Start-RipAudioAndExit {
+    param([string]$DriveLetter, [string]$RipAudioDir)
+    $audioArgs = @{ Drive = $DriveLetter.TrimEnd(':', '\') }
+    if ($script:OutputDriveExplicit) { $audioArgs.OutputDrive = "$OutputDrive".TrimEnd(':', '\') }
+    Set-Location -LiteralPath $RipAudioDir
+    & (Join-Path $RipAudioDir 'rip-audio.ps1') @audioArgs
+    exit $LASTEXITCODE
+}
+
+# The sibling ripaudio checkout (repos side by side), or "" when there is none.
+function Get-RipAudioDir {
+    $dir = Join-Path (Split-Path $PSScriptRoot -Parent) 'ripaudio'
+    if (Test-Path -LiteralPath (Join-Path $dir 'rip-audio.ps1')) { return $dir }
+    return ""
+}
+
+# MakeMKV rips video discs only: says so for an audio CD, prints the ripaudio command and
+# offers [R] rip it with rip-audio.ps1 now / [D] rip another drive's video disc instead.
+# Always exits the script. $DrvLines may be MakeMKV's drive listing or Windows' own
+# (Get-WindowsOpticalDrives); -GetDiscType lets the caller reuse disc types it already has.
+function Invoke-AudioCdGuard {
+    param(
+        [string]$DriveLetter,
+        [object[]]$DrvLines = @(),
+        [scriptblock]$GetDiscType = { param($l) Get-DiscTypeLabel -DriveLetter $l }
+    )
+    $ripAudioDir = Get-RipAudioDir
+    Write-Host "`n$DriveLetter holds an audio CD - ripdisc rips DVDs and Blu-rays (MakeMKV), not music CDs." -ForegroundColor Yellow
+    Write-Host "Rip it with ripaudio instead:" -ForegroundColor Yellow
+    Write-Host "  $(Get-RipAudioCommand -DriveLetter $DriveLetter -OutputDrive $(if ($script:OutputDriveExplicit) { $OutputDrive } else { '' }) -RipAudioDir $ripAudioDir)" -ForegroundColor Cyan
+    $others = @(if ($DrvLines) { Get-OtherDiscDrives -DrvLines $DrvLines -CurrentLetter $DriveLetter -GetDiscType $GetDiscType })
+    $otherAudio = @($others | Where-Object { $_.DiscType -eq 'Audio CD' })
+    if ($otherAudio.Count -gt 0) {
+        Write-Host "  (also an audio CD in $(($otherAudio | ForEach-Object { $_.Letter }) -join ', ') - run ripaudio again for it afterwards)" -ForegroundColor DarkGray
+    }
+    # Video discs in other drives (the audio CD's own drive and other audio CDs left out)
+    $videoDrives = @($others | Where-Object { $_.DiscType -in @('DVD-Video', 'Blu-ray') })
+    if ($ripAudioDir -or $videoDrives.Count -gt 0) {
+        Write-Host ""
+        if ($ripAudioDir) { Write-Host "  [R] Rip this CD with rip-audio.ps1 now" -ForegroundColor White }
+        foreach ($v in $videoDrives) {
+            Write-Host "  [D] Rip $($v.Letter)$(if ($v.DiscName) { " [$($v.DiscName)]" }) ($($v.DiscType)) instead" -ForegroundColor White
+            break
+        }
+        if ($videoDrives.Count -gt 1) { Write-Host "      (D lists all $($videoDrives.Count) drives with a video disc)" -ForegroundColor DarkGray }
+        Write-Host "  [A] or Enter: stop" -ForegroundColor Gray
+        $guardChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
+        if ($guardChoice -eq 'R' -and $ripAudioDir) { Start-RipAudioAndExit -DriveLetter $DriveLetter -RipAudioDir $ripAudioDir }
+        if ($guardChoice -eq 'D' -and $videoDrives.Count -gt 0) {
+            $newDrive = if ($videoDrives.Count -eq 1) { $videoDrives[0].Letter } else { Read-OtherDrive -Drives $videoDrives }
+            if ($newDrive) {
+                Write-Host "`nRestarting on $newDrive..." -ForegroundColor Cyan
+                $relaunch = Get-RelaunchParams -BoundParams $script:LaunchParams -DriveLetter $newDrive
+                & $PSCommandPath @relaunch
+                exit $LASTEXITCODE
+            }
+        }
+    }
+    exit 1
 }
 
 # Without -Drive, the configured default drive may hold the wrong disc (an audio CD left
@@ -1798,6 +1907,51 @@ $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 # while it enumerates them at startup. Empty when -DriveIndex is used (we never see the drive list).
 $script:TargetDriveName = ""
 
+# ========== AUDIO CD CHECK BEFORE MAKEMKV ==========
+# Windows can tell an audio CD from a DVD/Blu-ray in well under a second; MakeMKV's drive
+# query cannot - it tries to read every drive as a video disc, and on audio CDs it retries
+# "ILLEGAL MODE FOR THIS TRACK" reads. With two cold USB drives both holding audio CDs that
+# went past the 60 s timeout (2026-11-22), so the run died with a timeout before the audio
+# CD guard further down was ever reached. Check first and hand over to ripaudio straight
+# away. Skipped while another MakeMKV is running (never probe drives mid-rip) - the normal
+# path below, with its own guard, still covers that case.
+$preMkvRunning = @(Get-Process -Name "makemkvcon64", "makemkvcon" -ErrorAction SilentlyContinue).Count -gt 0
+if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
+    $winDrives = @(Get-WindowsOpticalDrives)
+    $winTypes = @{}
+    foreach ($w in $winDrives) { $winTypes[$w.Letter] = Get-DiscTypeLabel -DriveLetter $w.Letter }
+
+    # ========== MUSIC LIBRARY OFFER ==========
+    # A library named like "Music" was picked: most likely an audio CD, so offer ripaudio
+    # first. Enter carries on with ripdisc (a concert DVD / Blu-ray into that library).
+    if ($script:MusicLibraryChosen) {
+        $ripAudioDir = Get-RipAudioDir
+        if ($ripAudioDir) {
+            $audioDrives = @($winDrives | Where-Object { $winTypes[$_.Letter] -eq 'Audio CD' })
+            $offerLetter = if (@($audioDrives | Where-Object { $_.Letter -eq $driveLetter }).Count -gt 0) { $driveLetter }
+                elseif ($audioDrives.Count -gt 0) { $audioDrives[0].Letter } else { $driveLetter }
+            $offerWhat = if ($winTypes[$offerLetter] -eq 'Audio CD') { "the audio CD in $offerLetter" } else { "a CD in $offerLetter" }
+            Write-Host "`nThat is a music library. Ripping a music CD? ripaudio does those (ripdisc only rips DVDs / Blu-rays)." -ForegroundColor Cyan
+            if ($audioDrives.Count -gt 1) {
+                Write-Host "  Audio CDs in: $(($audioDrives | ForEach-Object { $_.Letter }) -join ', ') - run ripaudio again for the others afterwards" -ForegroundColor DarkGray
+            }
+            Write-Host "  [R] Rip $offerWhat with rip-audio.ps1 now" -ForegroundColor White
+            Write-Host "  Enter: carry on with ripdisc (a music DVD / Blu-ray)" -ForegroundColor Gray
+            $musicChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
+            if ($musicChoice -eq 'R') { Start-RipAudioAndExit -DriveLetter $offerLetter -RipAudioDir $ripAudioDir }
+        }
+    }
+
+    $audioLetter = Get-AudioCdShortcutDrive -TargetLetter $driveLetter -DriveGiven:$PSBoundParameters.ContainsKey('Drive') `
+        -DiscTypes $winTypes
+    if ($audioLetter) {
+        if ($audioLetter -ne $driveLetter) {
+            Write-Host "$driveLetter has no disc to rip, and no drive holds a DVD or Blu-ray." -ForegroundColor Yellow
+        }
+        Invoke-AudioCdGuard -DriveLetter $audioLetter -DrvLines $winDrives -GetDiscType { param($l) $winTypes[$l] }
+    }
+}
+
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
 } else {
@@ -1825,34 +1979,51 @@ if ($DriveIndex -ge 0) {
         }
     }
     if (-not $drvOutput) {
-        Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
-        # Run this as a real Process with a hard timeout, not a plain `&` call - `&` has no
-        # timeout mechanism at all, and MakeMKV's own drive probe can hang indefinitely when a
-        # physical drive is malfunctioning (seen live: a USB DVD drive that had started
-        # dropping connection made this exact query hang for 5+ minutes with nothing to show
-        # for it). Only stdout is redirected, matching the main rip step further down -
-        # MakeMKV's error lines land on stdout, not stderr.
-        $drvProc = New-Object System.Diagnostics.Process
-        $drvProc.StartInfo.FileName = $makemkvconPath
-        $drvProc.StartInfo.Arguments = "-r info disc:9999"
-        $drvProc.StartInfo.UseShellExecute = $false
-        $drvProc.StartInfo.RedirectStandardOutput = $true
-        $drvProc.StartInfo.RedirectStandardError = $false
-        $drvProc.StartInfo.CreateNoWindow = $true
-        $drvProc.Start() | Out-Null
+        # 20s per attempt, with a live countdown, then [R]etry. A cold USB drive can take
+        # ~30-35s to answer on its own (seen live), but the drive keeps spinning up while we
+        # wait, so a retry after 20s is usually quick - better than sitting through a fixed
+        # 60s (user request 2026-11-22). Up to 3 attempts.
+        $drvQueryTimeoutSec = 20
+        $drvQueryMaxAttempts = 3
+        $drvQueryExitedInTime = $false
+        for ($drvAttempt = 1; $drvAttempt -le $drvQueryMaxAttempts; $drvAttempt++) {
+            Write-Host "Looking up drive $driveLetter in MakeMKV..." -ForegroundColor Gray
+            # Run this as a real Process with a hard timeout, not a plain `&` call - `&` has no
+            # timeout mechanism at all, and MakeMKV's own drive probe can hang indefinitely when a
+            # physical drive is malfunctioning (seen live: a USB DVD drive that had started
+            # dropping connection made this exact query hang for 5+ minutes with nothing to show
+            # for it). Only stdout is redirected, matching the main rip step further down -
+            # MakeMKV's error lines land on stdout, not stderr.
+            $drvProc = New-Object System.Diagnostics.Process
+            $drvProc.StartInfo.FileName = $makemkvconPath
+            $drvProc.StartInfo.Arguments = "-r info disc:9999"
+            $drvProc.StartInfo.UseShellExecute = $false
+            $drvProc.StartInfo.RedirectStandardOutput = $true
+            $drvProc.StartInfo.RedirectStandardError = $false
+            $drvProc.StartInfo.CreateNoWindow = $true
+            $drvProc.Start() | Out-Null
 
-        # 60s, not 30s: seen live, a legitimate (not stuck) query on a USB drive that had to
-        # spin up from idle took ~30-35s to complete on its own. A shorter timeout would kill a
-        # query that was actually about to succeed, not just a genuinely hung one.
-        $drvQueryTimeoutSec = 60
-        $drvQueryExitedInTime = Wait-ProcessWithTimeout -Process $drvProc -TimeoutSec $drvQueryTimeoutSec
+            # Countdown on one line (only once it is clearly not instant)
+            $drvTick = { param($s) if ($s -ge 3) { Write-Host -NoNewline "`r  waiting for the drive... ${s}s / ${drvQueryTimeoutSec}s " -ForegroundColor DarkGray } }
+            $drvQueryExitedInTime = Wait-ProcessWithTimeout -Process $drvProc -TimeoutSec $drvQueryTimeoutSec -OnTick $drvTick
+            Write-Host -NoNewline "`r$(' ' * 50)`r"
+            if ($drvQueryExitedInTime) { break }
+
+            # Leftover makemkvcon from a Ctrl+C'd run? Then a retry cannot help - say so below.
+            $otherMkvProcs = @(Get-Process -Name "makemkvcon", "makemkvcon64" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $drvProc.Id })
+            if ($drvAttempt -ge $drvQueryMaxAttempts -or $otherMkvProcs.Count -gt 0) { break }
+            Write-Host "No answer from MakeMKV after ${drvQueryTimeoutSec}s - the drive may still be spinning up." -ForegroundColor Yellow
+            $drvRetry = "$(Read-Host '[R] Retry (usually quick once the drive is awake) / Enter = R / [A] Abort')".Trim().ToUpper()
+            if ($drvRetry -eq 'A') { break }
+        }
 
         if (-not $drvQueryExitedInTime) {
             # No $script:LogFile exists yet at this point - LOGGING SETUP runs later, once a
             # drive has actually been identified - so there is nothing to write this to. Make
             # the console output carry the same information a log entry would instead.
             Write-Host "`n========================================" -ForegroundColor Red
-            Write-Host "MakeMKV drive query timed out after ${drvQueryTimeoutSec}s" -ForegroundColor Red
+            $drvTries = [math]::Min($drvAttempt, $drvQueryMaxAttempts)
+            Write-Host "MakeMKV drive query timed out ($drvTries attempt$(if ($drvTries -ne 1) { 's' }) of ${drvQueryTimeoutSec}s)" -ForegroundColor Red
             Write-Host "========================================" -ForegroundColor Red
             Write-Host "No session log exists yet for this run - logging only starts once a drive is" -ForegroundColor Gray
             Write-Host "identified, and this failed before that point." -ForegroundColor Gray
@@ -1861,7 +2032,7 @@ if ($DriveIndex -ge 0) {
             # and holding the drive exclusively - PowerShell's Ctrl+C does not kill a script's
             # child processes for you. That looks identical to a hung/disconnected drive from
             # here, so surface it explicitly rather than just guessing "malfunctioning".
-            $otherMkvProcs = @(Get-Process -Name "makemkvcon", "makemkvcon64" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $drvProc.Id })
+            # ($otherMkvProcs was gathered in the retry loop above.)
             if ($otherMkvProcs.Count -gt 0) {
                 $pidList = ($otherMkvProcs | ForEach-Object { $_.Id }) -join ", "
                 Write-Host "`nLikely cause: $($otherMkvProcs.Count) other MakeMKV process(es) already running (PID $pidList)." -ForegroundColor Yellow
@@ -2030,41 +2201,7 @@ if ($DriveIndex -ge 0) {
 # -DriveIndex caveat as the Step 1 check: the letter is only trusted when no index was
 # used, or -Drive was given.
 if (($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) -and (Get-DiscTypeLabel -DriveLetter $driveLetter) -eq 'Audio CD') {
-    $ripAudioDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'ripaudio'
-    if (-not (Test-Path -LiteralPath (Join-Path $ripAudioDir 'rip-audio.ps1'))) { $ripAudioDir = "" }
-    Write-Host "`n$driveLetter holds an audio CD - ripdisc rips DVDs and Blu-rays (MakeMKV), not music CDs." -ForegroundColor Yellow
-    Write-Host "Rip it with ripaudio instead:" -ForegroundColor Yellow
-    Write-Host "  $(Get-RipAudioCommand -DriveLetter $driveLetter -OutputDrive $(if ($script:OutputDriveExplicit) { $OutputDrive } else { '' }) -RipAudioDir $ripAudioDir)" -ForegroundColor Cyan
-    # Video discs in other drives (the audio CD's own drive and other audio CDs left out)
-    $videoDrives = @(if ($drvLines) { Get-OtherDiscDrives -DrvLines $drvLines -CurrentLetter $driveLetter | Where-Object { $_.DiscType -ne 'Audio CD' } })
-    if ($ripAudioDir -or $videoDrives.Count -gt 0) {
-        Write-Host ""
-        if ($ripAudioDir) { Write-Host "  [R] Rip this CD with rip-audio.ps1 now" -ForegroundColor White }
-        foreach ($v in $videoDrives) {
-            Write-Host "  [D] Rip $($v.Letter)$(if ($v.DiscName) { " [$($v.DiscName)]" }) ($($v.DiscType)) instead" -ForegroundColor White
-            break
-        }
-        if ($videoDrives.Count -gt 1) { Write-Host "      (D lists all $($videoDrives.Count) drives with a video disc)" -ForegroundColor DarkGray }
-        Write-Host "  [A] or Enter: stop" -ForegroundColor Gray
-        $guardChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
-        if ($guardChoice -eq 'R' -and $ripAudioDir) {
-            $audioArgs = @{ Drive = $driveLetter.TrimEnd(':') }
-            if ($script:OutputDriveExplicit) { $audioArgs.OutputDrive = $OutputDrive.TrimEnd(':', '\') }
-            Set-Location -LiteralPath $ripAudioDir
-            & (Join-Path $ripAudioDir 'rip-audio.ps1') @audioArgs
-            exit $LASTEXITCODE
-        }
-        if ($guardChoice -eq 'D' -and $videoDrives.Count -gt 0) {
-            $newDrive = if ($videoDrives.Count -eq 1) { $videoDrives[0].Letter } else { Read-OtherDrive -Drives $videoDrives }
-            if ($newDrive) {
-                Write-Host "`nRestarting on $newDrive..." -ForegroundColor Cyan
-                $relaunch = Get-RelaunchParams -BoundParams $script:LaunchParams -DriveLetter $newDrive
-                & $PSCommandPath @relaunch
-                exit $LASTEXITCODE
-            }
-        }
-    }
-    exit 1
+    Invoke-AudioCdGuard -DriveLetter $driveLetter -DrvLines $drvLines
 }
 
 # ========== BLU-RAY CHECK WITH -title ==========

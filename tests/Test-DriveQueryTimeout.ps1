@@ -145,6 +145,28 @@ Assert-True ($hungElapsed -lt 10) "bounds the wait to roughly the timeout, not t
 Start-Sleep -Milliseconds 500  # give the OS a moment to finish tearing the killed process down
 Assert-True $hungProc.HasExited "the hung process was actually killed, not just abandoned"
 
+Write-Host "`nWait-ProcessWithTimeout - countdown ticks" -ForegroundColor Cyan
+
+$tickProc = New-Object System.Diagnostics.Process
+$tickProc.StartInfo.FileName = "powershell.exe"
+$tickProc.StartInfo.Arguments = "-NoProfile -Command `"Start-Sleep -Seconds 120`""
+$tickProc.StartInfo.UseShellExecute = $false
+$tickProc.StartInfo.CreateNoWindow = $true
+$tickProc.Start() | Out-Null
+$ticks = [System.Collections.Generic.List[int]]::new()
+$tickResult = Wait-ProcessWithTimeout -Process $tickProc -TimeoutSec 3 -OnTick { param($s) $ticks.Add($s) }
+Assert-Equal $false $tickResult "still times out with -OnTick"
+Assert-Equal '1,2' (($ticks | Select-Object -First 2) -join ',') "-OnTick gets each whole second once, in order"
+Assert-True ($ticks.Count -le 3) "no duplicate ticks for the same second"
+Start-Sleep -Milliseconds 500
+
+Write-Host "`nrip-disc.ps1 - drive lookup waits 20s per attempt, then offers a retry" -ForegroundColor Cyan
+$ripText = [IO.File]::ReadAllText($ripDiscPath)
+Assert-True ($ripText -match '\$drvQueryTimeoutSec = 20\b') "the startup drive lookup gives up after 20s, not 60s"
+Assert-True ($ripText -match '\$drvQueryMaxAttempts = 3\b') "up to 3 attempts"
+Assert-True ($ripText -match "-TimeoutSec \`$drvQueryTimeoutSec -OnTick \`$drvTick") "the lookup shows a countdown while it waits"
+Assert-True ($ripText.Contains("[R] Retry (usually quick once the drive is awake) / Enter = R / [A] Abort")) "a timeout asks to retry instead of exiting"
+
 $total = $script:Passed + $script:Failed
 Write-Host "`n$($script:Passed)/$total passed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }
