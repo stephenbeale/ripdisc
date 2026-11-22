@@ -26,7 +26,7 @@ function Import-FunctionFromScript {
     return $fn.Extent.Text
 }
 
-foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives', 'Get-WindowsOpticalDrives', 'Get-AudioCdShortcutDrive')) {
+foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives', 'Get-WindowsOpticalDrives', 'Get-AudioCdShortcutDrive', 'Get-CyanripBusyDrives')) {
     . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $name)))
 }
 . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath (Join-Path $repoRoot 'Load-Config.ps1') -FunctionName 'Test-MusicLibraryFolder')))
@@ -155,6 +155,22 @@ $queryAt = $ripText.IndexOf('$drvProc.StartInfo.Arguments = "-r info disc:9999"'
 Assert-Equal $true ($preAt -gt 0 -and $preAt -lt $queryAt) 'the audio CD check runs before the MakeMKV drive query'
 Assert-Equal $true ($musicAt -gt $preAt -and $musicAt -lt $queryAt) 'the music library offer runs before the MakeMKV drive query'
 Assert-Equal $true ($ripText.IndexOf('$script:MusicLibraryChosen = Test-MusicLibraryFolder') -gt 0) 'the library pick sets the music flag'
+
+Write-Host "`nBusy drives (ripaudio already ripping)" -ForegroundColor Cyan
+# The real command line seen 2026-11-22 while ripaudio ripped D:
+$live = '"C:\Users\x\cyanrip.exe" -D "Tom Jones and Jools Holland" -o flac -d D: -s 0 -N'
+Assert-Equal 'D:' ((Get-CyanripBusyDrives -CommandLines @($live)) -join ',') 'the drive comes from -d, not the -D output folder'
+Assert-Equal 'D:,G:' ((Get-CyanripBusyDrives -CommandLines @($live, 'cyanrip.exe -d g -s 0')) -join ',') 'two rips; a bare letter without the colon'
+Assert-Equal '' ((Get-CyanripBusyDrives -CommandLines @('cyanrip.exe -D "Disc D" -o flac')) -join ',') 'only -D (output folder): nothing busy'
+Assert-Equal 0 @(Get-CyanripBusyDrives -CommandLines @()).Count 'no cyanrip running: nothing busy'
+$two = @{ 'D:' = 'Audio CD'; 'G:' = 'Audio CD' }
+Assert-Equal 'G:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('D:')) 'default D: busy ripping: hand over the free G: (the 2026-11-22 case)'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('G:')) 'G: busy: the default D: is still used'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DiscTypes $two -BusyLetters @('D:', 'G:')) 'every audio CD drive busy: the default (the guard then says why)'
+Assert-Equal 'D:' (Get-AudioCdShortcutDrive -TargetLetter 'D:' -DriveGiven -DiscTypes $two -BusyLetters @('D:')) '-Drive D is never second-guessed, even when busy'
+$ripText2 = [IO.File]::ReadAllText($ripDiscPath)
+Assert-Equal $true ($ripText2.Contains('-DiscTypes $winTypes -BusyLetters $cyBusy')) 'the pre-check passes the busy drives'
+Assert-Equal $true ($ripText2.Contains('$freeAudio = @($audioDrives | Where-Object { -not $_.Busy })')) 'the music offer only offers free drives'
 
 Write-Host "`n$script:Passed passed, $script:Failed failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }

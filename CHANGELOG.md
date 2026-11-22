@@ -15,6 +15,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Picking a library whose folder name contains "music" (`Test-MusicLibraryFolder`, Load-Config.ps1) offers `[R]` rip the audio CD with rip-audio.ps1 before MakeMKV runs; Enter carries on (a concert DVD / Blu-ray).
+- The music-library offer and the audio CD check skip drives ripaudio is already ripping (`Get-CyanripBusyDrives`, from cyanrip's `-d X:` command lines). Found live: with ripaudio ripping D:, the offer still picked D: and ripaudio stopped "D: is busy" although G: held a free audio CD. Now it says "D: is already being ripped by ripaudio" and offers G:; when every audio CD drive is busy it says so and offers no [R].
 - MakeMKV drive-list cache (`%TEMP%\makemkv-drive-cache.txt`) is now written only for a real `makemkvcon(64).exe`, and its first line records which makemkvcon wrote it; a cache from another path (or an old one without the line) is ignored (`Read-DriveCache` / `Write-DriveCache`). Found live: a test run against a fake makemkvcon cached "Z: FAKE DRIVE" and the user's next real run failed "Drive D: not found".
 - Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 33 (17 new).
 

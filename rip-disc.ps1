@@ -1384,15 +1384,35 @@ function Get-WindowsOpticalDrives {
     return @($rows | Sort-Object Letter)
 }
 
+# Drive letters a running cyanrip (ripaudio) is ripping from, from each cyanrip command
+# line's "-d X:" (case-sensitive: "-D" is cyanrip's output folder). Seen live 2026-11-22:
+# the music offer picked D: while ripaudio was ripping D:, and ripaudio then stopped with
+# "D: is busy" although G: held a free audio CD. -CommandLines is a seam for tests.
+function Get-CyanripBusyDrives {
+    param([string[]]$CommandLines = $null)
+    if ($null -eq $CommandLines) {
+        try {
+            $CommandLines = @(Get-CimInstance Win32_Process -Filter "Name = 'cyanrip.exe'" -ErrorAction Stop -OperationTimeoutSec 5 | ForEach-Object { "$($_.CommandLine)" })
+        } catch {
+            return @()
+        }
+    }
+    $letters = @(foreach ($c in $CommandLines) {
+        if ("$c" -cmatch '(?:^|\s)-d\s+"?([A-Za-z]):?') { "$($Matches[1].ToUpper()):" }
+    })
+    return @($letters | Sort-Object -Unique)
+}
+
 # Decides, from Windows' disc types alone (no MakeMKV), whether to go straight to the audio
 # CD hand-off. Returns the drive letter to hand over, or "" to carry on to MakeMKV:
 # - -Drive given: only when that drive holds an audio CD.
 # - no -Drive: only when no drive holds a DVD/Blu-ray (otherwise the auto drive pick after
 #   the MakeMKV lookup takes the video disc). The default drive first, else the first
-#   drive holding an audio CD.
+#   drive holding an audio CD - skipping drives already being ripped (-BusyLetters),
+#   unless every audio CD drive is busy (then the default/first, so the guard says so).
 # -DiscTypes maps "D:" -> Get-DiscTypeLabel's answer.
 function Get-AudioCdShortcutDrive {
-    param([string]$TargetLetter, [switch]$DriveGiven, [hashtable]$DiscTypes = @{})
+    param([string]$TargetLetter, [switch]$DriveGiven, [hashtable]$DiscTypes = @{}, [string[]]$BusyLetters = @())
     $target = "$TargetLetter".TrimEnd(':', '\').ToUpper() + ':'
     if ($DriveGiven) {
         if ("$($DiscTypes[$target])" -eq 'Audio CD') { return $target }
@@ -1400,8 +1420,10 @@ function Get-AudioCdShortcutDrive {
     }
     $letters = @($DiscTypes.Keys | Sort-Object)
     foreach ($l in $letters) { if ("$($DiscTypes[$l])" -in @('DVD-Video', 'Blu-ray')) { return "" } }
-    if ("$($DiscTypes[$target])" -eq 'Audio CD') { return $target }
-    foreach ($l in $letters) { if ("$($DiscTypes[$l])" -eq 'Audio CD') { return "$l" } }
+    $audio = @(@($target) + $letters | Where-Object { "$($DiscTypes[$_])" -eq 'Audio CD' } | Select-Object -Unique)
+    $free = @($audio | Where-Object { $BusyLetters -notcontains $_ })
+    if ($free.Count -gt 0) { return "$($free[0])" }
+    if ($audio.Count -gt 0) { return "$($audio[0])" }
     return ""
 }
 
@@ -1956,6 +1978,10 @@ $script:TargetDriveName = ""
 $preMkvRunning = @(Get-Process -Name "makemkvcon64", "makemkvcon" -ErrorAction SilentlyContinue).Count -gt 0
 if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
     $winDrives = @(Get-WindowsOpticalDrives)
+    # Drives ripaudio (cyanrip) is ripping right now: marked busy, so the offers below pick
+    # a free drive and never list a busy one as "rip this instead"
+    $cyBusy = @(Get-CyanripBusyDrives)
+    foreach ($w in $winDrives) { if ($cyBusy -contains $w.Letter) { $w.Busy = $true } }
     $winTypes = @{}
     foreach ($w in $winDrives) { $winTypes[$w.Letter] = Get-DiscTypeLabel -DriveLetter $w.Letter }
 
@@ -1966,25 +1992,36 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
         $ripAudioDir = Get-RipAudioDir
         if ($ripAudioDir) {
             $audioDrives = @($winDrives | Where-Object { $winTypes[$_.Letter] -eq 'Audio CD' })
-            $offerLetter = if (@($audioDrives | Where-Object { $_.Letter -eq $driveLetter }).Count -gt 0) { $driveLetter }
-                elseif ($audioDrives.Count -gt 0) { $audioDrives[0].Letter } else { $driveLetter }
+            $freeAudio = @($audioDrives | Where-Object { -not $_.Busy })
+            # The default drive if it is free, else the first free audio CD drive, else (all
+            # busy, or no audio CD seen) the default drive - ripaudio then says what is wrong
+            $offerLetter = if (@($freeAudio | Where-Object { $_.Letter -eq $driveLetter }).Count -gt 0) { $driveLetter }
+                elseif ($freeAudio.Count -gt 0) { $freeAudio[0].Letter } else { $driveLetter }
             $offerWhat = if ($winTypes[$offerLetter] -eq 'Audio CD') { "the audio CD in $offerLetter" } else { "a CD in $offerLetter" }
             Write-Host "`nThat is a music library. Ripping a music CD? ripaudio does those (ripdisc only rips DVDs / Blu-rays)." -ForegroundColor Cyan
-            if ($audioDrives.Count -gt 1) {
-                Write-Host "  Audio CDs in: $(($audioDrives | ForEach-Object { $_.Letter }) -join ', ') - run ripaudio again for the others afterwards" -ForegroundColor DarkGray
+            foreach ($b in @($audioDrives | Where-Object { $_.Busy })) {
+                Write-Host "  $($b.Letter) is already being ripped by ripaudio." -ForegroundColor DarkGray
             }
-            Write-Host "  [R] Rip $offerWhat with rip-audio.ps1 now" -ForegroundColor White
+            if ($freeAudio.Count -gt 1) {
+                Write-Host "  Audio CDs in: $(($freeAudio | ForEach-Object { $_.Letter }) -join ', ') - run ripaudio again for the others afterwards" -ForegroundColor DarkGray
+            }
+            if ($audioDrives.Count -gt 0 -and $freeAudio.Count -eq 0) {
+                Write-Host "  Every audio CD drive is busy - wait for those rips to finish." -ForegroundColor Yellow
+            } else {
+                Write-Host "  [R] Rip $offerWhat with rip-audio.ps1 now" -ForegroundColor White
+            }
             Write-Host "  Enter: carry on with ripdisc (a music DVD / Blu-ray)" -ForegroundColor Gray
             $musicChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
-            if ($musicChoice -eq 'R') { Start-RipAudioAndExit -DriveLetter $offerLetter -RipAudioDir $ripAudioDir }
+            if ($musicChoice -eq 'R' -and -not ($audioDrives.Count -gt 0 -and $freeAudio.Count -eq 0)) { Start-RipAudioAndExit -DriveLetter $offerLetter -RipAudioDir $ripAudioDir }
         }
     }
 
     $audioLetter = Get-AudioCdShortcutDrive -TargetLetter $driveLetter -DriveGiven:$PSBoundParameters.ContainsKey('Drive') `
-        -DiscTypes $winTypes
+        -DiscTypes $winTypes -BusyLetters $cyBusy
     if ($audioLetter) {
         if ($audioLetter -ne $driveLetter) {
-            Write-Host "$driveLetter has no disc to rip, and no drive holds a DVD or Blu-ray." -ForegroundColor Yellow
+            $why = if ($cyBusy -contains $driveLetter) { "is already being ripped by ripaudio" } else { "has no disc to rip" }
+            Write-Host "$driveLetter $why, and no drive holds a DVD or Blu-ray - using $audioLetter." -ForegroundColor Yellow
         }
         Invoke-AudioCdGuard -DriveLetter $audioLetter -DrvLines $winDrives -GetDiscType { param($l) $winTypes[$l] }
     }
