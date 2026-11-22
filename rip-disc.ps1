@@ -1042,6 +1042,44 @@ function Wait-ProcessWithTimeout {
     return $true
 }
 
+# ---- MakeMKV drive-list cache (%TEMP%\makemkv-drive-cache.txt, 5-minute TTL) ----
+# The file is shared by every checkout and run on this machine. On 2026-11-22 a test run
+# against a fake makemkvcon cached its fake drive list ("Z: FAKE DRIVE"), and the user's
+# real run a minute later failed "Drive D: not found". So: only output from a real
+# makemkvcon(64).exe is cached, and the first line records which makemkvcon wrote it - a
+# cache from any other path (or an old one without the line) is ignored.
+function Get-DriveCacheHeader {
+    param([string]$MakeMkvPath)
+    return "# makemkvcon: $MakeMkvPath"
+}
+
+function Test-CacheableMakeMkvPath {
+    param([string]$MakeMkvPath)
+    if (-not $MakeMkvPath) { return $false }
+    return ((Split-Path $MakeMkvPath -Leaf) -match '^(?i)makemkvcon(64)?\.exe$')
+}
+
+# The cached drive-list lines, or $null when there is no usable cache (missing, older than
+# the TTL, or written by a different makemkvcon). -Now is a seam for tests.
+function Read-DriveCache {
+    param([string]$CacheFile, [string]$MakeMkvPath, [double]$TtlMinutes = 5, [datetime]$Now = (Get-Date))
+    if (-not (Test-Path -LiteralPath $CacheFile)) { return $null }
+    if (($Now - (Get-Item -LiteralPath $CacheFile).LastWriteTime).TotalMinutes -ge $TtlMinutes) { return $null }
+    $lines = @(Get-Content -LiteralPath $CacheFile)
+    if ($lines.Count -lt 2 -or $lines[0] -ne (Get-DriveCacheHeader $MakeMkvPath)) { return $null }
+    return ,@($lines[1..($lines.Count - 1)])
+}
+
+# Writes the cache, but only for a real makemkvcon and a clean enumeration (no MSG:2003 read
+# errors - a drive that errors may be missing or wrong in the DRV: list). Returns why not, or "".
+function Write-DriveCache {
+    param([string]$CacheFile, [string]$MakeMkvPath, [object[]]$Lines)
+    if (-not (Test-CacheableMakeMkvPath $MakeMkvPath)) { return "not a real makemkvcon ($MakeMkvPath)" }
+    if (@($Lines | Where-Object { "$_".Trim() -match '^MSG:2003' }).Count -gt 0) { return "read errors" }
+    @(Get-DriveCacheHeader $MakeMkvPath) + @($Lines) | Set-Content -LiteralPath $CacheFile -Force
+    return ""
+}
+
 # MakeMKV's own signature for the drive vanishing mid-rip (USB cable knocked out, hub reset,
 # disc ejected): Windows reports STATUS_DEVICE_NOT_CONNECTED, or "device which does not
 # exist". Shared by Step 1's pause-and-retry loop and its final error analysis.
@@ -1970,14 +2008,8 @@ if ($DriveIndex -ge 0) {
     # Check for cached drive mapping (5-minute TTL) to avoid slow re-queries
     $drvCacheFile = Join-Path $env:TEMP "makemkv-drive-cache.txt"
     $drvCacheTTL = 5  # minutes
-    $drvOutput = $null
-    if (Test-Path $drvCacheFile) {
-        $cacheAge = (Get-Date) - (Get-Item $drvCacheFile).LastWriteTime
-        if ($cacheAge.TotalMinutes -lt $drvCacheTTL) {
-            Write-Host "Looking up drive $driveLetter (cached)..." -ForegroundColor Gray
-            $drvOutput = Get-Content $drvCacheFile
-        }
-    }
+    $drvOutput = Read-DriveCache -CacheFile $drvCacheFile -MakeMkvPath $makemkvconPath -TtlMinutes $drvCacheTTL
+    if ($drvOutput) { Write-Host "Looking up drive $driveLetter (cached)..." -ForegroundColor Gray }
     if (-not $drvOutput) {
         # 20s per attempt, with a live countdown, then [R]etry. A cold USB drive can take
         # ~30-35s to answer on its own (seen live), but the drive keeps spinning up while we
@@ -2062,14 +2094,11 @@ if ($DriveIndex -ge 0) {
             Write-Host "ERROR: MakeMKV drive query failed (exit code $($drvProc.ExitCode))" -ForegroundColor Red
             exit 1
         }
-        # Cache the output for subsequent runs — but only if every drive enumerated cleanly.
-        # A drive that reports read errors (MSG:2003) may be missing or wrong in the DRV: list,
-        # and caching that bad mapping would reuse it for the whole TTL.
-        $drvHadErrors = @($drvOutput | Where-Object { "$_".Trim() -match '^MSG:2003' }).Count -gt 0
-        if ($drvHadErrors) {
+        # Cache the output for subsequent runs - only a clean enumeration from a real
+        # makemkvcon (see Write-DriveCache).
+        $drvNoCache = Write-DriveCache -CacheFile $drvCacheFile -MakeMkvPath $makemkvconPath -Lines $drvOutput
+        if ($drvNoCache -eq 'read errors') {
             Write-Host "Not caching drive list — a drive reported read errors during enumeration; will re-query next run." -ForegroundColor DarkYellow
-        } else {
-            $drvOutput | Set-Content $drvCacheFile -Force
         }
     }
 

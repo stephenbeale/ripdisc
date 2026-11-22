@@ -160,6 +160,33 @@ Assert-Equal '1,2' (($ticks | Select-Object -First 2) -join ',') "-OnTick gets e
 Assert-True ($ticks.Count -le 3) "no duplicate ticks for the same second"
 Start-Sleep -Milliseconds 500
 
+Write-Host "`nDrive-list cache - only a real makemkvcon's clean output, keyed by its path" -ForegroundColor Cyan
+foreach ($fn in 'Get-DriveCacheHeader', 'Test-CacheableMakeMkvPath', 'Read-DriveCache', 'Write-DriveCache') {
+    . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $fn)))
+}
+$cacheDir = Join-Path ([IO.Path]::GetTempPath()) "ripdisc-cache-test-$PID"
+New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+$cacheFile = Join-Path $cacheDir 'makemkv-drive-cache.txt'
+$realMkv = 'C:\Program Files (x86)\MakeMKV\makemkvcon64.exe'
+$good = @('MSG:1005,0,1,"started"', 'DRV:0,2,999,0,"GP75N","DISC","D:"')
+try {
+    # The 2026-11-22 incident: a fake makemkvcon's drive list must never be cached
+    Assert-Equal 'not a real makemkvcon (C:\tmp\fake-makemkvcon.cmd)' (Write-DriveCache -CacheFile $cacheFile -MakeMkvPath 'C:\tmp\fake-makemkvcon.cmd' -Lines $good) "a fake makemkvcon's output is not cached"
+    Assert-True (-not (Test-Path $cacheFile)) "no cache file written for the fake"
+    Assert-Equal 'read errors' (Write-DriveCache -CacheFile $cacheFile -MakeMkvPath $realMkv -Lines ($good + 'MSG:2003,0,3,"Error"')) "read errors (MSG:2003) are not cached"
+    Assert-Equal '' (Write-DriveCache -CacheFile $cacheFile -MakeMkvPath $realMkv -Lines $good) "a real makemkvcon64.exe's clean output is cached"
+    $back = Read-DriveCache -CacheFile $cacheFile -MakeMkvPath $realMkv
+    Assert-Equal ($good -join '|') (@($back) -join '|') "read back without the header line"
+    Assert-True ($null -eq (Read-DriveCache -CacheFile $cacheFile -MakeMkvPath 'C:\Other\makemkvcon64.exe')) "a cache written by a different makemkvcon path is ignored"
+    Assert-True ($null -eq (Read-DriveCache -CacheFile $cacheFile -MakeMkvPath $realMkv -Now ((Get-Date).AddMinutes(6)))) "older than the 5-minute TTL: ignored"
+    Set-Content -LiteralPath $cacheFile -Value $good   # an old-format cache with no header line
+    Assert-True ($null -eq (Read-DriveCache -CacheFile $cacheFile -MakeMkvPath $realMkv)) "an old cache without the header line is ignored"
+    Assert-True ($null -eq (Read-DriveCache -CacheFile (Join-Path $cacheDir 'none.txt') -MakeMkvPath $realMkv)) "no cache file: nothing"
+    Assert-True (Test-CacheableMakeMkvPath 'C:\Program Files\MakeMKV\makemkvcon.exe') "makemkvcon.exe (32-bit name) is cacheable"
+} finally {
+    Remove-Item -LiteralPath $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "`nrip-disc.ps1 - drive lookup waits 20s per attempt, then offers a retry" -ForegroundColor Cyan
 $ripText = [IO.File]::ReadAllText($ripDiscPath)
 Assert-True ($ripText -match '\$drvQueryTimeoutSec = 20\b') "the startup drive lookup gives up after 20s, not 60s"

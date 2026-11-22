@@ -15,7 +15,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Picking a library whose folder name contains "music" (`Test-MusicLibraryFolder`, Load-Config.ps1) offers `[R]` rip the audio CD with rip-audio.ps1 before MakeMKV runs; Enter carries on (a concert DVD / Blu-ray).
-- Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 23 (7 new).
+- MakeMKV drive-list cache (`%TEMP%\makemkv-drive-cache.txt`) is now written only for a real `makemkvcon(64).exe`, and its first line records which makemkvcon wrote it; a cache from another path (or an old one without the line) is ignored (`Read-DriveCache` / `Write-DriveCache`). Found live: a test run against a fake makemkvcon cached "Z: FAKE DRIVE" and the user's next real run failed "Drive D: not found".
+- Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 33 (17 new).
 
 ## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
 
