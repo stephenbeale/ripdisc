@@ -1599,6 +1599,62 @@ function Get-RelaunchParams {
     return $params
 }
 
+# [E] Edit at "Ready to rip": asks for each field in turn (Enter keeps it) and returns the
+# restart parameters, or $null when nothing changed. A restart with the new values (rather
+# than patching variables here) re-runs the folder-clash and existing-folder checks that
+# already ran for the old values. -Current: Title, Year, Disc, Extras, Season, Series,
+# OutputDrive, Drive. -ReadInput is a seam for tests.
+function Read-ReadyToRipEdit {
+    param([hashtable]$Current, [hashtable]$BoundParams, [scriptblock]$ReadInput = { param($p) Read-Host $p })
+    $new = @{} + $Current
+    Write-Host "`nEdit - press Enter to keep each value." -ForegroundColor Cyan
+
+    $a = & $ReadInput "Title [$($Current.Title)]"
+    if ("$a".Trim()) { $new.Title = "$a".Trim() }
+
+    if (-not $Current.Series) {
+        $shownYear = if ($Current.Year) { $Current.Year } else { 'none' }
+        while ($true) {
+            $a = "$(& $ReadInput "Year [$shownYear] (YYYY, or - for none)")".Trim()
+            if (-not $a) { break }
+            if ($a -eq '-') { $new.Year = ""; break }
+            if ($a -match '^(18|19|20)\d{2}$') { $new.Year = $a; break }
+            Write-Host "  Type a 4-digit year, - for none, or Enter to keep." -ForegroundColor Yellow
+        }
+    }
+
+    if ($Current.Series) {
+        $a = "$(& $ReadInput "Season [$($Current.Season)]")".Trim()
+        if ($a -match '^\d{1,2}$') { $new.Season = [int]$a }
+    }
+    $a = "$(& $ReadInput "Disc number [$($Current.Disc)]")".Trim()
+    if ($a -match '^\d{1,2}$' -and [int]$a -ge 1) { $new.Disc = [int]$a }
+    if (-not $Current.Series) {
+        $ex = if ($Current.Extras) { 'Y' } else { 'N' }
+        $a = "$(& $ReadInput "Extras only - straight into the extras folder? (y/n) [$ex]")".Trim()
+        if ($a -match '^[Yy]') { $new.Extras = $true } elseif ($a -match '^[Nn]') { $new.Extras = $false }
+    }
+
+    $a = "$(& $ReadInput "Output drive [$($Current.OutputDrive)]")".Trim()
+    if ($a -match '^[A-Za-z]:?$') { $new.OutputDrive = $a.Substring(0, 1).ToUpper() + ':' }
+    $a = "$(& $ReadInput "Disc drive [$($Current.Drive)]")".Trim()
+    if ($a -match '^[A-Za-z]:?$') { $new.Drive = $a.Substring(0, 1).ToUpper() + ':' }
+
+    $changed = @(foreach ($k in 'Title', 'Year', 'Season', 'Disc', 'Extras', 'OutputDrive', 'Drive') { if ("$($new[$k])" -ne "$($Current[$k])") { $k } })
+    if ($changed.Count -eq 0) { return $null }
+
+    $params = @{}
+    foreach ($k in $BoundParams.Keys) { if ($k -notin @('title', 'Year', 'Disc', 'Extras', 'Season', 'OutputDrive', 'Drive', 'DriveIndex')) { $params[$k] = $BoundParams[$k] } }
+    $params['title'] = $new.Title
+    if ($new.Year) { $params['Year'] = $new.Year }
+    $params['Disc'] = $new.Disc
+    if ($new.Extras) { $params['Extras'] = $true }
+    if ($new.Series) { $params['Series'] = $true; if ($new.Season -gt 0) { $params['Season'] = $new.Season } }
+    $params['OutputDrive'] = $new.OutputDrive
+    $params['Drive'] = $new.Drive
+    return $params
+}
+
 # One suggestion. Kind is the source's own label ("Short", "TV mini-series"...) for
 # display; MediaType ('movie' / 'tv' / $null) is what drives Series mode.
 function New-TitleCandidate {
@@ -2847,7 +2903,20 @@ Write-Host "Using: $driveDescription" -ForegroundColor Yellow
 Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 $host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
-$response = Read-Host "Press Enter to continue, or Ctrl+C to abort"
+while ($true) {
+    $response = "$(Read-Host 'Enter = start, [E] Edit, [A] Abort')".Trim().ToUpper()
+    if ($response -eq 'A') { Write-Host "Aborted - nothing was ripped." -ForegroundColor Yellow; exit 0 }
+    if ($response -ne 'E') { break }
+    $editCurrent = @{
+        Title = $title; Year = "$($script:FolderYear)"; Disc = $Disc; Extras = [bool]$Extras; Season = $Season; Series = [bool]$Series
+        OutputDrive = ("$OutputDrive".TrimEnd('\').TrimEnd(':').ToUpper() + ':'); Drive = ("$driveLetter".TrimEnd('\').TrimEnd(':').ToUpper() + ':')
+    }
+    $relaunch = Read-ReadyToRipEdit -Current $editCurrent -BoundParams $script:LaunchParams
+    if (-not $relaunch) { Write-Host "Nothing changed." -ForegroundColor Gray; continue }
+    Write-Host "`nRestarting with the new details (the folder checks run again)..." -ForegroundColor Cyan
+    & $PSCommandPath @relaunch
+    exit $LASTEXITCODE
+}
 Write-Timestamp "Rip started"
 
 # Disable close button to prevent accidental window closure during rip
