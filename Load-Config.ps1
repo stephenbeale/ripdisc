@@ -389,14 +389,20 @@ function Get-EditDistance {
 # Parentheses are not PowerShell wildcard characters, so -Path / -like keep working.
 function Get-MediaFolderName {
     param([string]$SafeTitle, [string]$Year = "")
-    if ("$Year" -match '^\d{4}$') { return "$($SafeTitle -replace ' \(\d{4}\)$', '') ($Year)" }
+    if ("$Year" -match '^\d{4}$') {
+        # The year already inside the title ("Michael Collins (1996)-extras", 2026-11-24):
+        # keep the title as typed rather than add a second "(1996)" at the end
+        if ($SafeTitle -notmatch ' \(\d{4}\)$' -and $SafeTitle -match "\($Year\)") { return $SafeTitle }
+        return "$($SafeTitle -replace ' \(\d{4}\)$', '') ($Year)"
+    }
     return $SafeTitle
 }
 
-# The year a title already carries ("Musica Surfica (2008)" -> "2008"), else "".
+# The year a title already carries ("Musica Surfica (2008)" -> "2008"), anywhere in the
+# title ("Michael Collins (1996)-extras" -> "1996"), else "".
 function Get-TitleYear {
     param([string]$Title)
-    if ($Title -match ' \((\d{4})\)$') { return $Matches[1] }
+    if ($Title -match '\(((?:18|19|20)\d{2})\)') { return $Matches[1] }
     return ""
 }
 

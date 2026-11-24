@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-24 - [E] Edit at "Ready to rip"; a Year Inside the Title Counts
+
+### Added
+- **"Ready to rip" now takes `Enter = start, [E] Edit, [A] Abort`** (was "Press Enter to continue, or Ctrl+C to abort"). Edit asks for each field in turn, with Enter keeping it: title, year (movies; `-` for none), season (series), disc number, extras only (movies), output drive, disc drive. If anything changed, rip-disc.ps1 restarts with those values as parameters (`-title -Year -Disc -Extras -Season -OutputDrive -Drive`, the library switch kept, `-DriveIndex` dropped), so the folder-clash and existing-folder checks run again for the new values. New `Read-ReadyToRipEdit`.
+
+### Fixed
+- **A year in the middle of a typed title was not seen**: "Michael Collins (1996)-extras" was asked for its year again and the folder became "Michael Collins (1996)-extras (1996)". `Get-TitleYear` finds `(YYYY)` anywhere (18xx-20xx), and `Get-MediaFolderName` keeps a title that already holds the year as typed.
+
+### Tests
+- New tests/Test-ReadyToRipEdit.ps1 12/12; Test-MovieFolderNaming 143/143 (3 new); full suite passes (24 files).
+
 ## 2026-11-24 - Disc Label Format Codes, IMDb Retry, Music Library and Timeout Message While Another Rip Runs
 
 ### Fixed
