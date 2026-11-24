@@ -238,8 +238,8 @@ folder (`Documentaries\<Title>\`), not in a `DiscN` folder or `extras`; any othe
 to `extras`. `-disc` is the part number, so rip them in any order.
 
 ```powershell
-.ip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 1   # Metal A Headbangers Journey-Part 1.mp4
-.ip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 2   # Metal A Headbangers Journey-Part 2.mp4
+.\rip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 1   # Metal A Headbangers Journey-Part 1.mp4
+.\rip-disc.ps1 -title "Metal A Headbangers Journey" -documentary -disc 2   # Metal A Headbangers Journey-Part 2.mp4
 ```
 
 Without an explicit `-disc`, `-documentary` is unchanged (`<Title>-Feature`). `-documentary -series` and
@@ -553,7 +553,7 @@ E:\Surf\SurfTitle\
 
 ### Any other genre (`-Genre`, or an unknown switch)
 
-`.ip-disc.ps1 -Drive D -OutputDrive F -Basketball` asks whether `-Basketball` should be a
+`.\rip-disc.ps1 -Drive D -OutputDrive F -Basketball` asks whether `-Basketball` should be a
 new folder. Y (or Enter) gives the same layout as Surf, under `F:\Basketball\`; N uses the
 standard `DVDs` (or `Bluray`) folder. A near-miss of a real option (`-Documentry`) is
 pointed out before the question. `-Genre Basketball` skips the question.
