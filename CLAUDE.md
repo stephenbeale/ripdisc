@@ -19,6 +19,29 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-24 - Edit at "Ready to rip", disc-label cleanup, music-while-ripping fixes, README CR fix (PRs #188, #189, #190; main = 32be545, 24 test files pass)
+
+All three MERGED. **Not yet run on real discs** (see NEXT SESSION).
+
+**#188 (4805323):** README: three `.\rip-disc.ps1` examples had a literal carriage return (stray `\r` from #159).
+**#189 (871ad3c):** `Clean-DiscName` drops mastering codes (`MICHAEL_COLLINS_B_16X9LB_PAL_1` -> "Michael Collins"); IMDb suggestion lookup retries with fewer leading words when there are no hits; Music library picked while another MakeMKV rip runs now offers ripaudio without probing drives; the drive-lookup timeout message no longer says to kill every MakeMKV (new `Get-MakeMkvProcessInfo`: active rip vs leftover process; it had pointed at the live Michael Collins rip, PID 36936).
+**#190 (32be545):** "Ready to rip" prompt is `Enter = start, [E] Edit, [A] Abort`. Edit walks title, year (`-` = none), season (series), disc number, extras only, output drive, disc drive, then restarts rip-disc.ps1 with those params (`Read-ReadyToRipEdit`) so the clash checks re-run. `Get-TitleYear` finds `(YYYY)` anywhere; `Get-MediaFolderName` keeps a title that already holds the year. tests/Test-ReadyToRipEdit.ps1 12/12.
+
+**Fixed by hand on F: (no code):**
+- `F:\DVDs\Michael Collins (1996)`: two-sided PAL DVD. Now `Michael Collins (1996) - part1.mp4` (Side A 1:41:21), `- part2.mp4` (Side B 25:49 title, ends in credits), `extras\Michael Collins (1996) - Documentary.mp4` (Side B 51:14, Neil Jordan interview; frames checked). Stray `F:\DVDs\Michael Collins (1996)-extras (1996)` removed.
+- Cleanup: removed merged worktrees ripdisc-core-extraction, ripdisc-docs-roadmap, ripdisc-specials (and local branches) and empty folders ripdisc-auto-drive, -bluray-tag, -claude-trim, -pr141-note, -library. Kept ripdisc-manifest / -notes / -sanitize (PRs #184, #185, #183 still OPEN). Remote branch `fix/series-extras-specials` still exists (not deleted).
+- ripaudio side (see the ripaudio repo notes): #164-#166 merged; F:\Music Neil Diamond covers and Dire Straits Brothers in Arms titles repaired.
+
+### 2026-11-24 - NEXT SESSION items
+
+1. Real-disc checks, then tick the PR boxes: #189 Music library during a DVD rip shows the ripaudio offer and the timeout message names the active rip; #190 [E] Edit + restart, and "X (1996)-extras" is not asked for a year.
+2. Check Jellyfin plays Michael Collins part1/part2 as one film.
+3. Open PRs #183 (ripdisc-sanitize), #184 (ripdisc-manifest), #185 (ripdisc-notes): review and merge or close.
+4. Musica Surfica (`F:\Music\Various\Musica Surfica`, ripped 2026-10-29) had the all-tracks-tagged-1 bug (fixed in ripaudio #166); it was renamed by another tool and follows the cue order, titles unverified against the album.
+5. Optional (user has not chosen): barcode lookup via iTunes then Deezer (no key, no email) when MusicBrainz is down; on 38 logged barcodes iTunes found 20, Deezer 8; iTunes often returns deluxe editions, so use names only when the track count matches.
+6. Multi-disc albums: Disc 1 and Disc 2 can pick different releases (Neil Diamond); consider defaulting Disc 2 to Disc 1's release (ripaudio).
+7. Delete remote branch `fix/series-extras-specials` if confirmed merged. The untracked `ripdisc-config.json.bak-20261029` is still undecided: do not commit, delete or move.
+
 ### 2026-11-22 - Audio CD check before MakeMKV, music library offer, 20 s lookup + retry (branch `fix/audio-cd-before-makemkv`, worktree `ripdisc-audio-guard`)
 
 Trigger: real run, Music library picked, audio CDs in both GP75N drives (D:, G:); "MakeMKV drive query timed out after 60s". MakeMKV retries ILLEGAL MODE reads on audio CDs; with both drives cold that passed 60 s, so the audio CD guard (after the lookup) was never reached. Warm, the same query took 5 s. BU40N was not connected (PnP) at the time.
