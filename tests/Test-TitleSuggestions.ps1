@@ -193,6 +193,24 @@ $script:ImdbBody = [pscustomobject]@{ unexpected = 1 }
 $c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
 Assert-Equal 0 @($c).Count 'changed response shape: empty list'
 
+# No hits for a long label: one retry with the leading words (stops at a lone letter /
+# a word with a digit), no further retries
+$collins = [pscustomobject]@{ d = @([pscustomobject]@{ id = 'tt0117039'; l = 'Michael Collins'; y = 1996; q = 'feature'; qid = 'movie' }) }
+$script:ImdbUrls = @()
+$script:ImdbBody = $null
+function Invoke-ImdbSuggestRequest { param([string]$Url) $script:ImdbUrls += $Url; if ($Url -like '*/michael%20collins.json') { return $collins } return [pscustomobject]@{ d = @() } }
+$c = Get-ImdbTitleCandidates -SearchTitle 'Michael Collins B 16X9lb Pal 1' 6>$null
+Assert-Equal 2 $script:ImdbUrls.Count 'no hits: exactly one retry'
+Assert-True ($script:ImdbUrls[1] -like '*/m/michael%20collins.json') 'retry searches the words before the lone letter'
+Assert-Equal 'Michael Collins (1996)' "$(@($c)[0].Title) ($(@($c)[0].Year))" 'retry hit is offered'
+$script:ImdbUrls = @()
+$c = Get-ImdbTitleCandidates -SearchTitle 'Some Unknown Surf Film' 6>$null
+Assert-True ($script:ImdbUrls.Count -eq 2 -and $script:ImdbUrls[1] -like '*/some%20unknown%20surf.json' -and @($c).Count -eq 0) 'no junk word: retry drops the last word; still nothing is fine'
+$script:ImdbUrls = @()
+$null = Get-ImdbTitleCandidates -SearchTitle 'Slow Dance' 6>$null
+Assert-Equal 1 $script:ImdbUrls.Count 'two-word search: no retry'
+function Invoke-ImdbSuggestRequest { param([string]$Url) $script:ImdbUrls += $Url; if ($script:ImdbThrow) { throw "network down" }; return $script:ImdbBody }
+
 # ---------------------------------------------------------------------------
 Write-Host "`nMerging TheDiscDB, disc label, TMDb and IMDb" -ForegroundColor Cyan
 

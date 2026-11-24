@@ -984,6 +984,20 @@ function Clean-DiscName {
     # Collapse multiple spaces and trim
     $cleaned = ($cleaned -replace '\s+', ' ').Trim()
 
+    # Mastering codes: picture format / TV standard / region, e.g. MICHAEL_COLLINS_B_16X9LB_PAL_1.
+    # Everything from the first such code (after the title's first word) is dropped, plus a
+    # lone letter or number just before it ("B" = a version/side code) when at least two
+    # title words are left - so "PLAN_B_PAL" keeps "Plan B" and "OCEANS_11_PAL" keeps 11.
+    $formatCode = '^(?i)(PAL|NTSC|SECAM|(16X9|4X3|169|43)(LB|WS|FS|ANA)?|LB|ANA|ANAMORPHIC|WIDESCREEN|FULLSCREEN|R[0-8]|REGION[0-8]?|DVD[59]?|DL)$'
+    $words = @($cleaned -split ' ' | Where-Object { $_ })
+    $cut = -1
+    for ($i = 1; $i -lt $words.Count; $i++) { if ($words[$i] -match $formatCode) { $cut = $i; break } }
+    if ($cut -gt 0) {
+        $words = @($words[0..($cut - 1)])
+        while ($words.Count -gt 2 -and $words[-1] -match '^([A-Za-z]|\d{1,2})$') { $words = @($words[0..($words.Count - 2)]) }
+        $cleaned = $words -join ' '
+    }
+
     # Title case
     $cleaned = (Get-Culture).TextInfo.ToTitleCase($cleaned.ToLower())
 
@@ -1403,6 +1417,28 @@ function Get-CyanripBusyDrives {
     return @($letters | Sort-Object -Unique)
 }
 
+# Describes running makemkvcon processes: Active = the process that started it (the rip
+# script's PowerShell) is still alive, so it is a rip in progress, not a Ctrl+C leftover.
+# What = "saving disc:1 to C:\Video\X\Disc1" from its command line. -Processes / -AliveIds
+# are seams for tests (objects with ProcessId, ParentProcessId, CommandLine).
+function Get-MakeMkvProcessInfo {
+    param([int[]]$Ids, [object[]]$Processes = $null, [int[]]$AliveIds = $null)
+    if ($null -eq $Processes) {
+        $Processes = @(foreach ($id in $Ids) {
+            try { Get-CimInstance Win32_Process -Filter "ProcessId = $id" -OperationTimeoutSec 5 -ErrorAction Stop } catch { }
+        })
+    }
+    if ($null -eq $AliveIds) { $AliveIds = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) }
+    return @(foreach ($p in $Processes) {
+        if (-not $p) { continue }
+        $cmd = "$($p.CommandLine)"
+        $what = if ($cmd -match '\smkv\s+(disc:\d+)\s+\S+\s+"?([^"]+?)"?(\s+--|\s*$)') { "saving $($Matches[1]) to $($Matches[2])" }
+            elseif ($cmd -match '\sinfo\s+(disc:\d+)') { "reading $($Matches[1])" }
+            elseif ($cmd) { $cmd } else { "makemkvcon" }
+        [pscustomobject]@{ Id = [int]$p.ProcessId; Active = ($AliveIds -contains [int]$p.ParentProcessId); What = $what }
+    })
+}
+
 # Decides, from Windows' disc types alone (no MakeMKV), whether to go straight to the audio
 # CD hand-off. Returns the drive letter to hand over, or "" to carry on to MakeMKV:
 # - -Drive given: only when that drive holds an audio CD.
@@ -1646,7 +1682,7 @@ function Invoke-ImdbSuggestRequest {
 # games, podcasts and single episodes are dropped; shorts and videos stay (surf / skate
 # films are often listed as those).
 function Get-ImdbTitleCandidates {
-    param([string]$SearchTitle, [int]$Max = 6)
+    param([string]$SearchTitle, [int]$Max = 6, [switch]$NoRetry)
     $q = ("$SearchTitle".ToLowerInvariant() -replace '\s+', ' ').Trim()
     if (-not $q) { return @() }
     $first = if ($q[0] -match '[a-z0-9]') { $q[0] } else { 'x' }
@@ -1656,6 +1692,18 @@ function Get-ImdbTitleCandidates {
     } catch {
         Write-Host "WARNING: IMDb search failed: $($_.Exception.Message)" -ForegroundColor Yellow
         return @()
+    }
+    # Nothing found: a label with leftover codes or extra words ("Michael Collins B 16X9lb
+    # Pal 1") matches no title. Try once more with the leading words, up to the first lone
+    # letter or word with a digit in it (else all but the last word), at least two words.
+    # Shown as suggestions only, so the user still decides.
+    $words = @($q -split ' ')
+    if (-not $NoRetry -and @(@($response.d) | Where-Object { $_ }).Count -eq 0 -and $words.Count -ge 3) {
+        $keep = $words.Count - 1
+        for ($i = 2; $i -lt $words.Count; $i++) { if ($words[$i] -match '^[a-z]$|\d') { $keep = $i; break } }
+        $shorter = ($words[0..($keep - 1)]) -join ' '
+        Write-Host "  No IMDb match - trying: $shorter" -ForegroundColor DarkGray
+        return @(Get-ImdbTitleCandidates -SearchTitle $shorter -Max $Max -NoRetry)
     }
     $kinds = @{ movie = 'Movie'; short = 'Short'; tvSeries = 'TV series'; tvMiniSeries = 'TV mini-series'; tvMovie = 'TV movie'
                 tvSpecial = 'TV special'; tvShort = 'TV short'; video = 'Video' }
@@ -1976,6 +2024,19 @@ $script:TargetDriveName = ""
 # away. Skipped while another MakeMKV is running (never probe drives mid-rip) - the normal
 # path below, with its own guard, still covers that case.
 $preMkvRunning = @(Get-Process -Name "makemkvcon64", "makemkvcon" -ErrorAction SilentlyContinue).Count -gt 0
+# Music library picked while another rip runs: still offer ripaudio, without probing any
+# drive (2026-11-24: Music picked during a DVD rip went straight to a MakeMKV lookup that
+# waited behind that rip and timed out). ripaudio checks the drive itself.
+if ($DriveIndex -lt 0 -and $preMkvRunning -and $script:MusicLibraryChosen) {
+    $ripAudioDir = Get-RipAudioDir
+    if ($ripAudioDir) {
+        Write-Host "`nThat is a music library. Ripping a music CD? ripaudio does those (ripdisc only rips DVDs / Blu-rays)." -ForegroundColor Cyan
+        Write-Host "  (Another MakeMKV rip is running, so drives are not checked here.)" -ForegroundColor DarkGray
+        Write-Host "  [R] Rip a CD in $driveLetter with rip-audio.ps1 now" -ForegroundColor White
+        Write-Host "  Enter: carry on with ripdisc (a music DVD / Blu-ray)" -ForegroundColor Gray
+        if ("$(Read-Host 'Choice')".Trim().ToUpper() -eq 'R') { Start-RipAudioAndExit -DriveLetter $driveLetter -RipAudioDir $ripAudioDir }
+    }
+}
 if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
     $winDrives = @(Get-WindowsOpticalDrives)
     # Drives ripaudio (cyanrip) is ripping right now: marked busy, so the offers below pick
@@ -2103,11 +2164,23 @@ if ($DriveIndex -ge 0) {
             # here, so surface it explicitly rather than just guessing "malfunctioning".
             # ($otherMkvProcs was gathered in the retry loop above.)
             if ($otherMkvProcs.Count -gt 0) {
-                $pidList = ($otherMkvProcs | ForEach-Object { $_.Id }) -join ", "
-                Write-Host "`nLikely cause: $($otherMkvProcs.Count) other MakeMKV process(es) already running (PID $pidList)." -ForegroundColor Yellow
-                Write-Host "If an earlier rip was stopped with Ctrl+C, its makemkvcon process can be left" -ForegroundColor Yellow
-                Write-Host "running and holding the drive - Ctrl+C does not close it for you. Close it with:" -ForegroundColor Yellow
-                Write-Host "  Get-Process makemkvcon,makemkvcon64 | Stop-Process -Force" -ForegroundColor White
+                # A running rip (its PowerShell still alive) is NOT a leftover - never tell the
+                # user to kill it (2026-11-24: this advice pointed at a live Michael Collins rip).
+                $mkvInfo = @(Get-MakeMkvProcessInfo -Ids @($otherMkvProcs | ForEach-Object { $_.Id }))
+                $active = @($mkvInfo | Where-Object { $_.Active })
+                $orphans = @($mkvInfo | Where-Object { -not $_.Active })
+                if ($active.Count -gt 0) {
+                    Write-Host "`nLikely cause: another rip is running right now - MakeMKV answers one job at a time:" -ForegroundColor Yellow
+                    foreach ($a in $active) { Write-Host "  PID $($a.Id): $($a.What)" -ForegroundColor White }
+                    Write-Host "That is not a leftover - do NOT close it. Run this again when it finishes," -ForegroundColor Yellow
+                    Write-Host "or pass -Drive and -DriveIndex <N> to skip this lookup." -ForegroundColor Yellow
+                }
+                if ($orphans.Count -gt 0) {
+                    $pidList = ($orphans | ForEach-Object { $_.Id }) -join ", "
+                    Write-Host "`nLeftover MakeMKV process(es) whose script has ended (PID $pidList) - probably a rip" -ForegroundColor Yellow
+                    Write-Host "stopped with Ctrl+C, still holding the drive. Close just those with:" -ForegroundColor Yellow
+                    Write-Host "  Stop-Process -Id $pidList -Force" -ForegroundColor White
+                }
             } else {
                 Write-Host "`nNo other MakeMKV process is currently running, so this isn't a leftover process" -ForegroundColor Gray
                 Write-Host "holding the drive. Other likely causes:" -ForegroundColor Gray
