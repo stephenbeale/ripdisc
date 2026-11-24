@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-24 - Disc Label Format Codes, IMDb Retry, Music Library and Timeout Message While Another Rip Runs
+
+### Fixed
+- **Disc labels kept mastering codes**, so `MICHAEL_COLLINS_B_16X9LB_PAL_1` was offered as "Michael Collins B 16X9lb Pal 1" and IMDb found nothing. `Clean-DiscName` now drops everything from the first picture-format / TV-standard / region code (`16X9`, `4X3`, `LB`, `WS`, `FS`, `ANA`, `PAL`, `NTSC`, `SECAM`, `R1`-`R8`, `REGION`, `DVD5/9`, `DL`), plus a lone letter or number just before it when two title words remain ("Plan B", "Oceans 11" and a code as the first word are kept).
+- **IMDb search with no hits** now retries once with the leading words (up to the first lone letter or word with a digit, else all but the last word). Live: "Michael Collins B 16X9lb Pal 1" -> "michael collins" -> Michael Collins (1996) tt0117039.
+- **Picking the Music library while a DVD rip was running went to a MakeMKV drive lookup that timed out** (MakeMKV was busy with the other rip) and never offered ripaudio, because the audio CD pre-check is skipped while MakeMKV runs. The ripaudio offer is now shown in that case too, without probing any drive.
+- **The drive-lookup timeout told the user to kill every MakeMKV process**, including a rip in progress (PID 36936, the Michael Collins rip). New `Get-MakeMkvProcessInfo` tells an active rip (its PowerShell still alive) from a leftover: an active one is named ("saving disc:1 to C:\Video\Michael Collins (1996)\Disc1") with "do NOT close it"; `Stop-Process -Id` is offered only for leftovers.
+
+### Tests
+- Test-EpisodeNaming 33/33 (8 new), Test-TitleSuggestions 111/111 (5 new), Test-DriveQueryTimeout 40/40 (7 new); full suite passes (23 files).
+
 ## 2026-11-22 - Audio CDs Caught Before MakeMKV, Music Library Offers ripaudio, 20 s Drive Lookup with Retry
 
 ### Fixed

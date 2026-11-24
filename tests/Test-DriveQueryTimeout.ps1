@@ -194,6 +194,22 @@ Assert-True ($ripText -match '\$drvQueryMaxAttempts = 3\b') "up to 3 attempts"
 Assert-True ($ripText -match "-TimeoutSec \`$drvQueryTimeoutSec -OnTick \`$drvTick") "the lookup shows a countdown while it waits"
 Assert-True ($ripText.Contains("[R] Retry (usually quick once the drive is awake) / Enter = R / [A] Abort")) "a timeout asks to retry instead of exiting"
 
+Write-Host "`nGet-MakeMkvProcessInfo - a running rip is never called a leftover" -ForegroundColor Cyan
+. ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName 'Get-MakeMkvProcessInfo')))
+# Real command line of the 2026-11-24 Michael Collins rip (PID 36936), parent alive
+$procs = @(
+    [pscustomobject]@{ ProcessId = 36936; ParentProcessId = 100; CommandLine = '"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" mkv disc:1 all "C:\Video\Michael Collins (1996)\Disc1" --minlength=120 --progress=-same' },
+    [pscustomobject]@{ ProcessId = 500; ParentProcessId = 999; CommandLine = '"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -r info disc:0' }
+)
+$info = @(Get-MakeMkvProcessInfo -Ids @(36936, 500) -Processes $procs -AliveIds @(100))
+Assert-Equal $true $info[0].Active 'parent PowerShell alive: active rip'
+Assert-Equal 'saving disc:1 to C:\Video\Michael Collins (1996)\Disc1' $info[0].What 'says what the rip is doing'
+Assert-Equal $false $info[1].Active 'parent gone: leftover'
+Assert-Equal 'reading disc:0' $info[1].What 'info query described'
+Assert-True (-not $ripText.Contains('Get-Process makemkvcon,makemkvcon64 | Stop-Process -Force')) 'no blanket "kill every MakeMKV" advice any more'
+Assert-True ($ripText.Contains('That is not a leftover - do NOT close it.')) 'an active rip is called out as one to keep'
+Assert-True ($ripText -match '\$preMkvRunning -and \$script:MusicLibraryChosen') 'music library offer still shown while another MakeMKV rip runs'
+
 $total = $script:Passed + $script:Failed
 Write-Host "`n$($script:Passed)/$total passed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }

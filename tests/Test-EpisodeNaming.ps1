@@ -116,6 +116,15 @@ Assert-Equal 'Warming By The Devils Fire' (Clean-DiscName -RawName 'WARMING_BY_T
 Assert-Equal 'Soul Of A Man' (Clean-DiscName -RawName 'SOUL_OF_A_MAN').CleanedTitle 'all-caps label is title-cased'
 Assert-Equal 'Godfathers And Sons' (Clean-DiscName -RawName 'Godfathers and Sons').CleanedTitle 'already-spaced label is title-cased'
 Assert-Equal 'Feel Like Going Home' (Clean-DiscName -RawName 'FEEL__LIKE___GOING_HOME').CleanedTitle 'runs of underscores collapse to one space'
+# Mastering codes (format / TV standard / region) and what follows them are dropped
+Assert-Equal 'Michael Collins' (Clean-DiscName -RawName 'MICHAEL_COLLINS_B_16X9LB_PAL_1').CleanedTitle 'real label 2026-11-24: version letter, 16X9LB, PAL, disc number dropped'
+Assert-Equal 'Some Film' (Clean-DiscName -RawName 'SOME_FILM_NTSC_R1').CleanedTitle 'NTSC and region code dropped'
+Assert-Equal 'Some Film' (Clean-DiscName -RawName 'SOME_FILM_4X3').CleanedTitle '4X3 dropped'
+Assert-Equal 'The Big Film' (Clean-DiscName -RawName 'THE_BIG_FILM_A_WIDESCREEN').CleanedTitle 'lone letter before a code dropped when two words remain'
+Assert-Equal 'Plan B' (Clean-DiscName -RawName 'PLAN_B_PAL').CleanedTitle 'Plan B keeps its B (only one word would be left)'
+Assert-Equal 'Oceans 11' (Clean-DiscName -RawName 'OCEANS_11_PAL').CleanedTitle 'Oceans 11 keeps its 11'
+Assert-Equal 'Pal Joey' (Clean-DiscName -RawName 'PAL_JOEY').CleanedTitle 'a code as the first word is the title, not a code'
+Assert-Equal 'Region Of Fire' (Clean-DiscName -RawName 'REGION_OF_FIRE').CleanedTitle 'first word never cut'
 
 Write-Host "`nEpisode name resolution" -ForegroundColor Cyan
 Assert-Equal 'Warming By The Devils Fire' (Resolve-EpisodeNames -FileCount 1 -DiscLabel 'WARMING_BY_THE_DEVILS_FIRE')[0] 'single episode takes the cleaned disc label'
