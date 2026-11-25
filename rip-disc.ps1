@@ -2063,8 +2063,10 @@ $driveDescription = if ($DriveIndex -ge 0) {
 # Use disc:N format which lets MakeMKV find drives by its own enumeration index.
 # WMI Win32_CDROMDrive enumeration order does NOT match MakeMKV's disc:N order,
 # so we always query MakeMKV directly via `info disc:9999` to get the correct index.
-# Wake up the target drive first — USB optical drives go dormant and MakeMKV stalls waiting for spin-up
-$null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
+# The target drive is woken (USB optical drives go dormant and MakeMKV stalls waiting for
+# spin-up) only AFTER the checks below have shown it is free - never up front. Seen live
+# 2026-11-25: the default D: was being ripped by ripaudio, and touching it first was wrong.
+$cyBusy = @()
 
 # MakeMKV's name for the drive we are ripping from (e.g. "DVD+R-DL HL-DT-ST DVDRAM GP75N 1.02 K0GPAID0457").
 # Used in Step 1 to tell our drive's read errors apart from errors MakeMKV reports for OTHER drives
@@ -2099,8 +2101,12 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
     # a free drive and never list a busy one as "rip this instead"
     $cyBusy = @(Get-CyanripBusyDrives)
     foreach ($w in $winDrives) { if ($cyBusy -contains $w.Letter) { $w.Busy = $true } }
+    # A drive ripaudio is busy with is not touched at all: cyanrip only rips audio CDs, so
+    # that is its type. Probing it (volume label, root folder) could disturb the live rip.
     $winTypes = @{}
-    foreach ($w in $winDrives) { $winTypes[$w.Letter] = Get-DiscTypeLabel -DriveLetter $w.Letter }
+    foreach ($w in $winDrives) {
+        $winTypes[$w.Letter] = if ($w.Busy) { 'Audio CD' } else { Get-DiscTypeLabel -DriveLetter $w.Letter }
+    }
 
     # ========== MUSIC LIBRARY OFFER ==========
     # A library named like "Music" was picked: most likely an audio CD, so offer ripaudio
@@ -2142,6 +2148,13 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
         }
         Invoke-AudioCdGuard -DriveLetter $audioLetter -DrvLines $winDrives -GetDiscType { param($l) $winTypes[$l] }
     }
+}
+
+# Now wake the target drive for MakeMKV - only when it is known to be free: not being ripped
+# by ripaudio, and no other MakeMKV running (its disc:N is unknown until the lookup, so no
+# drive is touched mid-rip). -DriveIndex runs never get here with a real letter.
+if ($DriveIndex -lt 0 -and -not $preMkvRunning -and $cyBusy -notcontains $driveLetter) {
+    $null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue
 }
 
 if ($DriveIndex -ge 0) {

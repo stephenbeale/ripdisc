@@ -172,5 +172,16 @@ $ripText2 = [IO.File]::ReadAllText($ripDiscPath)
 Assert-Equal $true ($ripText2.Contains('-DiscTypes $winTypes -BusyLetters $cyBusy')) 'the pre-check passes the busy drives'
 Assert-Equal $true ($ripText2.Contains('$freeAudio = @($audioDrives | Where-Object { -not $_.Busy })')) 'the music offer only offers free drives'
 
+# 2026-11-25: no drive is touched before it is known to be free. The default drive used to be
+# woken (Test-Path D:\) first thing, while ripaudio was ripping D:.
+$wakeLine = '$null = Test-Path "${driveLetter}\" -ErrorAction SilentlyContinue'
+$autoStart = $ripText2.IndexOf('# ========== AUTO-DISCOVERY ==========')
+$preCheck = $ripText2.IndexOf('# ========== AUDIO CD CHECK BEFORE MAKEMKV ==========')
+$firstWake = $ripText2.IndexOf($wakeLine, $autoStart)
+Assert-Equal $true ($autoStart -gt 0 -and $preCheck -gt $autoStart) 'auto-discovery and pre-check markers found'
+Assert-Equal $true ($firstWake -gt $preCheck) 'the target drive is not woken before the audio CD / busy checks'
+Assert-Equal $true ($ripText2.Contains('if ($DriveIndex -lt 0 -and -not $preMkvRunning -and $cyBusy -notcontains $driveLetter) {')) 'the wake skips a drive ripaudio is ripping, and any drive while another MakeMKV runs'
+Assert-Equal $true ($ripText2.Contains('if ($w.Busy) { ''Audio CD'' } else { Get-DiscTypeLabel -DriveLetter $w.Letter }')) 'a busy drive is never probed for its disc type'
+
 Write-Host "`n$script:Passed passed, $script:Failed failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }
