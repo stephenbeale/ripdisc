@@ -176,7 +176,7 @@ $c = Get-ImdbTitleCandidates -SearchTitle '30 Rock' 6>$null
 Assert-Equal '30 Rock|2006|tv|tt0496424|IMDb;30 Rock|1983|tv|tt1860375|IMDb;The 30 Foot Bride of Candy Rock|1959|movie|tt0052529|IMDb;30 Rock: The Webisodes||movie|tt2866584|IMDb' (Format-Candidates $c) 'titles kept with id/year/kind; music videos and people dropped; missing year left blank'
 Assert-Equal 'https://v2.sg.media-imdb.com/suggestion/3/30%20rock.json' $script:ImdbUrls[-1] 'URL: lowercased query under its first character'
 Assert-Equal 'with Tina Fey, Alec Baldwin' $c[0].Description 'IMDb cast becomes the description'
-Assert-Equal 'TV series|Movie|Video' "$($c[0].Kind)|$($c[2].Kind)|$($c[3].Kind)" 'IMDb kind kept (TV series / Movie / Video), not lumped into Movie'
+Assert-Equal 'TV series|Movie|Direct-to-video' "$($c[0].Kind)|$($c[2].Kind)|$($c[3].Kind)" 'IMDb kind kept (TV series / Movie / Direct-to-video), not lumped into Movie'
 Assert-Equal '30 Rock (2006) [TV series]' (Format-TitleCandidate $c[0]) 'menu line uses the IMDb kind'
 $null = Get-ImdbTitleCandidates -SearchTitle '"Weird" Al' 6>$null
 Assert-True ($script:ImdbUrls[-1] -match '/suggestion/x/') 'a query not starting with a letter/digit goes under x'
