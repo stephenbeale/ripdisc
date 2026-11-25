@@ -8,6 +8,8 @@
     <!-- Keep the executable named RipDisc.exe, as in earlier releases -->
     <AssemblyName>RipDisc</AssemblyName>
     <RootNamespace>RipDisc</RootNamespace>
+    <!-- Logo (assets/logo.svg, yellow with a black CD) as the .exe icon -->
+    <ApplicationIcon>..\..\assets\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

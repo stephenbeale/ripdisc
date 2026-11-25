@@ -1,5 +1,7 @@
 # RipDisc
 
+<img src="assets/logo.svg" alt="RipDisc logo" width="128">
+
 PowerShell and C# tools for automated DVD and Blu-ray disc ripping using MakeMKV and HandBrake.
 
 ## Video walkthrough
