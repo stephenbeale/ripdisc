@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-25 - No Drive Is Touched Before It Is Known to Be Free
+
+### Fixed
+- rip-disc.ps1 woke the default drive (`Test-Path D:\`) first thing, before any check, so with ripaudio ripping D: it touched that busy drive before the music offer moved on to the free G:. The wake now runs after the audio CD / busy checks, and only when the drive is free: not being ripped by ripaudio, and no other MakeMKV running. The disc-type check (volume label, root folders) also skips drives ripaudio is ripping; their type is "Audio CD" without probing. Test-AutoVideoDrive 62 (4 new; the order check fails on the old code).
+
 ## 2026-11-24 - [E] Edit at "Ready to rip"; a Year Inside the Title Counts
 
 ### Added
