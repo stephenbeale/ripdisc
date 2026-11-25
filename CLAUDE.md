@@ -19,6 +19,19 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-25 (evening) - Open PR backlog cleared, leftover progress bar, ripaudio end screen (main = b7274a0, 24 test files pass)
+
+**Merged (each rebased onto main, CHANGELOG conflicts resolved, full suite passing before merge; none run on a real disc):** #184 b46aa7e (manifest append to any columns, no rename without a manifest), #175 af0ed21 (rename-series offers Season 1 for loose files; undo restores names only, files stay in Season N), #182 c916665 (year prompt word order + [N] never ask again), #183 8be408d (titles drop ':' etc. instead of '_'; old '_' folders kept via `Resolve-LegacySafeTitle`).
+**#199 b7274a0:** the "stale bar from attempt 1" was not a missing `-Completed` (it already ran after each attempt; the Jean de Florette log shows attempt 2 was also ~21% at 6m18s). Rips run in Windows PowerShell 5.1 in Windows Terminal (default profile), where a Write-Host below a drawn bar leaves a dead copy in the scrollback. `Hide-RipProgressBar` now runs before every Write-Host in the MakeMKV loop. Test-MakeMkvProgress 23/23. **Not seen on a real rip** (possible flicker at each milestone).
+**ripaudio #171 (79300f7):** "More free tools by me" (ripdisc, Flyweight, Waffley) in all five ripaudio scripts' `Show-CoffeeBadge`.
+**#185 closed** (2026-11-01 evening notes, said #182-#184 were open). Its still-open items, carried here:
+- `F:\Documentaries\Strike Force_ The Story of Sukhoi (2007)` has the old `_` name; rename to the no-underscore name? User has not decided. (#183 keeps using the `_` folder for that title until renamed.)
+- `F:\Series\Silicon Valley\Season 3\Disc1`: episode titles were lost from 5 names (now `Silicon Valley-S03-E0N.mp4`); restore? Undecided. Do NOT run undo-rename.ps1 there (it would undo ALL rows back to raw names). Backup `rename-manifest.backup-20261101.csv` beside it.
+- Check the "Super Carrier Airport at Sea" rip log for read errors ~17:11-17:12 on 2026-11-01 (a test briefly started a second MakeMKV on D:). Never script rip-disc.ps1 past the Ready-to-rip prompt.
+- Ideas: "Pick a title" prompt should accept typed text as the title; warn before MakeMKV when disconnected drives will slow the scan; rename-series should leave already-titled S##E## files alone.
+
+**Checked, not acted on:** remote `fix/series-extras-specials` is fully merged (its tip b4ae61a was in #152; the squash 685d9ea has the identical tree), safe to delete. `ripdisc-auto-drive` folder already gone. `ripdisc-config.json.bak-20261029` = the config from before `movieFolderNaming: "title-year"` was added (only difference), safe to delete; still the user's call.
+
 ### 2026-11-25 (later) - End screen lists my other free tools (PR #195; main = 3432813 at merge, 24 test files pass)
 
 MERGED. Supersedes the "uncommitted at close" paragraph in the entry below: the end-screen edits were finished and merged as #195, nothing is left on `feature/end-screen-other-projects`.
