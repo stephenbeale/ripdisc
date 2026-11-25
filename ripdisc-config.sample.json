@@ -10,5 +10,6 @@
   },
   "tmdbApiKey": "",
   "movieFolderNaming": "title",
+  "askFolderYear": true,
   "libraryFolders": ["DVDs", "Bluray", "Documentaries", "Music", "Series"]
 }
