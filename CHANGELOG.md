@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-25 - No Leftover Progress Bars During a Rip
+
+### Fixed
+- A MakeMKV progress bar line ("Total 21% | Elapsed 6m 18s") stayed on screen as dead text during the 2026-10-29 Jean de Florette retry. `Write-Progress -Completed` already ran after each attempt; the leftover comes from Windows PowerShell 5.1 in Windows Terminal scrolling a copy of the drawn bar into the scrollback when a line is written below it. The rip loop now hides the bar (`Hide-RipProgressBar`) before every console line it writes (operation, action, 10% milestone, MakeMKV output, watchdog warnings); the next progress update draws it again.
+- Tests: `Test-MakeMkvProgress.ps1` 23 (7 new; fails on the old code).
+
 ## 2026-11-25 - Logo in a Film Strip Frame
 
 ### Changed

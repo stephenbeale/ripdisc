@@ -94,6 +94,42 @@ $ripDiscText = Get-Content $ripDiscPath -Raw
 Assert-True ($ripDiscText -match '--progress=-same') "MakeMKV is launched with --progress=-same"
 Assert-True ($ripDiscText -notmatch 'Saving \d\+ titles\|Current progress') "progress lines no longer mark the rip as started (they also appear during the disc scan)"
 
+Write-Host "`nRip bar hidden before console lines (no ghost bars in Windows Terminal)" -ForegroundColor Cyan
+. ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName 'Hide-RipProgressBar')))
+$script:ProgressCalls = @()
+function Write-Progress { param([int]$Id, [string]$Activity, [switch]$Completed) $script:ProgressCalls += "$Id|$Completed" }
+$script:RipBarShown = $true
+Hide-RipProgressBar
+Assert-Equal '1|True' ($script:ProgressCalls -join ',') 'a showing bar is completed (Id 1)'
+Assert-Equal $false $script:RipBarShown 'the bar is marked hidden'
+Hide-RipProgressBar
+Assert-Equal 1 $script:ProgressCalls.Count 'an already hidden bar is left alone'
+Remove-Item Function:\Write-Progress
+
+# Every Write-Host inside the MakeMKV read loop must hide the bar first (the line before it,
+# or the line before a multi-line Write-Host's first line).
+$ripLines = Get-Content -LiteralPath $ripDiscPath
+$loopStart = [array]::FindIndex([string[]]$ripLines, [Predicate[string]]{ param($l) $l -match '^while \(\$null -ne \(\$line = \$proc\.StandardOutput\.ReadLine\(\)\)\)' })
+$loopEnd = [array]::FindIndex([string[]]$ripLines, [Predicate[string]]{ param($l) $l -match '^try \{ \$proc\.WaitForExit\(\) \}' })
+Assert-True ($loopStart -gt 0 -and $loopEnd -gt $loopStart) 'found the MakeMKV read loop'
+$unguarded = @()
+$writes = 0
+$shownAfterUpdate = $false
+for ($i = $loopStart; $i -lt $loopEnd; $i++) {
+    if ($ripLines[$i] -match 'Write-Progress -Id 1 -Activity \$activity') {
+        for ($j = $i; $j -lt $i + 6; $j++) { if ($ripLines[$j] -match '\$script:RipBarShown = \$true') { $shownAfterUpdate = $true } }
+    }
+    if ($ripLines[$i] -match '^\s*Write-Host\b') {
+        $writes++
+        $prev = $i - 1
+        while ($prev -gt $loopStart -and $ripLines[$prev] -match '^\s*Write-Host\b') { $prev-- }
+        if ($ripLines[$prev] -notmatch 'Hide-RipProgressBar') { $unguarded += "line $($i + 1): $($ripLines[$i].Trim())" }
+    }
+}
+Assert-True ($writes -ge 6) "the loop writes console lines ($writes found)"
+Assert-Equal '' ($unguarded -join '; ') 'every Write-Host in the loop hides the bar first'
+Assert-True $shownAfterUpdate 'drawing the bar marks it shown'
+
 $total = $script:Passed + $script:Failed
 Write-Host "`n$($script:Passed)/$total passed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }
