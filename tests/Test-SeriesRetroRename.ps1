@@ -451,6 +451,71 @@ try {
     Assert-Equal 1 $s.Declined 'end of input declines the folder'
     Assert-Equal 0 $s.Renamed 'end of input: nothing renamed'
     Assert-True (-not (Test-Path (Join-Path $sp2 'rename-manifest.csv'))) 'end of input: no manifest written'
+
+    # ---------------------------------------------------------------------------
+    Write-Host "`nLoose video files in a series folder with no Season / Disc folders" -ForegroundColor Cyan
+
+    $flatDur = { param($path) 50 * 60 }
+    $newLoose = {
+        param([string]$Name)
+        $dir = Join-Path $tempRoot $Name
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        foreach ($n in 'Lakers Episode 01.mp4', 'Lakers Episode 02.mp4', 'Lakers Episode 03.mp4', '._Lakers Episode 01.mp4', 'notes.txt') {
+            New-Item -ItemType File -Path (Join-Path $dir $n) | Out-Null
+        }
+        $dir
+    }
+
+    $lk = & $newLoose 'Lakers'
+    Assert-Equal 3 @(Get-SeriesLooseVideoFiles -Root $lk).Count 'loose files: mp4/mkv only, ._ files ignored'
+    Assert-Equal 0 @(Get-SeriesLooseVideoFiles -Root (Join-Path $tempRoot 'Show A\Season 0')).Count 'loose files: never from a Season 0 folder'
+
+    # Dry run: plans S01 names, moves nothing, asks nothing.
+    $readY = { param($p) $script:askedLoose += $p; 'y' }
+    $script:askedLoose = @()
+    $s = Invoke-SeriesRetroRename -Root $lk -NoTmdb -GetDuration $flatDur -ReadInput $readY 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 1 $s.Units 'loose dry run: one unit'
+    Assert-Equal 3 $s.Planned 'loose dry run: three files planned'
+    Assert-Equal 'Lakers-S01-E01.mp4' (@($s.Results[0].Result.Plan)[0].NewName) 'loose dry run: named as Season 1'
+    Assert-True (-not (Test-Path (Join-Path $lk 'Season 1'))) 'loose dry run: no Season 1 folder made'
+    Assert-True (Test-Path (Join-Path $lk 'Lakers Episode 01.mp4')) 'loose dry run: files not moved'
+    Assert-Equal 0 $script:askedLoose.Count 'loose dry run: no confirmation asked'
+
+    # Apply, declined: nothing moved.
+    $readN = { param($p) 'n' }
+    $s = Invoke-SeriesRetroRename -Root $lk -Apply -NoTmdb -GetDuration $flatDur -UndoScriptSource $undoPath -ReadInput $readN 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 1 $s.Declined 'loose apply declined: counted as declined'
+    Assert-True (-not (Test-Path (Join-Path $lk 'Season 1'))) 'loose apply declined: no Season 1 folder'
+    Assert-True (Test-Path (Join-Path $lk 'Lakers Episode 03.mp4')) 'loose apply declined: files left in place'
+
+    # Apply, end of input: declines too.
+    $s = Invoke-SeriesRetroRename -Root $lk -Apply -NoTmdb -GetDuration $flatDur -UndoScriptSource $undoPath -ReadInput { param($p) $null } 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 1 $s.Declined 'loose apply EOF: declined'
+    Assert-True (-not (Test-Path (Join-Path $lk 'Season 1'))) 'loose apply EOF: no Season 1 folder'
+
+    # Apply, confirmed: moved into Season 1 then renamed (y to the move, Enter accepts the table).
+    $script:answers = @('y', '')
+    $readSeq = { param($p) $a = $script:answers[0]; $script:answers = @($script:answers | Select-Object -Skip 1); $a }
+    $s = Invoke-SeriesRetroRename -Root $lk -Apply -NoTmdb -GetDuration $flatDur -UndoScriptSource $undoPath -ReadInput $readSeq 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    $s1 = Join-Path $lk 'Season 1'
+    Assert-Equal 3 $s.Renamed 'loose apply: three files renamed'
+    Assert-True (Test-Path (Join-Path $s1 'Lakers-S01-E03.mp4')) 'loose apply: E03 in Season 1'
+    Assert-True (Test-Path (Join-Path $s1 'rename-manifest.csv')) 'loose apply: manifest in Season 1'
+    Assert-True (Test-Path (Join-Path $lk '._Lakers Episode 01.mp4')) 'loose apply: ._ file left in the series folder'
+    Assert-True (Test-Path (Join-Path $lk 'notes.txt')) 'loose apply: non-video file left in the series folder'
+    Assert-Equal 0 @(Get-ChildItem -LiteralPath $lk -File -Filter *.mp4 | Where-Object { -not $_.Name.StartsWith('._') }).Count 'loose apply: no videos left loose'
+
+    # -Yes skips the move question; -Season 2 picks the folder and S02 names.
+    $lk2 = & $newLoose 'Lakers Two'
+    $s = Invoke-SeriesRetroRename -Root $lk2 -Season 2 -Apply -Yes -NoTmdb -GetDuration $flatDur -UndoScriptSource $undoPath -ReadInput { param($p) throw "asked: $p" } 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 3 $s.Renamed 'loose -Yes -Season 2: renamed without asking'
+    Assert-True (Test-Path (Join-Path $lk2 'Season 2\Lakers Two-S02-E01.mp4')) 'loose -Season 2: Season 2 folder, S02 names'
+
+    # An empty series folder still just says nothing found.
+    $emptyDir = Join-Path $tempRoot 'Nothing Here'
+    New-Item -ItemType Directory -Path $emptyDir | Out-Null
+    $s = Invoke-SeriesRetroRename -Root $emptyDir -Apply -NoTmdb -ReadInput { param($p) throw "asked: $p" } 6>&1 | Where-Object { $_ -is [pscustomobject] } | Select-Object -Last 1
+    Assert-Equal 0 $s.Units 'empty folder: no units, no prompt'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

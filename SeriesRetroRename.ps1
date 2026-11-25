@@ -136,6 +136,17 @@ function Get-SeriesRenameUnits {
     return $out
 }
 
+# Video files (mp4/mkv, not macOS "._" files) sitting directly in a SERIES folder - one
+# that is not itself a Season (including Season 0) or Disc folder. Empty otherwise.
+function Get-SeriesLooseVideoFiles {
+    param([string]$Root)
+    $leaf = Split-Path ((Resolve-Path -LiteralPath $Root).ProviderPath) -Leaf
+    if ($null -ne (Get-SeasonFolderNumber $leaf) -or $null -ne (Get-DiscFolderNumber $leaf)) { return @() }
+    return @(Get-ChildItem -LiteralPath $Root -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -match '^\.(mp4|mkv)$' -and -not $_.Name.StartsWith('._') } |
+        Sort-Object Name)
+}
+
 # Highest episode number among files in $Directory already in final <Title>-S##-E## shape
 # (0 when none), so numbering carries on after episodes renamed by an earlier run.
 function Get-SeriesFolderMaxEpisode {
@@ -179,9 +190,55 @@ function Invoke-SeriesRetroRename {
     )
 
     $units = @(Get-SeriesRenameUnits -Root $Root -Title $Title -Season $Season)
+    $looseMove = $null
     if ($units.Count -eq 0) {
-        Write-Host "No Season / DiscN folders found under $Root" -ForegroundColor Yellow
-        return [pscustomobject]@{ Units = 0; Planned = 0; Renamed = 0; Skipped = 0; Declined = 0; Results = @() }
+        $empty = [pscustomobject]@{ Units = 0; Planned = 0; Renamed = 0; Skipped = 0; Declined = 0; Results = @() }
+        $loose = @(Get-SeriesLooseVideoFiles -Root $Root)
+        if ($loose.Count -eq 0) {
+            Write-Host "No Season / DiscN folders found under $Root" -ForegroundColor Yellow
+            return $empty
+        }
+        # A series folder holding the episodes itself: offer to treat it as one season,
+        # which means a "Season N" folder (Season 1 unless -Season says otherwise).
+        $seasonNo = if ($Season -gt 0) { $Season } else { 1 }
+        $seasonDir = Join-Path ((Resolve-Path -LiteralPath $Root).ProviderPath) "Season $seasonNo"
+        $t = if ($Title) { $Title } else { Split-Path ((Resolve-Path -LiteralPath $Root).ProviderPath) -Leaf }
+        Write-Host "No Season / DiscN folders found under $Root, but it holds $($loose.Count) video file(s) directly." -ForegroundColor Yellow
+        Write-Host "To rename them as a single series they need a season folder: they will be moved into" -ForegroundColor Yellow
+        Write-Host "  $seasonDir" -ForegroundColor Yellow
+        Write-Host ("and named {0}-{1}-E##. Not a single series, or not season {2}? Answer n and pass -Season N, or make the Season folders yourself." -f $t, (Get-SeriesSeasonTag $seasonNo), $seasonNo) -ForegroundColor Yellow
+        if ($Apply) {
+            $ok = [bool]$Yes
+            if (-not $ok) {
+                $answer = & $ReadInput "Continue as Season $seasonNo? [y]es / [N]o (default)"
+                $ok = ($null -ne $answer -and "$answer".Trim() -match '^(?i)y(es)?$')
+            }
+            if (-not $ok) {
+                Write-Host "Nothing moved or renamed." -ForegroundColor Gray
+                $empty.Declined = 1
+                return $empty
+            }
+            New-Item -ItemType Directory -Path $seasonDir -Force | Out-Null
+            $moved = @()
+            foreach ($f in $loose) {
+                $target = Join-Path $seasonDir $f.Name
+                try {
+                    if (Test-Path -LiteralPath $target) { throw "already exists: $target" }
+                    Move-Item -LiteralPath $f.FullName -Destination $target -ErrorAction Stop
+                    Write-Log "MOVED $($f.FullName) -> $target"
+                    $moved += $f.Name
+                } catch {
+                    Write-Host "Could not move $($f.Name) into $seasonDir ($($_.Exception.Message)). Stopping before any rename; $($moved.Count) file(s) already moved there." -ForegroundColor Red
+                    return $empty
+                }
+            }
+            Write-Host "Moved $($moved.Count) file(s) into $seasonDir" -ForegroundColor Green
+            $units = @(Get-SeriesRenameUnits -Root $Root -Title $Title -Season $Season)
+        } else {
+            # Dry run: plan them where they are, as season N; nothing moves.
+            Write-Host "Dry run: files are NOT moved; with -Apply you will be asked to confirm the move first." -ForegroundColor Cyan
+            $units = @([pscustomobject]@{ Directory = (Resolve-Path -LiteralPath $Root).ProviderPath; Title = $t; Season = $seasonNo; Disc = 0; SeasonDir = $Root })
+        }
     }
 
     $mode = if ($Apply) { "APPLY" } else { "DRY RUN - nothing will be renamed (add -Apply to rename)" }
