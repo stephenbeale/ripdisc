@@ -56,6 +56,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - MakeMKV drive-list cache (`%TEMP%\makemkv-drive-cache.txt`) is now written only for a real `makemkvcon(64).exe`, and its first line records which makemkvcon wrote it; a cache from another path (or an old one without the line) is ignored (`Read-DriveCache` / `Write-DriveCache`). Found live: a test run against a fake makemkvcon cached "Z: FAKE DRIVE" and the user's next real run failed "Drive D: not found".
 - Tests: `Test-AutoVideoDrive.ps1` 48 (27 new), `Test-DriveQueryTimeout.ps1` 33 (17 new).
 
+## 2026-11-01 - Rename Manifest: Append to Any Columns, Never Rename Without It
+
+### Fixed
+- `rename-series.ps1` / the `-Series` rename on `F:\Series\Silicon Valley\Season 3\Disc1` failed to append to a hand-written `rename-manifest.csv` (extra `IntermediateName`/`Notes` columns: "Cannot append CSV content ... IntermediateName") but renamed the 5 files anyway, so `undo-rename.ps1` had no rows for them, and still printed "Rename manifest: ... (5 row(s))". `Write-RenameManifest` now gives new rows the file's extra columns (empty) and appends; a manifest without `OriginalName`/`NewName` is refused. If the manifest cannot be written, nothing is renamed (result `Failed`, and rename-series.ps1's summary counts the folder as NOT renamed).
+- Tests: `Test-SeriesEpisodeRename.ps1` 169 (the new append test fails on the old code with the same error).
+
 ## 2026-11-01 - Library Prompt, Library Folders in Setup, Year Prompt Skips Unrelated Matches
 
 ### Added
