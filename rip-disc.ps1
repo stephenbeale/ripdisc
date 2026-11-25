@@ -3231,6 +3231,18 @@ function Get-ContinueRipCommand {
     return ".\continue-rip.ps1 " + ($parts -join " ")
 }
 
+# Hides the MakeMKV rip bar (Write-Progress -Id 1) if it is showing. Called before every
+# Write-Host in the rip loop: in Windows PowerShell 5.1 under Windows Terminal, a line
+# written while the bar is drawn scrolls a copy of the bar into the scrollback, where it
+# stays as dead text (seen 2026-10-29: "Total 21% | Elapsed 6m 18s" left on screen during
+# the Jean de Florette retry). The next progress update draws the bar again.
+function Hide-RipProgressBar {
+    if ($script:RipBarShown) {
+        Write-Progress -Id 1 -Activity "MakeMKV" -Completed
+        $script:RipBarShown = $false
+    }
+}
+
 # Parses makemkvcon's --progress=-same output line
 #   "Current progress - 42%  , Total progress - 17% "
 # into its two percentages, or $null for any other line.
@@ -3576,6 +3588,7 @@ $lastProgressKey = ""
 $lastMilestone = 0
 $mkvOperation = ""
 $mkvAction = ""
+$script:RipBarShown = $false
 
 $proc = New-Object System.Diagnostics.Process
 $proc.StartInfo.FileName = $makemkvconPath
@@ -3612,10 +3625,12 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
                 $progressStartTime = $null
                 $lastProgressKey = ""
                 $lastMilestone = 0
+                Hide-RipProgressBar
                 Write-Host "  $line" -ForegroundColor Cyan
             }
         } elseif ($statusText -ne $mkvAction) {
             $mkvAction = $statusText
+            Hide-RipProgressBar
             Write-Host "  $line" -ForegroundColor DarkCyan
         }
         continue
@@ -3634,10 +3649,12 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
                 -Status "Total $($mkvProgress.Total)% | Elapsed $(Format-RipDuration $elapsed) | ETA $etaText" `
                 -PercentComplete ([math]::Min(100, $mkvProgress.Total)) `
                 -CurrentOperation "Current title $($mkvProgress.Current)%$(if ($mkvAction) { " - $mkvAction" })"
+            $script:RipBarShown = $true
             $milestone = [int]([math]::Floor($mkvProgress.Total / 10) * 10)
             if ($milestone -gt $lastMilestone -and $milestone -lt 100) {
                 $lastMilestone = $milestone
                 $milestoneText = "MakeMKV $milestone% complete - elapsed $(Format-RipDuration $elapsed), ETA ~$etaText"
+                Hide-RipProgressBar
                 Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] $milestoneText" -ForegroundColor Green
                 Write-Log $milestoneText
             }
@@ -3668,6 +3685,7 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
             }
             if ($stuckOffsetCount -ge $stuckThreshold) {
                 $wasKilledForStuck = $true
+                Hide-RipProgressBar
                 Write-Host "`nWARNING: MakeMKV stuck retrying the same bad sector ($stuckOffsetCount attempts at offset $stuckOffset)" -ForegroundColor Yellow
                 Write-Host "Killing MakeMKV to salvage titles already saved to disk..." -ForegroundColor Yellow
                 try { $proc.Kill() } catch {}
@@ -3680,6 +3698,7 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
             if ($preRipErrorCount -ge $preRipErrorThreshold) {
                 $wasKilledForAuth = $true
                 $preRipDriveLabel = if ($preRipErrorDrive -ne "") { " on '$preRipErrorDrive'" } else { "" }
+                Hide-RipProgressBar
                 Write-Host "`nERROR: MakeMKV never got past reading the disc$preRipDriveLabel ($preRipErrorCount consecutive read errors before the rip started)" -ForegroundColor Red
                 Write-Host "Killing MakeMKV — the drive could not authenticate or read the disc." -ForegroundColor Red
                 Write-Log "MakeMKV killed before rip started - $preRipErrorCount consecutive read errors$preRipDriveLabel"
@@ -3695,6 +3714,7 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
     }
 
     if ($line -ne $script:lastPrintedLine) {
+        Hide-RipProgressBar
         Write-Host $line
         $script:lastPrintedLine = $line
     }
@@ -3702,6 +3722,7 @@ while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
 
 try { $proc.WaitForExit() } catch {}
 Write-Progress -Id 1 -Activity "MakeMKV" -Completed
+$script:RipBarShown = $false
 if ($progressStartTime) {
     $mkvDuration = Format-RipDuration ((Get-Date) - $progressStartTime)
     Write-Host "MakeMKV finished after $mkvDuration" -ForegroundColor Gray
