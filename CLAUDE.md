@@ -19,7 +19,7 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
-### 2026-11-25 - Drive-free check before any drive access, logo (PRs #192, #193, #194; main = 9c01a94, 24 test files pass)
+### 2026-11-25 - Drive-free check before any drive access, logo (PRs #192, #193, #194, #195; main = 3432813, 24 test files pass)
 
 All three MERGED. **#192 not yet run on real drives.**
 
@@ -27,14 +27,13 @@ All three MERGED. **#192 not yet run on real drives.**
 **#193 (ae18ba8):** first logo: assets/logo.svg/png/ico (yellow, black CD with hub ring), README top, `RipDisc.Cli.csproj` ApplicationIcon (built exe checked, icon extracted).
 **#194 (9c01a94):** logo changed to the CD inside the flyweight project's film strip frame (dark rounded square, white sprockets, #ffd21f yellow; copied from `C:\Users\sjbeale\source\repos\flyweight\assets\icon.svg`). README render on GitHub verified.
 
-**Uncommitted at close (not part of this PR):** the main checkout is on `feature/end-screen-other-projects` (same commit as main) with edits to rip-disc.ps1 and continue-rip.ps1 (+12 lines each in `Show-CoffeeBadge`: a "More free tools by me" block listing ripaudio, Flyweight, Waffley). Left as is for the next session to finish or discard.
+**Also merged later the same day:** #195 (3432813) end screen lists the other free tools (ripaudio, Flyweight, Waffley) in `Show-CoffeeBadge` of rip-disc.ps1 and continue-rip.ps1. Nothing uncommitted left from this session.
 
 ### 2026-11-25 - NEXT SESSION items
 
 1. Real-drive checks for #192, then tick its 2 boxes: (a) with ripaudio ripping D:, run rip-disc.ps1 and pick Music; D: is not woken or probed, the offer names G:, [R] hands G: over; (b) a DVD in the default drive still wakes and rips normally.
-2. Finish or drop the uncommitted end-screen "other projects" block on `feature/end-screen-other-projects` (rip-disc.ps1, continue-rip.ps1).
-3. Optional: rebuild RipDisc.exe and check the icon in Explorer and the taskbar.
-4. Carry forward the still-open 2026-11-24 NEXT SESSION items below (not repeated here).
+2. Optional: rebuild RipDisc.exe and check the icon in Explorer and the taskbar.
+3. Carry forward the still-open 2026-11-24 NEXT SESSION items below (not repeated here).
 
 ### 2026-11-24 - Edit at "Ready to rip", disc-label cleanup, music-while-ripping fixes, README CR fix (PRs #188, #189, #190; main = 32be545, 24 test files pass)
 
