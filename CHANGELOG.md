@@ -7,7 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-11-25 - Logo
 
 ### Added
-- Logo: a black CD silhouette with two shine arcs on a yellow (#FFD400) rounded square. `assets/logo.svg` (source), `assets/logo.png` (512 px, transparent corners) and `assets/logo.ico` (16, 32, 48, 256 px). Shown at the top of the README, and used as RipDisc.exe's icon (`ApplicationIcon` in RipDisc.Cli.csproj).
+- Logo: a black CD silhouette with a yellow hub ring and centre hole on a yellow (#FFD400) rounded square. `assets/logo.svg` (source), `assets/logo.png` (512 px, transparent corners) and `assets/logo.ico` (16, 32, 48, 256 px). Shown at the top of the README, and used as RipDisc.exe's icon (`ApplicationIcon` in RipDisc.Cli.csproj).
 
 ## 2026-11-25 - No Drive Is Touched Before It Is Known to Be Free
 
