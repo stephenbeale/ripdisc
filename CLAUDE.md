@@ -19,6 +19,21 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-25 (later) - End screen lists my other free tools (PR #195; main = 3432813 at merge, 24 test files pass)
+
+MERGED. Supersedes the "uncommitted at close" paragraph in the entry below: the end-screen edits were finished and merged as #195, nothing is left on `feature/end-screen-other-projects`.
+
+**#195 (squash 3432813):** `Show-CoffeeBadge` in rip-disc.ps1 and continue-rip.ps1 gains a dim "More free tools by me" section below SiteGround: ripaudio (github.com/stephenbeale/ripaudio), Flyweight (github.com/stephenbeale/flyweight), Waffley (https://waffley.app). The coffee box stays first and brightest (user's request). Rendered; every row is 60 wide; both scripts parse. **Not yet seen at the end of a real rip;** the PR's last test box is unticked.
+
+**Left out on purpose:** Snout. Its live site https://stephenbeale.github.io/snout/ was built with an empty VITE_API_URL, so searches 404, and the Flask API is self-hosted with the user's eBay keys. Added to snout's ROADMAP via snout PR #26 (e7b7fcc): host the API, rebuild, run the tests, then add Snout back here. Jellyfin Catalogue also left out: the live site shows the user's own library (~800 films), so it is not a tool for others; making it reusable would need a template repo without the data.
+
+### 2026-11-25 (later) - NEXT SESSION items
+
+1. See the end-screen section at the end of a real rip, then tick the last box on PR #195.
+2. When Snout's roadmap item (snout PR #26) is done, add Snout back to the list in both scripts.
+3. Consider the same section in ripaudio's end screen (not started).
+4. The 2026-11-24 NEXT SESSION list still applies (see below); the untracked `ripdisc-config.json.bak-20261029` is still undecided: do not commit, delete or move.
+
 ### 2026-11-25 - Drive-free check before any drive access, logo (PRs #192, #193, #194, #195; main = 3432813, 24 test files pass)
 
 All three MERGED. **#192 not yet run on real drives.**
