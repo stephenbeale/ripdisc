@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-25 - Logo in a Film Strip Frame
+
+### Changed
+- The logo's CD (black disc, yellow hub ring and centre hole) now sits in a film strip frame, the same frame as the flyweight project's icon: dark rounded square, white sprocket holes down both sides, yellow (#ffd21f) frame in the middle. `assets/logo.svg`, `logo.png` and `logo.ico` regenerated; README and RipDisc.exe pick it up unchanged.
+
 ## 2026-11-25 - Logo
 
 ### Added
