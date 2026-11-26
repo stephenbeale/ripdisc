@@ -19,18 +19,22 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
-### 2026-11-26 - Next free drive during a rip (#201), summary tables (open PR) (main = bf1e64c)
+### 2026-11-26 - Next free drive during a rip (#201), summary tables (#202), end-screen links (#203) (main = bf1e64c)
 
 **#201 MERGED (bf1e64c):** trigger: King George ripping D: (disc:1), Meek's Cutoff in F:, run without `-Drive` timed out after 20 s because the MakeMKV drive query waits behind a running rip (earlier second rips only worked inside the 5 min drive cache). New `Get-MakeMkvRips`, `Get-MakeMkvBusyDrives` (busy letter from the running rip's log "Drive: X:" line whose MakeMKV command names that disc:N and folder; `-DriveIndex` logs not trusted; else a unique volume label matching the title folder), `Get-FreeDriveIndex` (if every other drive is busy and indices are known, the free index is the number left; MakeMKV not queried). A busy default drive goes through `Select-AutoVideoDrive` (switch/ask/stop); `-Drive` naming the busy drive stops at once; the MakeMKV query waits 60 s (not 20 s) while another rip runs. Enter = Y at "[Y] Accept (Enter) / [E] Edit title / [A] Abort". Verified live (D: busy, F: picked, disc:0; the real Meek's Cutoff run worked). Test-AutoVideoDrive 84/84. **Open PR boxes:** Enter at Discovered Metadata on a real run; two free drives with DVDs asks which.
 
-**Summary tables (branch `feature/summary-tables`, worktree `ripdisc-tables`, OPEN PR, not merged on purpose):** "Discovered Metadata" and "Ready to rip" print as two-column ASCII tables (`Split-TableText`, `Format-InfoTable`, `Write-InfoTable` in rip-disc.ps1; IMDb link on its own row; empty rows dropped; wraps within the column; fits console width; colours kept). tests/Test-InfoTable.ps1 15/15, full suite 25 files pass. CHANGELOG has the entry. **Not yet seen on a real rip.** Keep the worktree until the PR is merged.
+**Summary tables (PR #202, MERGED):** "Discovered Metadata" and "Ready to rip" print as two-column ASCII tables (`Split-TableText`, `Format-InfoTable`, `Write-InfoTable` in rip-disc.ps1; IMDb link on its own row; empty rows dropped; wraps within the column; fits console width; colours kept). tests/Test-InfoTable.ps1 15/15, full suite 25 files pass. CHANGELOG has the entry. **Not yet seen on a real rip.** 
+
+**End-screen links (ripdisc PR #203, ripaudio PR #172, both squash-merged):** the "More free tools by me" section of `Show-CoffeeBadge` was dim and easy to miss. Now "click a link to try one:", tool names bright green, one-liners light grey, URLs bright cyan behind a `>>` marker (no OSC 8; Windows Terminal makes URLs Ctrl+clickable). Every line 64 wide in powershell.exe and pwsh. **Waffley correction:** it was described as "learn a language through colours"; it is a language game (vocab, verbs, typing, speaking). One-liners: ripaudio "Rip audio CDs to FLAC or MP3, fully tagged"; Flyweight "Cut, annotate and export YouTube videos"; Waffley "Language game: vocab, verbs, typing, speaking"; in ripaudio the first entry is ripdisc "Rip DVDs and Blu-rays to MP4, titles looked up". **Open wording question:** the user may want different wording for the ripdisc line. No test covers Show-CoffeeBadge. Not seen on a real rip.
 
 ### 2026-11-26 - NEXT SESSION items
 
 1. After real runs, tick #201's two PR boxes (Enter at Discovered Metadata; two free drives with DVDs asks which).
-2. See the tables on a real rip (Miles Ahead was ripping at close), then merge the summary-tables PR and remove the `ripdisc-tables` worktree.
-3. Still undecided: untracked `ripdisc-config.json.bak-20261029` (do not commit, delete or move).
-4. Carry forward the 2026-11-25 lists (real-disc checks for #192, #199 progress bar, #195 end screen; F: leftovers from #185; Snout back on the end screen once snout PR #26 is done).
+2. See the summary tables (#202) and the new end screen (#203, ripaudio #172) on a real rip, then tick the PR boxes. All three are merged; worktrees removed.
+3. Optional: waffley.app's meta description says 6 languages while its README says 7; fix the site.
+4. Decide whether the ripdisc one-liner in ripaudio's end screen needs different wording.
+5. Still undecided: untracked `ripdisc-config.json.bak-20261029` (do not commit, delete or move).
+6. Carry forward the 2026-11-25 lists (real-disc checks for #192, #199 progress bar, #195 end screen; F: leftovers from #185; Snout back on the end screen once snout PR #26 is done).
 
 ### 2026-11-25 (evening) - Open PR backlog cleared, leftover progress bar, ripaudio end screen (main = b7274a0, 24 test files pass)
 
