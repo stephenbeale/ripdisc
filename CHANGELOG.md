@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-26 - Summary Tables
+
+### Changed
+- "Discovered Metadata" and "Ready to rip" are now two-column ASCII tables (label | value) instead of loose lines (user request). The IMDb link has its own row; empty values are left out; long values wrap within their column; the table fits the console width. Values keep their colors (drive rows and a sanitized name in yellow). New `Split-TableText`, `Format-InfoTable`, `Write-InfoTable` in rip-disc.ps1.
+- Tests: new `tests/Test-InfoTable.ps1` 15/15. **Not yet seen on a real rip.**
+
 ## 2026-11-26 - Move On to the Next Free Drive While Another Rip Runs
 
 ### Fixed
