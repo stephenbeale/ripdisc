@@ -183,5 +183,81 @@ Assert-Equal $true ($firstWake -gt $preCheck) 'the target drive is not woken bef
 Assert-Equal $true ($ripText2.Contains('if ($DriveIndex -lt 0 -and -not $preMkvRunning -and $cyBusy -notcontains $driveLetter) {')) 'the wake skips a drive ripaudio is ripping, and any drive while another MakeMKV runs'
 Assert-Equal $true ($ripText2.Contains('if ($w.Busy) { ''Audio CD'' } else { Get-DiscTypeLabel -DriveLetter $w.Letter }')) 'a busy drive is never probed for its disc type'
 
+# 2026-11-26: King George ripping D: (disc:1), Meek's Cutoff in F:, no -Drive. MakeMKV's
+# drive query timed out behind the running rip. Now the busy drive is found without MakeMKV
+# and the run moves on to the free drive, with its index worked out.
+Write-Host "`nAnother MakeMKV rip running: next free drive" -ForegroundColor Cyan
+foreach ($name in @('Get-MakeMkvRips', 'Get-MakeMkvBusyDrives', 'Get-FreeDriveIndex')) {
+    . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $name)))
+}
+$kgCmd = '"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" mkv disc:1 all "C:\Video\The Madness of King George\Disc1" --minlength=120 --progress=-same'
+$rips = @(Get-MakeMkvRips -CommandLines @($kgCmd, '"makemkvcon64.exe" -r info disc:9999'))
+Assert-Equal 1 $rips.Count 'only the mkv rip counts, not an info query'
+Assert-Equal 1 $rips[0].Index 'rip index read from the command line'
+Assert-Equal 'C:\Video\The Madness of King George\Disc1' $rips[0].OutDir 'rip folder read from the command line'
+
+$tmpLogs = Join-Path ([IO.Path]::GetTempPath()) ("ripdisc-busy-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tmpLogs | Out-Null
+try {
+    $kgLog = Join-Path $tmpLogs 'kg.log'
+    Set-Content -LiteralPath $kgLog -Value @(
+        '[2026-11-26 20:41:48] Drive: d:',
+        '[2026-11-26 20:41:49] MakeMKV command: makemkvcon mkv disc:1 all "C:\Video\The Madness of King George\Disc1" --minlength=120 --progress=-same')
+    $otherLog = Join-Path $tmpLogs 'other.log'
+    Set-Content -LiteralPath $otherLog -Value @(
+        '[2026-11-24 20:25:19] Drive: G:',
+        '[2026-11-24 20:25:23] MakeMKV command: makemkvcon mkv disc:1 all "C:\Video\Michael Collins (1996)\Disc1" --minlength=120 --progress=-same')
+    $idxLog = Join-Path $tmpLogs 'idx.log'
+    Set-Content -LiteralPath $idxLog -Value @(
+        '[2026-11-26 19:00:00] Drive Index: 0',
+        '[2026-11-26 19:00:01] MakeMKV command: makemkvcon mkv disc:0 all "C:\Video\Some Film\Disc1" --minlength=120 --progress=-same')
+
+    $win = @(
+        [pscustomobject]@{ Letter = 'D:'; Name = 'GP75N'; DiscName = 'THE_MADNESS_OF_KING_GEORGE'; Busy = $false },
+        [pscustomobject]@{ Letter = 'F:'; Name = 'GP75N'; DiscName = 'MEEKS_CUTOFF'; Busy = $false })
+    $busy = @(Get-MakeMkvBusyDrives -Rips $rips -WinDrives $win -LogFiles @($otherLog, $kgLog))
+    Assert-Equal 'D:' $busy[0].Letter 'busy drive from the rip''s own log (lower-case d: normalised), not another rip''s log'
+
+    $busy = @(Get-MakeMkvBusyDrives -Rips $rips -WinDrives $win -LogFiles @($otherLog))
+    Assert-Equal 'D:' $busy[0].Letter 'no log: the drive whose label matches the title folder'
+
+    $sfRip = @([pscustomobject]@{ Index = 0; OutDir = 'C:\Video\Some Film\Disc1' })
+    $busy = @(Get-MakeMkvBusyDrives -Rips $sfRip -WinDrives $win -LogFiles @($idxLog))
+    Assert-Equal '' $busy[0].Letter 'a -DriveIndex run''s log is not trusted, and no label matches: unknown'
+
+    $svRip = @([pscustomobject]@{ Index = 2; OutDir = 'C:\Video\Silicon Valley\Season2\Disc2' })
+    $svWin = @([pscustomobject]@{ Letter = 'E:'; Name = 'x'; DiscName = 'SILICON VALLEY'; Busy = $false })
+    Assert-Equal 'E:' (@(Get-MakeMkvBusyDrives -Rips $svRip -WinDrives $svWin -LogFiles @())[0].Letter) 'series folder: label matched past SeasonN\DiscN'
+
+    $twoSame = @($win[0], [pscustomobject]@{ Letter = 'G:'; Name = 'x'; DiscName = 'The Madness of King George'; Busy = $false })
+    Assert-Equal '' (@(Get-MakeMkvBusyDrives -Rips $rips -WinDrives $twoSame -LogFiles @())[0].Letter) 'two drives with matching labels: unknown, not a guess'
+} finally {
+    Remove-Item -LiteralPath $tmpLogs -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Busy D: + free F: with a DVD: the existing picker switches to F:
+$win[0].Busy = $true
+$auto = Select-AutoVideoDrive -DrvLines $win -CurrentLetter 'D:' -GetDiscType (New-TypeMap @{ 'F:' = 'DVD-Video'; 'D:' = 'DVD-Video' })
+Assert-Equal 'switch' $auto.Action 'default D: busy with MakeMKV: switch'
+Assert-Equal 'F:' $auto.Drives[0].Letter 'switch to F:'
+Assert-Equal $false ($script:Queried -contains 'D:') 'the busy D: is never probed'
+
+Assert-Equal 0 (Get-FreeDriveIndex -BusyIndices @(1) -DriveCount 2) 'two drives, disc:1 busy: the free one is disc:0 (the 2026-11-26 case)'
+Assert-Equal 1 (Get-FreeDriveIndex -BusyIndices @(0) -DriveCount 2) 'two drives, disc:0 busy: disc:1'
+Assert-Equal 1 (Get-FreeDriveIndex -BusyIndices @(0, 2) -DriveCount 3) 'three drives, two busy: the one left'
+Assert-Equal -1 (Get-FreeDriveIndex -BusyIndices @(1) -DriveCount 3) 'two free drives: not certain'
+Assert-Equal -1 (Get-FreeDriveIndex -BusyIndices @(3) -DriveCount 2) 'busy index outside 0..N-1 (numbering not as expected): not certain'
+Assert-Equal -1 (Get-FreeDriveIndex -BusyIndices @() -DriveCount 0) 'no drives: -1'
+
+$ripText3 = [IO.File]::ReadAllText($ripDiscPath)
+$moveOn = $ripText3.IndexOf('# ========== ANOTHER MAKEMKV RIP RUNNING: USE THE NEXT FREE DRIVE ==========')
+$query = $ripText3.IndexOf('$drvProc.StartInfo.Arguments = "-r info disc:9999"')
+Assert-Equal $true ($moveOn -gt 0 -and $moveOn -lt $query) 'the busy-drive move-on runs before any MakeMKV drive query'
+Assert-Equal $true ($ripText3.Contains('} elseif ($script:FreeDriveIndex -ge 0) {')) 'a certain free index skips the MakeMKV query'
+Assert-Equal $true ($ripText3.Contains('$drvQueryTimeoutSec = if ($preMkvRunning) { 60 } else { 20 }')) 'the query waits 60s while another rip runs'
+# 2026-11-26: Enter at "[Y] Accept / [E] Edit title / [A] Abort" said "Invalid choice"
+Assert-Equal $true ($ripText3.Contains('$input = Read-Host "[Y] Accept (Enter) / [E] Edit title / [A] Abort"')) 'Discovered Metadata prompt says Enter accepts'
+Assert-Equal $true ($ripText3.Contains('{ $_ -in @('''', ''Y'') } { $discoveryChoice = ''Y'' }')) 'Enter (empty answer) accepts the discovered metadata'
+
 Write-Host "`n$script:Passed passed, $script:Failed failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }

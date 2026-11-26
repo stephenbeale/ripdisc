@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-26 - Move On to the Next Free Drive While Another Rip Runs
+
+### Fixed
+- With a rip running on the default drive (King George on D:, disc:1) and the next disc in F:, a run without `-Drive` asked MakeMKV about D: and timed out after 20 s, because MakeMKV's drive query waits behind a running rip. Earlier second rips only worked because they started within 5 minutes of the first, so they read the cached drive list.
+- Now, while another MakeMKV rip runs, the busy drive is found without asking MakeMKV: the running rip's log (`Drive: D:` in the log whose MakeMKV command names that `disc:N` and folder), else the one drive whose volume label matches the rip's title folder. The run moves on to the free drive with a DVD / Blu-ray (asks if several; stops with a clear message if none). `-Drive` naming the busy drive stops at once rather than timing out.
+- When every other drive is being ripped and each rip's `disc:N` is known, the free drive's index is the number left over, so MakeMKV is not queried at all. Otherwise the query now waits 60 s (not 20 s) while another rip runs.
+- Tests: `Test-AutoVideoDrive.ps1` 84 (22 new). Checked live against the running King George rip: D: busy, F: picked, `disc:0`; the user's real run on F: (Meek's Cutoff) worked.
+- Enter now accepts at the "Discovered Metadata" prompt (`[Y] Accept (Enter) / [E] Edit title / [A] Abort`); it used to say "Invalid choice".
+
 ## 2026-11-25 - No Leftover Progress Bars During a Rip
 
 ### Fixed
