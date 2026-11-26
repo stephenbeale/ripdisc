@@ -19,6 +19,19 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-26 - Next free drive during a rip (#201), summary tables (open PR) (main = bf1e64c)
+
+**#201 MERGED (bf1e64c):** trigger: King George ripping D: (disc:1), Meek's Cutoff in F:, run without `-Drive` timed out after 20 s because the MakeMKV drive query waits behind a running rip (earlier second rips only worked inside the 5 min drive cache). New `Get-MakeMkvRips`, `Get-MakeMkvBusyDrives` (busy letter from the running rip's log "Drive: X:" line whose MakeMKV command names that disc:N and folder; `-DriveIndex` logs not trusted; else a unique volume label matching the title folder), `Get-FreeDriveIndex` (if every other drive is busy and indices are known, the free index is the number left; MakeMKV not queried). A busy default drive goes through `Select-AutoVideoDrive` (switch/ask/stop); `-Drive` naming the busy drive stops at once; the MakeMKV query waits 60 s (not 20 s) while another rip runs. Enter = Y at "[Y] Accept (Enter) / [E] Edit title / [A] Abort". Verified live (D: busy, F: picked, disc:0; the real Meek's Cutoff run worked). Test-AutoVideoDrive 84/84. **Open PR boxes:** Enter at Discovered Metadata on a real run; two free drives with DVDs asks which.
+
+**Summary tables (branch `feature/summary-tables`, worktree `ripdisc-tables`, OPEN PR, not merged on purpose):** "Discovered Metadata" and "Ready to rip" print as two-column ASCII tables (`Split-TableText`, `Format-InfoTable`, `Write-InfoTable` in rip-disc.ps1; IMDb link on its own row; empty rows dropped; wraps within the column; fits console width; colours kept). tests/Test-InfoTable.ps1 15/15, full suite 25 files pass. CHANGELOG has the entry. **Not yet seen on a real rip.** Keep the worktree until the PR is merged.
+
+### 2026-11-26 - NEXT SESSION items
+
+1. After real runs, tick #201's two PR boxes (Enter at Discovered Metadata; two free drives with DVDs asks which).
+2. See the tables on a real rip (Miles Ahead was ripping at close), then merge the summary-tables PR and remove the `ripdisc-tables` worktree.
+3. Still undecided: untracked `ripdisc-config.json.bak-20261029` (do not commit, delete or move).
+4. Carry forward the 2026-11-25 lists (real-disc checks for #192, #199 progress bar, #195 end screen; F: leftovers from #185; Snout back on the end screen once snout PR #26 is done).
+
 ### 2026-11-25 (evening) - Open PR backlog cleared, leftover progress bar, ripaudio end screen (main = b7274a0, 24 test files pass)
 
 **Merged (each rebased onto main, CHANGELOG conflicts resolved, full suite passing before merge; none run on a real disc):** #184 b46aa7e (manifest append to any columns, no rename without a manifest), #175 af0ed21 (rename-series offers Season 1 for loose files; undo restores names only, files stay in Season N), #182 c916665 (year prompt word order + [N] never ask again), #183 8be408d (titles drop ':' etc. instead of '_'; old '_' folders kept via `Resolve-LegacySafeTitle`).
