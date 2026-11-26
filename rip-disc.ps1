@@ -1454,6 +1454,78 @@ function Get-MakeMkvProcessInfo {
     })
 }
 
+# Running MakeMKV rips ("mkv disc:N all <dir>"), as Index + OutDir. A Ctrl+C leftover still
+# holds its drive, so it counts too. -CommandLines is a seam for tests.
+function Get-MakeMkvRips {
+    param([string[]]$CommandLines = $null)
+    if ($null -eq $CommandLines) {
+        try {
+            $CommandLines = @(Get-CimInstance Win32_Process -Filter "Name like 'makemkvcon%'" -ErrorAction Stop -OperationTimeoutSec 5 | ForEach-Object { "$($_.CommandLine)" })
+        } catch {
+            return @()
+        }
+    }
+    return @(foreach ($c in $CommandLines) {
+        if ("$c" -match '\smkv\s+disc:(\d+)\s+\S+\s+"?([^"]+?)"?(\s+--|\s*$)') {
+            [pscustomobject]@{ Index = [int]$Matches[1]; OutDir = $Matches[2].TrimEnd('\') }
+        }
+    })
+}
+
+# Which drive letter each running MakeMKV rip is reading. MakeMKV's own drive query waits
+# behind a running rip and timed out (2026-11-26: King George ripping D:, Meek's Cutoff in
+# F:, and the run without -Drive asked MakeMKV about D: and died after 20 s). So no MakeMKV
+# here: first the rip's own log ("Drive: D:" in the log whose MakeMKV command names that
+# disc:N and folder - runs started with -DriveIndex log "Drive Index:" instead, so are never
+# trusted), else the one drive whose volume label matches the rip's title folder.
+# Returns rows of Index + Letter ("" when unknown). -LogFiles is a seam for tests.
+function Get-MakeMkvBusyDrives {
+    param([object[]]$Rips = @(), [string]$LogDir = "", [object[]]$WinDrives = @(), [object[]]$LogFiles = $null)
+    if ($null -eq $LogFiles) {
+        $LogFiles = @(if ($LogDir -and (Test-Path -LiteralPath $LogDir)) {
+            Get-ChildItem -LiteralPath $LogDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-3) } | Sort-Object LastWriteTime -Descending
+        })
+    }
+    $norm = { param($s) ("$s" -replace '[^A-Za-z0-9]', '').ToLower() }
+    return @(foreach ($r in @($Rips)) {
+        if (-not $r) { continue }
+        $letter = ""
+        $needle = "disc:$($r.Index) all `"$($r.OutDir)`""
+        foreach ($f in @($LogFiles)) {
+            $path = if ($f -is [string]) { $f } else { $f.FullName }
+            if (-not (Select-String -LiteralPath $path -SimpleMatch -Pattern $needle -List -ErrorAction SilentlyContinue)) { continue }
+            $hit = Select-String -LiteralPath $path -Pattern '\] Drive: ([A-Za-z]):?\s*$' -List -ErrorAction SilentlyContinue
+            if ($hit) { $letter = "$($hit.Matches[0].Groups[1].Value.ToUpper()):" }
+            break
+        }
+        if (-not $letter) {
+            # Title folder: the folder above DiscN (and above SeasonN for a series)
+            $leaf = Split-Path $r.OutDir -Leaf
+            $folder = $r.OutDir
+            if ($leaf -match '^(?i)disc\s*\d+$') { $folder = Split-Path $folder -Parent }
+            if ((Split-Path $folder -Leaf) -match '^(?i)season\s*\d+$') { $folder = Split-Path $folder -Parent }
+            $want = & $norm (Split-Path $folder -Leaf)
+            $byLabel = @(@($WinDrives) | Where-Object { $_ -and $_.DiscName -and $want -and (& $norm $_.DiscName) -eq $want })
+            if ($byLabel.Count -eq 1) { $letter = "$($byLabel[0].Letter)".ToUpper() }
+        }
+        [pscustomobject]@{ Index = [int]$r.Index; Letter = $letter }
+    })
+}
+
+# MakeMKV numbers the connected drives disc:0..N-1. When every drive but one is being ripped
+# and each rip's index is known, the free drive's index is the one number left - no MakeMKV
+# query needed (it would wait behind the running rips). Returns -1 when that cannot be told
+# for certain. The answer is never a busy index.
+function Get-FreeDriveIndex {
+    param([int[]]$BusyIndices = @(), [int]$DriveCount = 0)
+    $busy = @($BusyIndices | Sort-Object -Unique)
+    if ($DriveCount -lt 1 -or $busy.Count -ne ($DriveCount - 1)) { return -1 }
+    if (@($busy | Where-Object { $_ -lt 0 -or $_ -ge $DriveCount }).Count -gt 0) { return -1 }
+    foreach ($i in 0..($DriveCount - 1)) { if ($busy -notcontains $i) { return $i } }
+    return -1
+}
+
 # Decides, from Windows' disc types alone (no MakeMKV), whether to go straight to the audio
 # CD hand-off. Returns the drive letter to hand over, or "" to carry on to MakeMKV:
 # - -Drive given: only when that drive holds an audio CD.
@@ -2170,6 +2242,55 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
     }
 }
 
+# ========== ANOTHER MAKEMKV RIP RUNNING: USE THE NEXT FREE DRIVE ==========
+# MakeMKV's drive query waits behind a running rip (2026-11-26: it timed out asking about
+# D:, the drive being ripped, while the new disc sat in F:). Work out from Windows and the
+# running rip's log which drive is busy, move on to the free drive with a DVD / Blu-ray,
+# and take its disc:N without asking MakeMKV when that is certain.
+$script:FreeDriveIndex = -1
+$mkvWinDrives = @()
+if ($DriveIndex -lt 0 -and $preMkvRunning) {
+    $mkvRips = @(Get-MakeMkvRips)
+    if ($mkvRips.Count -gt 0) {
+        $mkvWinDrives = @(Get-WindowsOpticalDrives)
+        $mkvBusy = @(Get-MakeMkvBusyDrives -Rips $mkvRips -LogDir (Join-Path $script:Config_TempRoot 'logs') -WinDrives $mkvWinDrives)
+        $mkvBusyLetters = @($mkvBusy | Where-Object { $_.Letter } | ForEach-Object { $_.Letter })
+        foreach ($w in $mkvWinDrives) { if ($mkvBusyLetters -contains $w.Letter) { $w.Busy = $true } }
+        if ($mkvBusyLetters -contains $driveLetter) {
+            if ($PSBoundParameters.ContainsKey('Drive')) {
+                Write-Host "`n$driveLetter is already being ripped by another MakeMKV run - wait for it to finish, or pick another drive with -Drive." -ForegroundColor Red
+                exit 1
+            }
+            $auto = Select-AutoVideoDrive -DrvLines $mkvWinDrives -CurrentLetter $driveLetter
+            $nextLetter = $null
+            if ($auto.Action -eq 'switch') {
+                $v = $auto.Drives[0]
+                Write-Host "$driveLetter is busy with another rip - using $($v.Letter)$(if ($v.DiscName) { " [$($v.DiscName)]" }), the next drive with a $($v.DiscType) (pass -Drive to choose)." -ForegroundColor Cyan
+                $nextLetter = $v.Letter
+            } elseif ($auto.Action -eq 'ask') {
+                Write-Host "$driveLetter is busy with another rip, and $($auto.Drives.Count) other drives have a DVD or Blu-ray." -ForegroundColor Cyan
+                $nextLetter = Read-OtherDrive -Drives $auto.Drives
+            }
+            if (-not $nextLetter) {
+                Write-Host "`n$driveLetter is busy with another rip, and no other drive holds a DVD or Blu-ray to start." -ForegroundColor Yellow
+                $missing = @(Get-DisconnectedOpticalDrives)
+                if ($missing.Count -gt 0) {
+                    Write-Host "Not connected (Windows knows these drives but cannot see them now): $($missing -join ', ')" -ForegroundColor Yellow
+                }
+                Write-Host "Put the disc in a free drive and run this again." -ForegroundColor Yellow
+                exit 1
+            }
+            $driveLetter = Get-NormalizedDriveLetter $nextLetter
+            $driveDescription = "Drive $driveLetter"
+        }
+        # Every running rip's drive known, and this the only free drive: its index is certain
+        $freeDrives = @($mkvWinDrives | Where-Object { -not $_.Busy })
+        if ($mkvBusyLetters.Count -eq $mkvRips.Count -and $freeDrives.Count -eq 1 -and $freeDrives[0].Letter -eq $driveLetter) {
+            $script:FreeDriveIndex = Get-FreeDriveIndex -BusyIndices @($mkvRips | ForEach-Object { $_.Index }) -DriveCount $mkvWinDrives.Count
+        }
+    }
+}
+
 # Now wake the target drive for MakeMKV - only when it is known to be free: not being ripped
 # by ripaudio, and no other MakeMKV running (its disc:N is unknown until the lookup, so no
 # drive is touched mid-rip). -DriveIndex runs never get here with a real letter.
@@ -2179,6 +2300,17 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning -and $cyBusy -notcontains $driveL
 
 if ($DriveIndex -ge 0) {
     $discSource = "disc:$DriveIndex"
+} elseif ($script:FreeDriveIndex -ge 0) {
+    # Worked out above without MakeMKV (it would wait behind the running rip)
+    $discSource = "disc:$($script:FreeDriveIndex)"
+    $drvLines = @($mkvWinDrives)
+    $freeDrv = @($mkvWinDrives | Where-Object { $_.Letter -eq $driveLetter }) | Select-Object -First 1
+    $script:TargetDiscLabel = if ($freeDrv) { $freeDrv.DiscName } else { "" }
+    foreach ($d in $mkvWinDrives) {
+        $tag = if ($d.Busy) { " (busy - another rip)" } elseif ($d.Letter -eq $driveLetter) { " <--" } else { "" }
+        Write-Host "  $($d.Letter) - $($d.Name)$(if ($d.DiscName) { " [$($d.DiscName)]" })$tag" -ForegroundColor $(if ($d.Busy) { 'DarkYellow' } else { 'Gray' })
+    }
+    Write-Host "Using $discSource for $driveLetter (the only free drive; MakeMKV not asked while the other rip runs)" -ForegroundColor Green
 } else {
     # Find which disc:N indices are already in use by running makemkvcon processes
     $busyIndices = @()
@@ -2202,7 +2334,8 @@ if ($DriveIndex -ge 0) {
         # ~30-35s to answer on its own (seen live), but the drive keeps spinning up while we
         # wait, so a retry after 20s is usually quick - better than sitting through a fixed
         # 60s (user request 2026-11-22). Up to 3 attempts.
-        $drvQueryTimeoutSec = 20
+        # While another rip runs, MakeMKV answers slowly (it waits behind that rip): allow 60s
+        $drvQueryTimeoutSec = if ($preMkvRunning) { 60 } else { 20 }
         $drvQueryMaxAttempts = 3
         $drvQueryExitedInTime = $false
         for ($drvAttempt = 1; $drvAttempt -le $drvQueryMaxAttempts; $drvAttempt++) {
@@ -2640,9 +2773,9 @@ if ($title -eq "") {
     # Prompt for confirmation
     $discoveryChoice = $null
     while ($null -eq $discoveryChoice) {
-        $input = Read-Host "[Y] Accept / [E] Edit title / [A] Abort"
-        switch ($input.ToUpper()) {
-            'Y' { $discoveryChoice = 'Y' }
+        $input = Read-Host "[Y] Accept (Enter) / [E] Edit title / [A] Abort"
+        switch ("$input".Trim().ToUpper()) {
+            { $_ -in @('', 'Y') } { $discoveryChoice = 'Y' }
             'E' {
                 $newTitle = Read-Host "Enter title"
                 if ($newTitle -ne "") {
@@ -2665,7 +2798,7 @@ if ($title -eq "") {
                 Write-Host "Aborted." -ForegroundColor Yellow
                 exit 0
             }
-            default { Write-Host "Invalid choice. Enter Y, E, or A." -ForegroundColor Red }
+            default { Write-Host "Invalid choice. Press Enter (or Y), E, or A." -ForegroundColor Red }
         }
     }
 

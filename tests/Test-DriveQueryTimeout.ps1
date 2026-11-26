@@ -189,7 +189,7 @@ try {
 
 Write-Host "`nrip-disc.ps1 - drive lookup waits 20s per attempt, then offers a retry" -ForegroundColor Cyan
 $ripText = [IO.File]::ReadAllText($ripDiscPath)
-Assert-True ($ripText -match '\$drvQueryTimeoutSec = 20\b') "the startup drive lookup gives up after 20s, not 60s"
+Assert-True ($ripText -match '\$drvQueryTimeoutSec = if \(\$preMkvRunning\) \{ 60 \} else \{ 20 \}') "the startup drive lookup gives up after 20s (60s only while another rip runs)"
 Assert-True ($ripText -match '\$drvQueryMaxAttempts = 3\b') "up to 3 attempts"
 Assert-True ($ripText -match "-TimeoutSec \`$drvQueryTimeoutSec -OnTick \`$drvTick") "the lookup shows a countdown while it waits"
 Assert-True ($ripText.Contains("[R] Retry (usually quick once the drive is awake) / Enter = R / [A] Abort")) "a timeout asks to retry instead of exiting"
