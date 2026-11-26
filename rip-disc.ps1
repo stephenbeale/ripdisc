@@ -1526,6 +1526,82 @@ function Get-FreeDriveIndex {
     return -1
 }
 
+# Splits text into pieces no longer than -Width, breaking at a space when there is one in
+# the second half of the piece (so URLs and paths without spaces are cut hard).
+function Split-TableText {
+    param([string]$Text, [int]$Width)
+    $Text = "$Text"
+    if ($Width -lt 1 -or $Text.Length -le $Width) { return ,@($Text) }
+    $pieces = [System.Collections.Generic.List[string]]::new()
+    while ($Text.Length -gt $Width) {
+        $cut = $Text.LastIndexOf(' ', $Width)
+        if ($cut -lt [int]($Width / 2)) { $cut = $Width }
+        $pieces.Add($Text.Substring(0, $cut).TrimEnd())
+        $Text = $Text.Substring($cut).TrimStart()
+    }
+    if ($Text) { $pieces.Add($Text) }
+    return ,@($pieces)
+}
+
+# Lays out a two-column summary table (label | value) under a heading, in plain ASCII so
+# it shows the same in Windows PowerShell 5.1 and any terminal. -Rows are objects with
+# Label, Value and an optional Color; a long value wraps onto extra lines in its column.
+# Returns line objects (Kind = border / heading / row, Text, Label, Value, Color); the
+# Write-InfoTable below prints them. -MaxWidth is the whole table's width limit.
+function Format-InfoTable {
+    param([string]$Heading, [object[]]$Rows = @(), [int]$MaxWidth = 100)
+    $Rows = @($Rows | Where-Object { $_ -and "$($_.Value)" -ne '' })
+    $labelWidth = [math]::Max(1, (@($Rows | ForEach-Object { "$($_.Label)".Length }) + 0 | Measure-Object -Maximum).Maximum)
+    $headingNeeds = "$Heading".Length - $labelWidth - 3
+    $longest = (@($Rows | ForEach-Object { "$($_.Value)".Length }) + @($headingNeeds) | Measure-Object -Maximum).Maximum
+    # "| " + label + " | " + value + " |" = label + value + 7
+    $valueWidth = [math]::Max(20, [math]::Min([int]$longest, $MaxWidth - $labelWidth - 7))
+    $inner = $labelWidth + $valueWidth + 3
+    $lines = [System.Collections.Generic.List[object]]::new()
+    $line = { param($kind, $text, $label = '', $value = '', $color = 'White')
+        $lines.Add([pscustomobject]@{ Kind = $kind; Text = $text; Label = $label; Value = $value; Color = $color }) }
+    $top = '+' + ('-' * ($inner + 2)) + '+'
+    $mid = '+' + ('-' * ($labelWidth + 2)) + '+' + ('-' * ($valueWidth + 2)) + '+'
+    & $line 'border' $top
+    foreach ($h in (Split-TableText -Text $Heading -Width $inner)) {
+        & $line 'heading' ('| ' + $h.PadRight($inner) + ' |') '' $h
+    }
+    & $line 'border' $mid
+    foreach ($r in $Rows) {
+        $color = if ($r.Color) { "$($r.Color)" } else { 'White' }
+        $first = $true
+        foreach ($piece in (Split-TableText -Text "$($r.Value)" -Width $valueWidth)) {
+            $label = if ($first) { "$($r.Label)" } else { '' }
+            & $line 'row' ('| ' + $label.PadRight($labelWidth) + ' | ' + $piece.PadRight($valueWidth) + ' |') $label.PadRight($labelWidth) $piece.PadRight($valueWidth) $color
+            $first = $false
+        }
+    }
+    & $line 'border' $mid
+    return $lines.ToArray()
+}
+
+# Prints Format-InfoTable's lines: borders in cyan, labels gray, values in each row's color.
+# The table is limited to the console width (100 when it cannot be read).
+function Write-InfoTable {
+    param([string]$Heading, [object[]]$Rows = @())
+    $consoleWidth = 100
+    try { $w = $Host.UI.RawUI.WindowSize.Width; if ($w -gt 40) { $consoleWidth = $w - 1 } } catch { }
+    foreach ($l in (Format-InfoTable -Heading $Heading -Rows $Rows -MaxWidth ([math]::Min($consoleWidth, 120)))) {
+        if ($l.Kind -eq 'border') { Write-Host $l.Text -ForegroundColor Cyan }
+        elseif ($l.Kind -eq 'heading') {
+            Write-Host '| ' -ForegroundColor Cyan -NoNewline
+            Write-Host $l.Text.Substring(2, $l.Text.Length - 4) -ForegroundColor White -NoNewline
+            Write-Host ' |' -ForegroundColor Cyan
+        } else {
+            Write-Host '| ' -ForegroundColor Cyan -NoNewline
+            Write-Host $l.Label -ForegroundColor Gray -NoNewline
+            Write-Host ' | ' -ForegroundColor Cyan -NoNewline
+            Write-Host $l.Value -ForegroundColor $l.Color -NoNewline
+            Write-Host ' |' -ForegroundColor Cyan
+        }
+    }
+}
+
 # Decides, from Windows' disc types alone (no MakeMKV), whether to go straight to the audio
 # CD hand-off. Returns the drive letter to hand over, or "" to carry on to MakeMKV:
 # - -Drive given: only when that drive holds an audio CD.
@@ -2755,20 +2831,19 @@ if ($title -eq "") {
     }
 
     # Show discovered metadata summary
-    Write-Host "`n--- Discovered Metadata ---" -ForegroundColor Cyan
-    Write-Host "  Title:  $title" -ForegroundColor White
-    if ($picked.Year) { Write-Host "  Year:   $($picked.Year)" -ForegroundColor White }
-    if ($picked.ImdbId) { Write-Host "  IMDb:   $($picked.ImdbId) (https://www.imdb.com/title/$($picked.ImdbId)/)" -ForegroundColor White }
-    if ($picked.Description) { Write-Host "  About:  $($picked.Description)" -ForegroundColor White }
-    Write-Host "  Format: $(if ($Bluray) { 'Blu-ray' } else { 'DVD' })" -ForegroundColor White
-    Write-Host "  Type:   $(Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray)" -ForegroundColor White
-    if ($Series) {
-        if ($Season -gt 0) {
-            Write-Host "  Season: $Season" -ForegroundColor White
-        }
-        Write-Host "  Disc:   $Disc" -ForegroundColor White
-    }
-    Write-Host "----------------------------" -ForegroundColor Cyan
+    # Empty values are left out by Write-InfoTable
+    Write-Host ""
+    Write-InfoTable -Heading "Discovered Metadata" -Rows @(
+        [pscustomobject]@{ Label = 'Title'; Value = $title }
+        [pscustomobject]@{ Label = 'Year'; Value = "$($picked.Year)" }
+        [pscustomobject]@{ Label = 'IMDb'; Value = $(if ($picked.ImdbId) { "$($picked.ImdbId)" }) }
+        [pscustomobject]@{ Label = 'Link'; Value = $(if ($picked.ImdbId) { "https://www.imdb.com/title/$($picked.ImdbId)/" }) }
+        [pscustomobject]@{ Label = 'About'; Value = "$($picked.Description)" }
+        [pscustomobject]@{ Label = 'Format'; Value = $(if ($Bluray) { 'Blu-ray' } else { 'DVD' }) }
+        [pscustomobject]@{ Label = 'Type'; Value = (Get-ContentTypeLabel -IsGenreSeries:$script:IsGenreSeries -GenreLabel $script:GenreLabel -Series:$Series -Bluray:$Bluray) }
+        [pscustomobject]@{ Label = 'Season'; Value = $(if ($Series -and $Season -gt 0) { "$Season" }) }
+        [pscustomobject]@{ Label = 'Disc'; Value = $(if ($Series) { "$Disc" }) }
+    )
 
     # Prompt for confirmation
     $discoveryChoice = $null
@@ -3035,11 +3110,6 @@ if ($Series -and -not $script:IsGenreSeries) {
     }
 }
 
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Ready to rip: $title" -ForegroundColor White
-if ($safeTitle -ne $title) {
-    Write-Host "Folder/file name will be sanitized to: `"$safeTitle`"" -ForegroundColor Yellow
-}
 # Full destination, category folder included (F:\Surf\..., F:\DVDs\...), built the same
 # way as $finalOutputDir further down so what is shown is where the files go.
 $previewDrive = Get-NormalizedDriveLetter $OutputDrive
@@ -3048,39 +3118,29 @@ $outputFolderPreview = if ($script:IsGenreSeries) { "$previewDrive\$($script:Gen
     elseif ($Series) { "$previewDrive\Series\$safeTitle$previewSeason\Disc$Disc" }
     else { Join-Path $movieParentDir $script:MediaFolderName }
 if ($Extras -and -not $Series) { $outputFolderPreview = Join-Path $outputFolderPreview "extras" }
-Write-Host "Output folder: $outputFolderPreview" -ForegroundColor White
-if ($script:IsGenreSeries) {
-    if ($Season -gt 0) {
-        $seasonTagPreview = "S{0:D2}" -f $Season
-        Write-Host "Type: $($script:GenreLabel) Series - Season $Season ($seasonTagPreview), Disc $Disc" -ForegroundColor White
-    } else {
-        Write-Host "Type: $($script:GenreLabel) Series - Disc $Disc" -ForegroundColor White
-    }
-} elseif ($script:GenreLabel) {
-    $genreLabel = $script:GenreLabel
-    $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: $genreLabel - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
-} elseif ($Series) {
-    if ($Season -gt 0) {
-        $seasonTagPreview = "S{0:D2}" -f $Season
-        Write-Host "Type: TV Series - Season $Season ($seasonTagPreview), Disc $Disc" -ForegroundColor White
-    } else {
-        Write-Host "Type: TV Series - Disc $Disc (no season folder)" -ForegroundColor White
-    }
-    Write-Host "Episodes: numbered from E$("{0:D2}" -f $StartEpisode) as $(Get-SeriesEpisodeFileName -Title $safeTitle -Season $Season -Episode $StartEpisode -Extension '.mp4')" -ForegroundColor White
-} elseif ($Bluray) {
-    $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: Blu-ray - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
-} else {
-    $discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
-    Write-Host "Type: Movie - $discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })" -ForegroundColor White
-}
-if ($script:DiscType) {
-    Write-Host "Disc Format: $($script:DiscType)" -ForegroundColor Yellow
-}
-Write-Host "Using: $driveDescription" -ForegroundColor Yellow
-Write-Host "Output Drive: $OutputDrive" -ForegroundColor Yellow
-Write-Host "========================================" -ForegroundColor Cyan
+$discTypeLabel = if ($Extras) { "Extras" } elseif ($Disc -eq 1) { "Main Feature" } else { "Special Features" }
+$discPart = "$discTypeLabel$(if (-not $Extras) { " (Disc $Disc)" })"
+$seasonTagPreview = if ($Season -gt 0) { "S{0:D2}" -f $Season } else { "" }
+$readyType = if ($script:IsGenreSeries) {
+        if ($Season -gt 0) { "$($script:GenreLabel) Series - Season $Season ($seasonTagPreview), Disc $Disc" } else { "$($script:GenreLabel) Series - Disc $Disc" }
+    } elseif ($script:GenreLabel) { "$($script:GenreLabel) - $discPart" }
+    elseif ($Series) {
+        if ($Season -gt 0) { "TV Series - Season $Season ($seasonTagPreview), Disc $Disc" } else { "TV Series - Disc $Disc (no season folder)" }
+    } elseif ($Bluray) { "Blu-ray - $discPart" }
+    else { "Movie - $discPart" }
+$readyEpisodes = if ($Series -and -not $script:IsGenreSeries) {
+    "from E$("{0:D2}" -f $StartEpisode) as $(Get-SeriesEpisodeFileName -Title $safeTitle -Season $Season -Episode $StartEpisode -Extension '.mp4')"
+} else { "" }
+Write-Host ""
+Write-InfoTable -Heading "Ready to rip: $title" -Rows @(
+    [pscustomobject]@{ Label = 'Sanitized name'; Value = $(if ($safeTitle -ne $title) { $safeTitle }); Color = 'Yellow' }
+    [pscustomobject]@{ Label = 'Output folder'; Value = $outputFolderPreview }
+    [pscustomobject]@{ Label = 'Type'; Value = $readyType }
+    [pscustomobject]@{ Label = 'Episodes'; Value = $readyEpisodes }
+    [pscustomobject]@{ Label = 'Disc format'; Value = "$($script:DiscType)"; Color = 'Yellow' }
+    [pscustomobject]@{ Label = 'Using'; Value = $driveDescription; Color = 'Yellow' }
+    [pscustomobject]@{ Label = 'Output drive'; Value = "$OutputDrive"; Color = 'Yellow' }
+)
 $host.UI.RawUI.WindowTitle = "rip-disc - INPUT"
 while ($true) {
     $response = "$(Read-Host 'Enter = start, [E] Edit, [A] Abort')".Trim().ToUpper()
