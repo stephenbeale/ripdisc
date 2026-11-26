@@ -288,14 +288,14 @@ function Show-CoffeeBadge {
     $c = "   _/  \_  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host (">> https://siteground.com/go/steve (affiliate)".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Yellow; Write-Host "$vt" -ForegroundColor DarkGray
     $c = "  /______\ "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("Click to check it out and support my projects!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
     Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("".PadRight($w)) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("  More free tools by me:".PadRight($w)) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
+    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("  More free tools by me - click a link to try one:".PadRight($w)) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
     foreach ($p in @(
-        @("ripaudio", "rip audio CDs, tagged and named", "https://github.com/stephenbeale/ripaudio"),
-        @("Flyweight", "a lightweight video editor", "https://github.com/stephenbeale/flyweight"),
-        @("Waffley", "learn a language through colours", "https://waffley.app")
+        @("ripaudio", "Rip audio CDs to FLAC or MP3, fully tagged", "https://github.com/stephenbeale/ripaudio"),
+        @("Flyweight", "Cut, annotate and export YouTube videos", "https://github.com/stephenbeale/flyweight"),
+        @("Waffley", "Language game: vocab, verbs, typing, speaking", "https://waffley.app")
     )) {
-        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   " + $p[0]) -NoNewline -ForegroundColor DarkCyan; Write-Host (" - " + $p[1]).PadRight($w - 3 - $p[0].Length) -NoNewline -ForegroundColor DarkGray; Write-Host "$vt" -ForegroundColor DarkGray
-        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("     " + $p[2]).PadRight($w) -NoNewline -ForegroundColor DarkGray; Write-Host "$vt" -ForegroundColor DarkGray
+        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   " + $p[0]) -NoNewline -ForegroundColor Green; Write-Host (" - " + $p[1]).PadRight($w - 3 - $p[0].Length) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
+        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   >> " + $p[2]).PadRight($w) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
     }
     Write-Host "  $bl$hz$br" -ForegroundColor DarkGray
     Write-Host ""

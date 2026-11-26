@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-26 - End Screen: Clearer "More Free Tools" Links
+
+### Changed
+- The "More free tools by me" section of the end-of-rip box (`Show-CoffeeBadge` in `rip-disc.ps1` and `continue-rip.ps1`) was dim grey and easy to miss. Tool names are now bright green, the one-liners light grey, and each link sits on its own line in bright cyan behind a `>>` marker, like the coffee link. Windows Terminal makes the URLs Ctrl+clickable; no escape codes are used, so Windows PowerShell 5.1 and pwsh render the same. Box width unchanged (every line 60 wide).
+- Descriptions now say what each tool does for you: ripaudio "Rip audio CDs to FLAC or MP3, fully tagged", Flyweight "Cut, annotate and export YouTube videos", Waffley "Language game: vocab, verbs, typing, speaking" (it is a vocabulary and verb-conjugation game with typing and speech phases, not only colours).
+- The coffee box stays first and brightest.
+
 ## 2026-11-26 - Summary Tables
 
 ### Changed
