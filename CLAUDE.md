@@ -19,6 +19,10 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-27 - Pointer: ripaudio work only (no ripdisc code changed; main = 3dbc0bb)
+
+This session ran in the ripaudio repo (launched from here). ripaudio PRs #173 (87217f4, `[unknown]` album artist + `-LiteralPath` everywhere), #174 (76c1631, compilations go to `Various`) and #175 (86108ff, Disc N of a set takes its titles from the sibling disc's MusicBrainz release; prints the cdtoc attach link) were merged after a real Pure Guitar Moods rip; none run on a real rip yet. Full notes and the NEXT SESSION list are in ripaudio's CLAUDE.md under 2026-11-27. The ripdisc NEXT SESSION lists above are unchanged. Untracked `ripdisc-config.json.bak-20261029` is still undecided (do not commit, delete or move).
+
 ### 2026-11-26 - Next free drive during a rip (#201), summary tables (#202), end-screen links (#203) (main = bf1e64c)
 
 **#201 MERGED (bf1e64c):** trigger: King George ripping D: (disc:1), Meek's Cutoff in F:, run without `-Drive` timed out after 20 s because the MakeMKV drive query waits behind a running rip (earlier second rips only worked inside the 5 min drive cache). New `Get-MakeMkvRips`, `Get-MakeMkvBusyDrives` (busy letter from the running rip's log "Drive: X:" line whose MakeMKV command names that disc:N and folder; `-DriveIndex` logs not trusted; else a unique volume label matching the title folder), `Get-FreeDriveIndex` (if every other drive is busy and indices are known, the free index is the number left; MakeMKV not queried). A busy default drive goes through `Select-AutoVideoDrive` (switch/ask/stop); `-Drive` naming the busy drive stops at once; the MakeMKV query waits 60 s (not 20 s) while another rip runs. Enter = Y at "[Y] Accept (Enter) / [E] Edit title / [A] Abort". Verified live (D: busy, F: picked, disc:0; the real Meek's Cutoff run worked). Test-AutoVideoDrive 84/84. **Open PR boxes:** Enter at Discovered Metadata on a real run; two free drives with DVDs asks which.
