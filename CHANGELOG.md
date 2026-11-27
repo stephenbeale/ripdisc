@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-27 - End Screen: Matching Icons, Even Spacing, Coffee at Both Ends
+
+### Changed
+- **The end-of-run box (`rip-disc.ps1` and `continue-rip.ps1`) now uses one layout for every section.** Each section has a 4-line ASCII icon in a fixed-width left column, text on the right, the link on its own line behind `>>`, and one blank row between sections. Each tool has its own icon (disc for ripdisc, notes for ripaudio, film strip for Flyweight, speech bubble for Waffley), the same height as the coffee cup and the SiteGround building.
+- The coffee ask now appears at the bottom as well as the top (shorter, same cup). Wording, links, the "(affiliate)" disclosure and the tool one-liners are unchanged; colours are unchanged.
+- The box is 72 columns wide (was 64) and every row is exactly that width in Windows PowerShell 5.1 and pwsh, including the bottom border. Frame rows are now built by one helper instead of a hand-padded line each.
 ## 2026-11-26 - End Screen: Clearer "More Free Tools" Links
 
 ### Changed
