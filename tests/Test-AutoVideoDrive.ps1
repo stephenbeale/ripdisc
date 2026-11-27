@@ -26,7 +26,7 @@ function Import-FunctionFromScript {
     return $fn.Extent.Text
 }
 
-foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives', 'Get-WindowsOpticalDrives', 'Get-AudioCdShortcutDrive', 'Get-CyanripBusyDrives')) {
+foreach ($name in @('Get-OtherDiscDrives', 'Select-AutoVideoDrive', 'Get-DisconnectedOpticalDrives', 'Get-WindowsOpticalDrives', 'Get-AudioCdShortcutDrive', 'Get-CyanripBusyDrives', 'Get-RipDriveClaimLetters')) {
     . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath $ripDiscPath -FunctionName $name)))
 }
 . ([scriptblock]::Create((Import-FunctionFromScript -ScriptPath (Join-Path $repoRoot 'Load-Config.ps1') -FunctionName 'Test-MusicLibraryFolder')))
@@ -258,6 +258,19 @@ Assert-Equal $true ($ripText3.Contains('$drvQueryTimeoutSec = if ($preMkvRunning
 # 2026-11-26: Enter at "[Y] Accept / [E] Edit title / [A] Abort" said "Invalid choice"
 Assert-Equal $true ($ripText3.Contains('$input = Read-Host "[Y] Accept (Enter) / [E] Edit title / [A] Abort"')) 'Discovered Metadata prompt says Enter accepts'
 Assert-Equal $true ($ripText3.Contains('{ $_ -in @('''', ''Y'') } { $discoveryChoice = ''Y'' }')) 'Enter (empty answer) accepts the discovered metadata'
+
+Write-Host "`nDrive claims (rip-audio.ps1 picked a drive, cyanrip not started yet)" -ForegroundColor Cyan
+$claimDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ripdisc-claims-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $claimDir | Out-Null
+try {
+    Set-Content -LiteralPath (Join-Path $claimDir 'F.claim') -Value @('Pid=4242', 'ProcessStart=2026-11-27T08:00:00', 'Claimed=08:00', 'Tool=ripaudio', 'Album=')
+    Set-Content -LiteralPath (Join-Path $claimDir 'G.claim') -Value @('Pid=4243', 'ProcessStart=2026-11-27T07:00:00')
+    $stamps = { param($id) switch ($id) { 4242 { '2026-11-27T08:00:00' } 4243 { '2026-11-27T09:59:00' } } }
+    Assert-Equal 'F:' ((Get-RipDriveClaimLetters -Dir $claimDir -GetStamp $stamps) -join ',') 'a live claim counts; G:''s process id was reused by another program, so it does not'
+    Assert-Equal 0 @(Get-RipDriveClaimLetters -Dir $claimDir -GetStamp { param($id) $null }).Count 'claim owners gone: nothing claimed'
+    Assert-Equal 0 @(Get-RipDriveClaimLetters -Dir (Join-Path $claimDir 'none')).Count 'no claim folder: nothing claimed'
+} finally { Remove-Item -LiteralPath $claimDir -Recurse -Force -ErrorAction SilentlyContinue }
+Assert-Equal $true ($ripText3.Contains('@(Get-CyanripBusyDrives) + @(Get-RipDriveClaimLetters)')) 'the music offer treats claimed drives as busy'
 
 Write-Host "`n$script:Passed passed, $script:Failed failed" -ForegroundColor $(if ($script:Failed) { 'Red' } else { 'Green' })
 if ($script:Failed) { exit 1 }
