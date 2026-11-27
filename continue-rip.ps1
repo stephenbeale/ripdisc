@@ -257,36 +257,71 @@ function Show-StepsSummary {
 }
 
 function Show-CoffeeBadge {
+    # End-of-run promo box. Every section has the same shape: a 4-line ASCII icon in a
+    # fixed-width left column, up to 4 lines of text on the right, a blank row between sections.
     $vt = [char]0x2551
-    $w  = 60
+    $w  = 68                       # inner width; the whole box is 2 + 1 + 68 + 1 = 72 columns
+    $iw = 9                        # icon column width (icons are at most 8 wide)
+    $tw = $w - 1 - $iw - 2         # text column width (1 left margin, 2 gap)
     $hz = [string]::new([char]0x2550, $w)
     $tl = [char]0x2554
     $tr = [char]0x2557
     $bl = [char]0x255A
     $br = [char]0x255D
+    $blank = { Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host (" " * $w) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray }
+    $row = {
+        param([string]$Icon, $IconColor, [string]$Text, $TextColor)
+        if ($Text.Length -gt $tw) { $Text = $Text.Substring(0, $tw) }
+        Write-Host "  $vt " -NoNewline -ForegroundColor DarkGray
+        Write-Host $Icon.PadRight($iw + 2) -NoNewline -ForegroundColor $IconColor
+        if ($Text) { Write-Host $Text.PadRight($tw) -NoNewline -ForegroundColor $TextColor }
+        else       { Write-Host (" " * $tw) -NoNewline }
+        Write-Host "$vt" -ForegroundColor DarkGray
+    }
+    $cup  = @(" ) ) )", "(_____)", "|     |", "'-----'")
+    $bldg = @(" .----.", " |[][]|", " |_||_|", "/______\")
     Write-Host ""
     Write-Host "  $tl$hz$tr" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   ) ) )".PadRight($w)) -NoNewline -ForegroundColor DarkYellow; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "  (_____)  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host ("Enjoying this app? Consider buying me a coffee!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor White; Write-Host "$vt" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("  |     |".PadRight($w)) -NoNewline -ForegroundColor DarkYellow; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "  |     |  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host (">> https://buymeacoffee.com/stephenbeale".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Yellow; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "  '-----'"; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkYellow; Write-Host ("            ^^^ click here! ^^^".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("".PadRight($w)) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "   .----.  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("I host all my sites on SiteGround - highly".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "   |    |  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("recommended if you want to make a site!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "   '----'"; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("".PadRight($w - $c.Length)) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "   _/  \_  "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host (">> https://siteground.com/go/steve (affiliate)".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Yellow; Write-Host "$vt" -ForegroundColor DarkGray
-    $c = "  /______\ "; Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host $c -NoNewline -ForegroundColor DarkCyan; Write-Host ("Click to check it out and support my projects!".PadRight($w - $c.Length)) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("".PadRight($w)) -NoNewline; Write-Host "$vt" -ForegroundColor DarkGray
-    Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("  More free tools by me - click a link to try one:".PadRight($w)) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
+    & $blank
+    # --- coffee (top) ---
+    & $row $cup[0] 'DarkYellow' "Enjoying this app?" 'White'
+    & $row $cup[1] 'DarkYellow' "Consider buying me a coffee!" 'White'
+    & $row $cup[2] 'DarkYellow' ">> https://buymeacoffee.com/stephenbeale" 'Yellow'
+    & $row $cup[3] 'DarkYellow' "^^^ click here! ^^^" 'Cyan'
+    & $blank
+    # --- SiteGround ---
+    & $row $bldg[0] 'DarkCyan' "I host all my sites on SiteGround - highly" 'Gray'
+    & $row $bldg[1] 'DarkCyan' "recommended if you want to make a site!" 'Gray'
+    & $row $bldg[2] 'DarkCyan' ">> https://siteground.com/go/steve (affiliate)" 'Yellow'
+    & $row $bldg[3] 'DarkCyan' "Click to check it out and support my projects!" 'Cyan'
+    & $blank
+    Write-Host "  $vt " -NoNewline -ForegroundColor DarkGray; Write-Host ("More free tools by me - click a link to try one:".PadRight($w - 1)) -NoNewline -ForegroundColor White; Write-Host "$vt" -ForegroundColor DarkGray
+    & $blank
+    # --- other tools ---
+    $icons = @{
+        ripdisc   = @("  .---.", " / (o) \", " \     /", "  '---'")
+        ripaudio  = @("  .---,", "  |   |", " _|  _|", "(_) (_)")
+        Flyweight = @(".-----.", "|o|=|o|", "|o|=|o|", "'-----'")
+        Waffley   = @(".-----.", "| ... |", "'--.--'", "   '/")
+    }
     foreach ($p in @(
         @("ripaudio", "Rip audio CDs to FLAC or MP3, fully tagged", "https://github.com/stephenbeale/ripaudio"),
         @("Flyweight", "Cut, annotate and export YouTube videos", "https://github.com/stephenbeale/flyweight"),
         @("Waffley", "Language game: vocab, verbs, typing, speaking", "https://waffley.app")
     )) {
-        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   " + $p[0]) -NoNewline -ForegroundColor Green; Write-Host (" - " + $p[1]).PadRight($w - 3 - $p[0].Length) -NoNewline -ForegroundColor Gray; Write-Host "$vt" -ForegroundColor DarkGray
-        Write-Host "  $vt" -NoNewline -ForegroundColor DarkGray; Write-Host ("   >> " + $p[2]).PadRight($w) -NoNewline -ForegroundColor Cyan; Write-Host "$vt" -ForegroundColor DarkGray
+        $ic = $icons[$p[0]]
+        & $row $ic[0] 'DarkGreen' $p[0] 'Green'
+        & $row $ic[1] 'DarkGreen' $p[1] 'Gray'
+        & $row $ic[2] 'DarkGreen' (">> " + $p[2]) 'Cyan'
+        & $row $ic[3] 'DarkGreen' "" 'Gray'
+        & $blank
     }
+    # --- coffee (bottom, short) ---
+    & $row $cup[0] 'DarkYellow' "" 'White'
+    & $row $cup[1] 'DarkYellow' "Enjoyed this? A coffee keeps the tools coming!" 'White'
+    & $row $cup[2] 'DarkYellow' ">> https://buymeacoffee.com/stephenbeale" 'Yellow'
+    & $row $cup[3] 'DarkYellow' "" 'White'
+    & $blank
     Write-Host "  $bl$hz$br" -ForegroundColor DarkGray
     Write-Host ""
 }
