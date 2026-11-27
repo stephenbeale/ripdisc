@@ -19,6 +19,21 @@ Older session notes (2026-01-19 to 2026-08-31) are archived verbatim in
 [docs/session-history.md](docs/session-history.md). Search there for the history
 behind a feature or fix; only the current notes are kept here.
 
+### 2026-11-27 (evening) - No-disc guard and "anything to rip?" check (branch `fix/no-disc-guard`, PR open, NOT merged; main = cf257dd)
+
+**Trigger 1:** a real run with D: empty. MakeMKV lists drives, not discs, so the scan found 0 titles and auto-discovery offered title searches. **Fix:** NO DISC GUARD after the audio CD guard and before discovery (also runs with -title). `Get-DriveDiscState` returns 'ok' / 'empty' (Win32_CDROMDrive.MediaLoaded false: "No disc in D: - nothing to rip.", [R] Retry / Enter stop) / 'unreadable' (waits up to 15 s, then [R] Retry / [C] Carry on anyway / Enter stop). Helper `Test-DriveMediaLoaded`.
+**Trigger 2:** a run asked for output drive and library, then said "D: is busy with another rip, and no other drive holds a DVD or Blu-ray". **Fix:** "ANYTHING TO RIP?" check before the output drive prompt (`Get-FreeDiscSummary`, `Get-NothingToRipMessage` in Load-Config.ps1). Windows only, ~1.5 s: drives with a disc minus running rips (makemkvcon `mkv` processes, cyanrip -d letters, live rip-audio claims). Messages "No disc in any drive - nothing to rip." or "Every disc in a drive (D:) is already being ripped (1 rip running) - nothing new to rip." with [R] Retry / Enter stop. If Windows cannot be asked, it carries on. `RIPDISC_SKIP_DISC_CHECK=1` turns it off; Test-OutputDriveAndGenre sets it for its real-script runs (they hung at the prompt without it).
+**Tests:** Test-NoDiscGuard 25/25 (powershell.exe and pwsh); full suite 26 files pass. Live: with The Girl With All the Gifts ripping in D: and no other disc, summary Loaded 1 / Busy 1 / Free 0 with the "already being ripped" message. **Not yet seen with all drives empty.**
+**Unticked PR boxes:** all drives empty, `.\rip-disc.ps1` shows "No disc in any drive" before any question; explicit empty `-Drive` with a disc elsewhere shows the per-drive "No disc in X:" guard.
+
+### 2026-11-27 (evening) - NEXT SESSION items
+
+1. Real check of the "No disc in any drive" message with empty drives, then merge `fix/no-disc-guard` via the repo workflow (sign-off comment, `gh pr merge --squash --delete-branch`).
+2. ripaudio: build one cyanrip run per track (check cue/log behaviour first), test on a real CD, decide on the draft PR (ripaudio #180). cyanrip writes nothing until the whole disc is done, so its staging is not effective yet; see ripaudio's CLAUDE.md.
+3. G: is the WD Elements USB disk (it was also F: in earlier notes).
+4. Carry forward the earlier NEXT SESSION lists above unchanged (2026-11-26, 2026-11-25, 2026-11-24 and older, plus the PR boxes #205 end screen and #206 music offer skipping a claimed drive).
+5. Still undecided: untracked `ripdisc-config.json.bak-20261029` (do not commit, delete or move).
+
 ### 2026-11-27 - Pointer: ripaudio work only (main = f6ac028)
 
 This session mostly ran in the ripaudio repo (launched from here); the only ripdisc code changes were #205 and #206 below. ripaudio PRs #173 (87217f4, `[unknown]` album artist + `-LiteralPath` everywhere), #174 (76c1631, compilations go to `Various`) and #175 (86108ff, Disc N of a set takes its titles from the sibling disc's MusicBrainz release; prints the cdtoc attach link) were merged after a real Pure Guitar Moods rip; none run on a real rip yet. Full notes and the NEXT SESSION list are in ripaudio's CLAUDE.md under 2026-11-27. Later the same day: ripdisc PR #205 (ae99475, matching `Show-CoffeeBadge` redesign with icons, 72 columns, coffee at both ends; ripaudio twin #177; not seen on a real run) and PR #206 (f6ac028, the music-library offer treats drives claimed by rip-audio.ps1 as busy via `Get-RipDriveClaimLetters` reading `%LOCALAPPDATA%\RipTools\drive-claims\<letter>.claim`; ripaudio twin #178; Test-AutoVideoDrive 88/88, suite 25 files; not run live). Pure Guitar Moods Discs 2-4 were fixed by hand (see ripaudio notes). Real-run PR boxes still to tick: #205 end screen, #206 music offer skips a just-claimed drive. ripdisc's own video rips write no claims (optional idea). The ripdisc NEXT SESSION lists above are otherwise unchanged. Untracked `ripdisc-config.json.bak-20261029` is still undecided (do not commit, delete or move).

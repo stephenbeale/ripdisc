@@ -116,6 +116,20 @@ $script:LaunchParams = @{} + $PSBoundParameters
 # decides both whether to prompt and whether the continue-rip.ps1 retry command carries it.
 $script:StartEpisodeExplicit = $PSBoundParameters.ContainsKey('StartEpisode')
 if (-not $PSBoundParameters.ContainsKey('Drive')) { $Drive = $script:Config_DefaultInputDrive }
+
+# ========== ANYTHING TO RIP? ==========
+# Before any question: stop at once when no drive holds a disc, or every disc is already
+# being ripped (see Get-FreeDiscSummary in Load-Config.ps1). Windows only; no disc is read.
+# RIPDISC_SKIP_DISC_CHECK=1 turns it off for tests that run this script on a real PC.
+while ($env:RIPDISC_SKIP_DISC_CHECK -ne '1') {
+    $nothingMsg = Get-NothingToRipMessage -Summary (Get-FreeDiscSummary)
+    if (-not $nothingMsg) { break }
+    Write-Host "`n$nothingMsg" -ForegroundColor Yellow
+    Write-Host "  [R] Retry (put a disc in first)" -ForegroundColor White
+    Write-Host "  [A] or Enter: stop" -ForegroundColor Gray
+    if ("$(Read-Host 'Choice')".Trim().ToUpper() -ne 'R') { exit 1 }
+}
+
 # No -OutputDrive: ask, with the config default on Enter, rather than silently using it.
 # The answer counts as explicit from here on (continue-rip / ripaudio commands, [D] restart).
 if (-not $PSBoundParameters.ContainsKey('OutputDrive')) {
@@ -1269,6 +1283,51 @@ function Get-DiscVolumeLabel {
         Write-Log "Volume label lookup failed for ${letter}: $($_.Exception.Message)"
     }
     return ""
+}
+
+# Is there a readable disc in the drive? 2026-11-27: D: was empty, MakeMKV still listed the
+# drive (it lists drives, not discs), its scan found 0 titles, and auto-discovery went on to
+# offer title searches. Waits up to -WaitSec for a disc that is still spinning up, then:
+#   'ok'         - a disc Windows can read (any type)
+#   'empty'      - Windows says no media is loaded
+#   'unreadable' - media loaded (or unknown) but Windows cannot read it (damaged disc?)
+# -GetDiscType, -GetMediaLoaded ($true / $false / $null = unknown) and -Sleep are test seams.
+function Get-DriveDiscState {
+    param(
+        [string]$DriveLetter,
+        [int]$WaitSec = 15,
+        [scriptblock]$GetDiscType = { param($l) Get-DiscTypeLabel -DriveLetter $l },
+        [scriptblock]$GetMediaLoaded = { param($l) Test-DriveMediaLoaded -DriveLetter $l },
+        [scriptblock]$Sleep = { Start-Sleep -Seconds 1 },
+        [scriptblock]$OnWait = { param($l, $s) Write-Host "Waiting up to $s s for $l to read the disc..." -ForegroundColor Gray }
+    )
+    if ("$(& $GetDiscType $DriveLetter)") { return 'ok' }
+    # Clearly empty: no point waiting
+    $media = & $GetMediaLoaded $DriveLetter
+    if ($media -eq $false) { return 'empty' }
+    & $OnWait $DriveLetter $WaitSec
+    for ($i = 0; $i -lt $WaitSec; $i++) {
+        & $Sleep
+        if ("$(& $GetDiscType $DriveLetter)") { return 'ok' }
+    }
+    $media = & $GetMediaLoaded $DriveLetter
+    if ($media -eq $false) { return 'empty' }
+    return 'unreadable'
+}
+
+# Windows' own "is a disc in the drive" flag: $true / $false, or $null when it cannot be read.
+function Test-DriveMediaLoaded {
+    param([string]$DriveLetter)
+    $letter = "$DriveLetter".TrimEnd(':', '\')
+    if ($letter.Length -ne 1) { return $null }
+    try {
+        $d = Get-CimInstance Win32_CDROMDrive -ErrorAction Stop -OperationTimeoutSec 5 |
+            Where-Object { $_.Drive -eq "${letter}:" } | Select-Object -First 1
+        if ($d) { return [bool]$d.MediaLoaded }
+    } catch {
+        Write-Log "MediaLoaded lookup failed for ${letter}: $($_.Exception.Message)"
+    }
+    return $null
 }
 
 # Determines what kind of disc is in a drive - Audio CD, Blu-ray, DVD-Video, or a data
@@ -2700,6 +2759,35 @@ if ($DriveIndex -ge 0) {
 # used, or -Drive was given.
 if (($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) -and (Get-DiscTypeLabel -DriveLetter $driveLetter) -eq 'Audio CD') {
     Invoke-AudioCdGuard -DriveLetter $driveLetter -DrvLines $drvLines
+}
+
+# ========== NO DISC GUARD ==========
+# MakeMKV lists drives whether or not a disc is in them, so an empty drive used to get as far
+# as auto-discovery (0 titles found) and then offer title searches (2026-11-27, D: empty).
+# Stop here instead. Same -DriveIndex caveat as the audio CD guard.
+if ($DriveIndex -lt 0 -or $PSBoundParameters.ContainsKey('Drive')) {
+    while ($true) {
+        $discState = Get-DriveDiscState -DriveLetter $driveLetter
+        if ($discState -eq 'ok') { break }
+        if ($discState -eq 'empty') {
+            Write-Host "`nNo disc in $driveLetter - nothing to rip." -ForegroundColor Yellow
+            Write-Log "No disc in $driveLetter - stopped before discovery"
+            Write-Host "  [R] Retry (put a disc in first)" -ForegroundColor White
+        } else {
+            Write-Host "`nWindows cannot read the disc in $driveLetter (dirty or damaged, or still loading)." -ForegroundColor Yellow
+            Write-Log "Disc in $driveLetter not readable by Windows"
+            Write-Host "  [R] Retry" -ForegroundColor White
+            Write-Host "  [C] Carry on anyway (let MakeMKV try)" -ForegroundColor White
+        }
+        Write-Host "  [A] or Enter: stop" -ForegroundColor Gray
+        $noDiscChoice = "$(Read-Host 'Choice')".Trim().ToUpper()
+        if ($noDiscChoice -eq 'R') { continue }
+        if ($noDiscChoice -eq 'C' -and $discState -eq 'unreadable') {
+            Write-Log "User chose to carry on with an unreadable disc in $driveLetter"
+            break
+        }
+        exit 1
+    }
 }
 
 # ========== BLU-RAY CHECK WITH -title ==========
