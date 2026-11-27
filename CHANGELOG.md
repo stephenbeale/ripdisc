@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-27 - Music Offer Skips Drives a ripaudio Window Has Just Picked
+
+### Fixed
+- The music-library offer only treated a drive as busy while cyanrip ran, so it could hand over a drive another rip-audio.ps1 window had just picked (still in its prompts or countdown). New `Get-RipDriveClaimLetters` reads ripaudio's drive claims (`%LOCALAPPDATA%\RipTools\drive-claims\<letter>.claim`, valid while the owner process is alive with the same start time) and the offer treats those drives as busy, like a running rip. Test-AutoVideoDrive 88/88.
+
 ## 2026-11-27 - End Screen: Matching Icons, Even Spacing, Coffee at Both Ends
 
 ### Changed

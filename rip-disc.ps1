@@ -1448,6 +1448,30 @@ function Get-WindowsOpticalDrives {
     return @($rows | Sort-Object Letter)
 }
 
+# Drive letters claimed by a rip-audio.ps1 window (ripaudio 2026-11-27): it writes
+# %LOCALAPPDATA%\RipTools\drive-claims\<letter>.claim the moment it picks a drive, long
+# before cyanrip starts, and removes it when it ends. A claim counts only while its owner
+# process is alive with the same start time (a reused process id is not the owner).
+# -Dir and -GetStamp are seams for tests.
+function Get-RipDriveClaimLetters {
+    param(
+        [string]$Dir = (Join-Path $env:LOCALAPPDATA 'RipTools\drive-claims'),
+        [scriptblock]$GetStamp = { param($id) try { (Get-Process -Id $id -ErrorAction Stop).StartTime.ToString('o') } catch { $null } }
+    )
+    if (-not (Test-Path -LiteralPath $Dir)) { return @() }
+    $letters = @(foreach ($f in @(Get-ChildItem -LiteralPath $Dir -Filter '*.claim' -File -ErrorAction SilentlyContinue)) {
+        $c = @{}
+        foreach ($line in @(Get-Content -LiteralPath $f.FullName -ErrorAction SilentlyContinue)) {
+            if ($line -match '^(\w+)=(.*)$') { $c[$Matches[1]] = $Matches[2] }
+        }
+        $ownerId = 0
+        if (-not [int]::TryParse("$($c.Pid)", [ref]$ownerId)) { continue }
+        $stamp = & $GetStamp $ownerId
+        if ($stamp -and $stamp -eq $c.ProcessStart -and $f.BaseName -match '^[A-Za-z]$') { "$($f.BaseName.ToUpper()):" }
+    })
+    return @($letters | Sort-Object -Unique)
+}
+
 # Drive letters a running cyanrip (ripaudio) is ripping from, from each cyanrip command
 # line's "-d X:" (case-sensitive: "-D" is cyanrip's output folder). Seen live 2026-11-22:
 # the music offer picked D: while ripaudio was ripping D:, and ripaudio then stopped with
@@ -2302,7 +2326,9 @@ if ($DriveIndex -lt 0 -and -not $preMkvRunning) {
     $winDrives = @(Get-WindowsOpticalDrives)
     # Drives ripaudio (cyanrip) is ripping right now: marked busy, so the offers below pick
     # a free drive and never list a busy one as "rip this instead"
-    $cyBusy = @(Get-CyanripBusyDrives)
+    # Also drives a rip-audio.ps1 window has just picked but not yet started cyanrip on
+    # (prompts, lookup, countdown): ripaudio claims them the moment they are picked.
+    $cyBusy = @(@(Get-CyanripBusyDrives) + @(Get-RipDriveClaimLetters) | Sort-Object -Unique)
     foreach ($w in $winDrives) { if ($cyBusy -contains $w.Letter) { $w.Busy = $true } }
     # A drive ripaudio is busy with is not touched at all: cyanrip only rips audio CDs, so
     # that is its type. Probing it (volume label, root folder) could disturb the live rip.
