@@ -560,6 +560,77 @@ if (-not (Test-Path $configFilePath)) {
     Write-Host "" -ForegroundColor Yellow
 }
 
+# ========== ANYTHING TO RIP? (before the first question) ==========
+# 2026-11-27: two runs asked for the output drive and library, then stopped: once D: was
+# empty, once D: was busy with another rip and no other drive held a disc. This answers
+# "is there a disc in a drive that is not already being ripped?" from Windows alone, in
+# well under a second, before anything is asked. It counts, it never reads a disc:
+#   Loaded = drives Windows says hold a disc
+#   Busy   = rips running: makemkvcon "mkv" processes (their drive letter is not known here,
+#            only how many) plus drives cyanrip is ripping or a rip-audio.ps1 window claimed
+#   Free   = Loaded - Busy (never below 0)
+# Known = $false when Windows could not be asked; callers then carry on as before.
+# -Drives (objects with Drive, MediaLoaded), -MkvRipCount, -AudioBusyLetters are test seams.
+function Get-FreeDiscSummary {
+    param(
+        [object[]]$Drives = $null,
+        [object]$MkvRipCount = $null,
+        [string[]]$AudioBusyLetters = $null,
+        [string]$ClaimDir = (Join-Path $env:LOCALAPPDATA 'RipTools\drive-claims')
+    )
+    $result = [pscustomobject]@{ Known = $false; Loaded = 0; Busy = 0; Free = 0; LoadedLetters = @() }
+    if ($null -eq $Drives) {
+        try { $Drives = @(Get-CimInstance Win32_CDROMDrive -ErrorAction Stop -OperationTimeoutSec 5) } catch { return $result }
+    }
+    $Drives = @($Drives | Where-Object { $_ -and "$($_.Drive)" -match '^[A-Za-z]:$' })
+    if ($Drives.Count -eq 0) { return $result }
+    $loaded = @($Drives | Where-Object { $_.MediaLoaded } | ForEach-Object { "$($_.Drive)".ToUpper() } | Sort-Object -Unique)
+
+    if ($null -eq $MkvRipCount) {
+        $MkvRipCount = 0
+        try {
+            $MkvRipCount = @(Get-CimInstance Win32_Process -Filter "Name = 'makemkvcon64.exe' OR Name = 'makemkvcon.exe'" -ErrorAction Stop -OperationTimeoutSec 5 |
+                Where-Object { "$($_.CommandLine)" -match '\smkv\s' }).Count
+        } catch { }
+    }
+    if ($null -eq $AudioBusyLetters) {
+        $AudioBusyLetters = @()
+        try {
+            foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name = 'cyanrip.exe'" -ErrorAction Stop -OperationTimeoutSec 5)) {
+                if ("$($p.CommandLine)" -cmatch '(?:^|\s)-d\s+"?([A-Za-z]):?') { $AudioBusyLetters += "$($Matches[1].ToUpper()):" }
+            }
+        } catch { }
+        # Claims whose owner process is still alive (rip-audio.ps1 claims a drive when picked)
+        if (Test-Path -LiteralPath $ClaimDir) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $ClaimDir -Filter '*.claim' -File -ErrorAction SilentlyContinue)) {
+                $ownerLine = @(Get-Content -LiteralPath $f.FullName -ErrorAction SilentlyContinue) | Where-Object { $_ -match '^Pid=(\d+)$' } | Select-Object -First 1
+                if ($ownerLine -and $ownerLine -match '^Pid=(\d+)$' -and (Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue) -and $f.BaseName -match '^[A-Za-z]$') {
+                    $AudioBusyLetters += "$($f.BaseName.ToUpper()):"
+                }
+            }
+        }
+    }
+    # Only audio rips on drives that hold a disc count (a stale letter must not hide a free disc)
+    $audioBusy = @($AudioBusyLetters | ForEach-Object { "$_".ToUpper() } | Sort-Object -Unique | Where-Object { $loaded -contains $_ })
+
+    $result.Known = $true
+    $result.Loaded = $loaded.Count
+    $result.LoadedLetters = $loaded
+    $result.Busy = [int]$MkvRipCount + $audioBusy.Count
+    $result.Free = [Math]::Max(0, $result.Loaded - $result.Busy)
+    return $result
+}
+
+# Message for Get-FreeDiscSummary when nothing can be ripped, or "" when something can
+# (or Windows could not be asked).
+function Get-NothingToRipMessage {
+    param($Summary)
+    if (-not $Summary -or -not $Summary.Known -or $Summary.Free -gt 0) { return "" }
+    if ($Summary.Loaded -eq 0) { return "No disc in any drive - nothing to rip." }
+    $n = $Summary.Busy
+    return "Every disc in a drive ($($Summary.LoadedLetters -join ', ')) is already being ripped ($n rip$(if ($n -ne 1) { 's' }) running) - nothing new to rip."
+}
+
 # ========== VALIDATION ==========
 if (-not $script:Config_MakeMkvPath) {
     Write-Host "`nERROR: MakeMKV (makemkvcon64.exe) not found." -ForegroundColor Red

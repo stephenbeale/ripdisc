@@ -194,8 +194,14 @@ Write-Host "`nrip-disc.ps1 stops early on bad arguments (real script, nothing ri
 
 function Invoke-RipDisc {
     param([string[]]$Arguments)
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ripDiscPath @Arguments 2>&1 | Out-String
-    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
+    # The "anything to rip?" check runs first and would wait at a prompt on a PC whose
+    # drives are empty or busy; these runs only test argument errors.
+    $env:RIPDISC_SKIP_DISC_CHECK = '1'
+    try {
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ripDiscPath @Arguments 2>&1 | Out-String
+        $code = $LASTEXITCODE
+    } finally { Remove-Item Env:RIPDISC_SKIP_DISC_CHECK -ErrorAction SilentlyContinue }
+    return [pscustomobject]@{ ExitCode = $code; Output = $out }
 }
 
 $run = Invoke-RipDisc @('-OutputDrive', 'F', '-Foo', 'bar')

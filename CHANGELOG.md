@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-11-27 - Stop When the Drive Is Empty
+
+### Fixed
+- **An empty drive went on to title searches.** Real run: no disc in D:, but MakeMKV still listed the drive (it lists drives, not discs), its scan found 0 titles ("Could not parse disc info"), and auto-discovery offered "Search again". A new NO DISC GUARD after the audio CD guard (before discovery, also with `-title`) runs `Get-DriveDiscState`. If Windows reads a disc, it carries on. If Windows says no media is loaded (`Win32_CDROMDrive.MediaLoaded`), it shows "No disc in D: - nothing to rip" with `[R] Retry` / Enter to stop. Otherwise it waits up to 15 s for a disc still spinning up, then shows "Windows cannot read the disc" with `[R] Retry`, `[C] Carry on anyway (let MakeMKV try)` / Enter to stop. Same `-DriveIndex` caveat as the audio CD guard (only when the letter can be trusted).
+- **Nothing to rip is now found before the first question.** The same evening a second run asked for the output drive and library, then said "D: is busy with another rip, and no other drive holds a DVD or Blu-ray". A new check runs before the output drive prompt (`Get-FreeDiscSummary` / `Get-NothingToRipMessage` in Load-Config.ps1, Windows only, about 1.5 s, no disc is read). It counts the drives holding a disc, minus the rips running (makemkvcon `mkv` processes, cyanrip drives, live rip-audio.ps1 claims). With nothing free it shows "No disc in any drive - nothing to rip." or "Every disc in a drive (D:) is already being ripped (1 rip running) - nothing new to rip." with `[R] Retry` / Enter to stop. If Windows cannot be asked, the run carries on as before. `RIPDISC_SKIP_DISC_CHECK=1` turns the check off (Test-OutputDriveAndGenre sets it for its real-script runs).
+- tests/Test-NoDiscGuard.ps1 25/25 (Windows PowerShell and pwsh); full suite 26 files pass. Checked live: with The Girl With All the Gifts ripping in D: and no other disc, the summary is Loaded 1, Busy 1, Free 0 and gives the "already being ripped" message; the D: disc reads `ok` for the per-drive guard.
+
 ## 2026-11-27 - Music Offer Skips Drives a ripaudio Window Has Just Picked
 
 ### Fixed
