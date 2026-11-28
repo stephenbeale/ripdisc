@@ -4,6 +4,8 @@
 
 PowerShell and C# tools for automated DVD and Blu-ray disc ripping using MakeMKV and HandBrake.
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support%20RipDisc-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/stephenbeale)
+
 ## Video walkthrough
 
 Watch how to use RipDisc:
@@ -931,6 +933,12 @@ ripdisc/
 ## Contributing
 
 New features are added to the PowerShell scripts first. The C# version should be updated to match when possible.
+
+## Support
+
+RipDisc is free and open source. If it has saved you hours of ripping and renaming, a coffee helps keep it going, and is much appreciated but never expected.
+
+<a href="https://buymeacoffee.com/stephenbeale"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=stephenbeale&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="48"></a>
 
 ## License
 
